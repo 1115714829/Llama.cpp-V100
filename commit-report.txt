@@ -1,0 +1,42 @@
+=== identity config === 
+momo
+1115714829@qq.com
+=== staged before commit === 
+M  common/common.cpp
+M  common/sampling.cpp
+M  common/speculative.cpp
+M  common/speculative.h
+M  ggml/src/ggml-cuda/mmvq.cu
+M  ggml/src/ggml-cuda/mmvq.cuh
+M  src/llama-context.cpp
+M  src/llama-context.h
+M  src/llama-ext.h
+M  src/llama-model.cpp
+M  src/llama-model.h
+M  src/models/dflash.cpp
+M  tools/server/server-context.cpp
+=== commit === 
+[master 79504e72b] llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+ 13 files changed, 587 insertions(+), 33 deletions(-)
+=== log === 
+79504e72b llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+1af554f8f server : improve startup log messages (#29125)
+eb1e1f495 json-schema : accept escaped hyphen in regex patterns (#29127)
+=== show --stat HEAD === 
+79504e72b llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+ common/common.cpp               |   6 +
+ common/sampling.cpp             |  21 +++
+ common/speculative.cpp          | 386 +++++++++++++++++++++++++++++++++++++---
+ common/speculative.h            |  16 ++
+ ggml/src/ggml-cuda/mmvq.cu      |  35 +++-
+ ggml/src/ggml-cuda/mmvq.cuh     |   4 +
+ src/llama-context.cpp           |  77 ++++++++
+ src/llama-context.h             |   9 +
+ src/llama-ext.h                 |   3 +
+ src/llama-model.cpp             |   4 +
+ src/llama-model.h               |   2 +
+ src/models/dflash.cpp           |  30 +++-
+ tools/server/server-context.cpp |  27 +++
+ 13 files changed, 587 insertions(+), 33 deletions(-)
+=== worktree after commit === 
+DONE 

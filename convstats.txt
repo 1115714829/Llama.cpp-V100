@@ -1,0 +1,30 @@
+=== importer help (first lines) ===
+QdstrmImporter allowed options:
+  -h [ --help ]             Prints this help message
+  -v [ --version ]          Prints the build version
+  -b [ --build-id ]         Prints the build id
+  -i [ --input-file ] arg   Path of the qdstrm file to be imported
+  -o [ --output-file ] arg  Use this option to provide a different file name or
+                            path for the resulting report file. Default is the 
+                            same name and path as the qdstrm file.
+  -f [ --force-overwrite ]  Overwrite the output file if it already exists.
+
+=== convert ===
+      }
+      Items {
+        Type: ErrorText
+        Value: "Wrong event order has been detected when adding events to the collection:\nnew event ={ StartNs=405325520 StopNs=405328725 GlobalId=302280302849054 Event={ TraceProcessEvent=[{ Correlation=1 EventClass=1 TextId=1805 ReturnValue=0 },] } Type=48 }\nlast event ={ StartNs=18387114196 StopNs=18387122605 GlobalId=302280302849054 Event={ TraceProcessEvent=[{ Correlation=1150257 EventClass=1 TextId=1793 ReturnValue=0 },] } Type=48 }"
+      }
+    }
+  }
+}
+
+
+ls: cannot access '/tmp/prof-tgt.nsys-rep': No such file or directory
+=== kernel summary (cuda_gpu_kern_sum) ===
+ERROR: Specified input file (/tmp/prof-tgt.nsys-rep) does not exist.
+
+usage: nsys stats [<args>] <input-file>
+Try 'nsys stats --help' for more information.
+CONVERT_DONE
+DONE 

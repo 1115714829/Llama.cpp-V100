@@ -1,0 +1,38 @@
+=== clock === 
+Sun Sep 20 19:24:01 CST 2026
+=== final-bf log === 
+=== p60-ab-harness ===============================================
+TAG=final-bf-tp3
+config: cards=0,1,2 (n=3)  split=tensor  tensor-split=1,1,1
+        spec='--model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7'  n_predict=512  ctx=8192  libdir=/root/libdir-rt
+libs:   70a4b50c8ae5d6c91014fc64f7d0b125 libllama.so.0.4.1
+        ed1b2f7fe61e300040d82ff392cfc15e libggml-cuda.so.0.24.0
+        4aa54a6301f88dc041a2181543f609e8 libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+gpu mem before launch:
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+=== server log tail === 
+0.01.377.256 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.377.263 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.377.270 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.377.278 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.377.285 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.377.304 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+=== gpu === 
+0, 308 MiB, 0 %
+1, 308 MiB, 0 %
+2, 308 MiB, 0 %
+3, 0 MiB, 0 %
+4, 0 MiB, 0 %
+5, 0 MiB, 0 %
+=== mem === 
+              total        used        free      shared  buff/cache   available
+Mem:            153           5         138           1           9         145
+Swap:             0           0           0
+DONE 

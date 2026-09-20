@@ -1,0 +1,17 @@
+=== clock === 
+Sun Sep 20 19:28:57 CST 2026
+=== procs === 
+1165081 bash /root/final-nccl.sh
+1171028 bash -c for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do if grep -q FINAL_NCCL_DONE /tmp/final-nccl.log 2>/dev/null; then break; fi; sleep 30; done; echo ===FINAL===; cat /tmp/final-nccl.log; echo ===ENVS===; grep -aE '^##### ENV ARM|MEDIAN_TG=' /tmp/nccl-env-sweep.log; echo ===KNOBS===; grep -aE '^##### KNOB ARM|MEDIAN_TG=' /tmp/nccl-knobs2.log 2>/dev/null
+1181708 bash /root/ppl-after-final.sh
+1186395 bash /root/collect2.sh
+1186573 bash -c for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do if grep -q COLLECT2_DONE /root/collect2.out 2>/dev/null; then break; fi; sleep 30; done; cat /root/collect2.out
+1189008 bash /root/q8mmq-ab.sh
+1189799 tee -a /tmp/final-nccl-summary.log
+1189883 /root/libdir-nccl/llama-server --model /root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf --model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7 --spec-draft-ngl 999 --split-mode tensor --tensor-split 1,1,1 --ctx-size 8192 -ngl 999 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --parallel 1 --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0 --repeat-penalty 1.0 --host 127.0.0.1 --port 8161 --api-key-file /etc/llama-server/api-keys
+1190663 bash -c for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do if grep -q Q8MMQ_AB_DONE /tmp/q8mmq-ab.log 2>/dev/null; then break; fi; sleep 30; done; echo ===Q8LOG===; grep -aE 'patch|patched|MMVQ_VOLTA_MAX_BATCH_SIZE_LEGACY|Built target|error|medians|^q8-|ARM|MEDIAN_TG=|Q8MMQ_AB_DONE|libggml-cuda.so' /tmp/q8mmq-ab.log; echo ===FORMAL2===; grep -aE 'MEDIAN_TG=|^prompt[123]:|^greedy:|FINAL_NCCL_DONE' /tmp/final-nccl.log; echo ===PPL===; grep -aE 'corpus:|PPL ARM|estimate|FINISH_PPL_DONE' /tmp/finish-ppl.log
+1190918 bash -c pgrep -af 'q8mmq-ab|fina[l]-nccl|pp[l]-after|collect2|llama-serve[r]|cmake|ninja|cc1plus|nvcc' | head -12
+=== q8 log === 
+=== waiting for the current queue (formal runs + ppl) ===
+=== collect2.out === 
+DONE 

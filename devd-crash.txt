@@ -1,0 +1,59 @@
+=== devd-tensor server log (full) === 
+0.00.000.289 I srv  llama_server: initializing ...
+0.00.379.960 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.381.841 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.381.925 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.137.541 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.137.556 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.137.573 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.137.579 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.137.586 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.137.608 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.137.615 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.137.622 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.137.629 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.137.635 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.137.642 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.137.649 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.137.656 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.137.664 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.137.683 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.02.924.942 W NCCL not compiled in; falling back to internal AllReduce.  Recompile with -DGGML_CUDA_NCCL=ON for best multi-GPU performance.
+0.02.924.962 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+0.03.006.907 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.03.210.158 I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+0.03.210.165 I common_speculative_init_result: loading draft model '/root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf'
+/root/llm/test/v100-opt/llama.cpp/ggml/src/ggml-backend.cpp:941: pre-allocated tensor (output.weight) in a buffer (Meta()) that cannot run the operation (NONE)
+/root/libdir-rt/libggml-base.so.0(+0x25268)[0x7fff86525268]
+/root/libdir-rt/libggml-base.so.0(ggml_print_backtrace+0x308)[0x7fff86525868]
+/root/libdir-rt/libggml-base.so.0(ggml_abort+0xe4)[0x7fff86525a04]
+/root/libdir-rt/libggml-base.so.0(+0x4925c)[0x7fff8654925c]
+/root/libdir-rt/libggml-base.so.0(ggml_backend_sched_split_graph+0xe18)[0x7fff8654bd78]
+/root/libdir-rt/libllama.so.0(_ZN13llama_context13graph_reserveEjjjPK22llama_memory_context_ibPm+0xa20)[0x7fff8df76160]
+/root/libdir-rt/libllama.so.0(_ZN13llama_context17resolve_fused_opsEPK22llama_memory_context_ij+0x504)[0x7fff8df76d64]
+/root/libdir-rt/libllama.so.0(_ZN13llama_context13sched_reserveEv+0x6a0)[0x7fff8df78440]
+/root/libdir-rt/libllama.so.0(_ZN13llama_contextC1ERK11llama_model20llama_context_params+0xcac)[0x7fff8df7be8c]
+/root/libdir-rt/libllama.so.0(llama_init_from_model+0x340)[0x7fff8df7d660]
+/root/libdir-rt/libllama-common.so.0(_ZN30common_speculative_init_resultC1ER13common_paramsP11llama_modelP13llama_context+0x400)[0x7fff8e706c40]
+/root/libdir-rt/libllama-common.so.0(_Z35common_speculative_init_from_paramsR13common_paramsP11llama_modelP13llama_context+0x54)[0x7fff8e707074]
+/root/libdir-rt/libllama-server-impl.so(_ZN19server_context_impl10load_modelER13common_params+0x17b8)[0x7fff8eab2568]
+/root/libdir-rt/libllama-server-impl.so(_ZN14server_context10load_modelER13common_params+0x1c)[0x7fff8ea9399c]
+/root/libdir-rt/libllama-server-impl.so(_Z12llama_serverR13common_paramsiPPc+0x3da8)[0x7fff8e9df6e8]
+/root/libdir-rt/libllama-server-impl.so(_Z12llama_serveriPPc+0x134)[0x7fff8e9e1f24]
+/root/libdir-rt/llama-server[0x100100d8]
+/lib64/glibc-hwcaps/power9/libc-2.28.so(+0x29f5c)[0x7fff85f19f5c]
+/lib64/glibc-hwcaps/power9/libc-2.28.so(__libc_start_main+0xb4)[0x7fff85f1a0f4]
+=== env sweep log === 
+=== waiting for first NCCL A/B to finish ===
+previous sweep done
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+##### ENV ARM env-debug cards=0,1,2 env='NCCL_DEBUG=INFO'
+DONE 

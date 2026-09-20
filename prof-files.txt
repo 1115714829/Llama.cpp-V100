@@ -1,0 +1,18 @@
+=== /tmp prof-tgt* === 
+-rw-rw-r-- 1 root root 16876344 Sep 20 13:11 /tmp/ns2-pristine.nsys-rep
+-rw-rw-r-- 1 root root 16883628 Sep 20 13:11 /tmp/ns2-volta2.nsys-rep
+-rw-rw-r-- 1 root root 15230136 Sep 20 13:09 /tmp/nsys-pristine.nsys-rep
+-rw-rw-r-- 1 root root 15208477 Sep 20 13:10 /tmp/nsys-volta2.nsys-rep
+-rw-r--r-- 1 root root     2275 Sep 20 19:46 /tmp/prof-tgt-resp.json
+-rw-r--r-- 1 root root     7354 Sep 20 19:47 /tmp/prof-tgt-server.log
+-rw-rw-r-- 1 root root 22156875 Sep 20 19:47 /tmp/prof-tgt.qdstrm
+=== any nsys-rep anywhere recent === 
+=== server log tail === 
+      }
+    }
+  }
+}
+Generated:
+    /tmp/prof-tgt.qdstrm
+=== nsys still running? === 
+DONE 

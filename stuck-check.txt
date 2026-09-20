@@ -1,0 +1,64 @@
+=== time === 
+Sun Sep 20 19:21:42 CST 2026
+=== arm logs by mtime === 
+-rw-r--r-- 1 root root   941 Sep 20 19:21 /tmp/p60-env-ring1ch.log
+-rw-r--r-- 1 root root 16900 Sep 20 19:21 /tmp/p60-env-1ch-server.log
+-rw-r--r-- 1 root root  1698 Sep 20 19:21 /tmp/p60-env-1ch.log
+-rw-r--r-- 1 root root    45 Sep 20 19:18 /tmp/final-nccl.log
+=== env-1ch server tail === 
+0.38.744.799 I slot print_timing: id  0 | task 266 |    graphs reused =        265
+0.38.744.807 I slot print_timing: id  0 | task 266 | draft acceptance = 0.66242 (  104 accepted /   157 generated), mean len =  5.52
+0.38.744.911 I slot      release: id  0 | task 266 | stop processing: n_tokens = 211, truncated = 0
+0.38.887.347 I srv    operator(): operator(): cleaning up before exit...
+0.38.903.049 W ~llama_context:  CUDA_Host compute buffer size of   5.8612 MiB, does not match expectation of   1.5334 MiB
+=== env-1ch summary === 
+=== p60-ab-harness2 ==============================================
+TAG=env-1ch
+config: cards=0,1,2 (n=3)  split=tensor  tensor-split=1,1,1
+        spec='--model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7'  n_predict=512  ctx=8192  libdir=/root/libdir-nccl
+        LDPATH_EXTRA='/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib'
+libs:   d52347fa4d186aa592f1d7f1331b2323 libllama.so.0.4.1
+        faf9cc468a0a263997e15c7f885c75b9 libggml-cuda.so.0.24.0
+        2d63d90bd84ba98e607fda502b5b36ac libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+NODROP=1: skipping drop_caches (diagnostic run, model stays page-cache hot)
+gpu mem before launch:
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+health ok=1 after 15s
+--- allreduce init lines from server log ---
+prompt1: tg=77.67 tok/s  AL=5.49
+prompt2: tg=65.48 tok/s  AL=4.48
+prompt3: tg=93.70 tok/s  AL=6.62
+greedy: content_len=157 reasoning_len=177 sha256=ccc284e4ec4f2ac562b26b291999b6776e10b687c1ec9720283e5075a95cb8ff
+
+MEDIAN_TG=77.67
+--- round breakdown (target host side) ---
+[RT] perf: rounds=289 reuse=265 rebuild=24 | build_us=42440 alloc_us=683589 setin_us=10928 enqueue_us=6262784
+--- target decode+sync per round ---
+[RT] target decode+sync: 55.070 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 44.449 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 51.634 ms/round over 288 rounds (last n_tokens=8)
+--- draft phases ---
+0.38.130.222 I draft: spec timing: n=272 | draft_decode=13.99 selector=4.36 walk=0.10 ms/round
+=== sweep log tail === 
+prompt3: tg=93.70 tok/s  AL=6.62
+greedy: content_len=157 reasoning_len=177 sha256=ccc284e4ec4f2ac562b26b291999b6776e10b687c1ec9720283e5075a95cb8ff
+
+MEDIAN_TG=77.67
+--- round breakdown (target host side) ---
+[RT] perf: rounds=289 reuse=265 rebuild=24 | build_us=42440 alloc_us=683589 setin_us=10928 enqueue_us=6262784
+--- target decode+sync per round ---
+[RT] target decode+sync: 55.070 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 44.449 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 51.634 ms/round over 288 rounds (last n_tokens=8)
+--- draft phases ---
+0.38.130.222 I draft: spec timing: n=272 | draft_decode=13.99 selector=4.36 walk=0.10 ms/round
+P60_DONE TAG=env-1ch STATUS=OK
+##### ENV ARM env-ring1ch cards=0,1,2 env='NCCL_ALGO=Ring NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1'
+DONE 

@@ -1,0 +1,73 @@
+=== build log so far === 
+=== src identity (13 modified files on server) ===
+4cddd204ea4601957b978e84dbacaff4  common/common.cpp
+7b9712a0ac9367aab931d314d1b60744  common/sampling.cpp
+e8f8c5cb969a8482787dd9d87a742185  common/speculative.cpp
+67a6fb10c931d6df0fbece158032d6d8  common/speculative.h
+ffe63a60bac7fd0c2ad9034adbd352ce  ggml/src/ggml-cuda/mmvq.cu
+dfd78c4f3b8eae6a402c58cc6ea05497  ggml/src/ggml-cuda/mmvq.cuh
+a64c791c28b4d24aa9b0fc1c440710bc  src/llama-context.cpp
+a07ad186cb954d2d30b0ba332877a37d  src/llama-context.h
+0f1dc7143eede59a907d42df8458ed40  src/llama-ext.h
+faab7438926e7f42b5de41a271486909  src/llama-model.cpp
+dff70377d5c0b1bac077632d69defcba  src/llama-model.h
+1468a237b1a95e4e33504b1cf0824833  src/models/dflash.cpp
+0e8012005994a74e38d512b29ec45e50  tools/server/server-context.cpp
+=== nccl bundle ===
+-rw-r--r-- 1 root root    31989 Sep  7 16:52 /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/include/nccl.h
+-rwxr-xr-x 1 root root 59872280 Sep  7 16:52 /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2
+=== configure build-nccl ===
+-- Warning: ccache not found - consider installing it for faster compilation or disable this warning with GGML_CCACHE=OFF
+-- CMAKE_SYSTEM_PROCESSOR: ppc64le
+-- GGML_SYSTEM_ARCH: PowerPC
+-- Found OpenMP_C: -fopenmp (found version "4.5") 
+-- Found OpenMP_CXX: -fopenmp (found version "4.5") 
+-- Found OpenMP: TRUE (found version "4.5")  
+-- Including CPU backend
+-- PowerPC detected
+-- Adding CPU backend variant ggml-cpu: -mcpu=power9 
+-- Found CUDAToolkit: /usr/local/cuda/include (found version "12.4.131") 
+-- CUDA Toolkit found
+-- The CUDA compiler identification is NVIDIA 12.4.131
+-- Detecting CUDA compiler ABI info
+-- Detecting CUDA compiler ABI info - done
+-- Check for working CUDA compiler: /usr/local/cuda-12.4/bin/nvcc - skipped
+-- Detecting CUDA compile features
+-- Detecting CUDA compile features - done
+-- Using CMAKE_CUDA_ARCHITECTURES=70-real CMAKE_CUDA_ARCHITECTURES_NATIVE=70-real
+-- FlashAttention K-V type combinations: f16-f16;q4_0-q4_0;q8_0-q8_0;bf16-bf16
+-- Found NCCL: /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2  
+-- CUDA host compiler is GNU 8.5.0
+-- Including CUDA backend
+-- ggml version: 0.24.0
+-- ggml commit:  unknown
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - found
+-- Found OpenSSL: /usr/lib64/libcrypto.so (found version "1.1.1k")  
+-- Performing Test OPENSSL_VERSION_SUPPORTED
+-- Performing Test OPENSSL_VERSION_SUPPORTED - Failed
+CMake Warning at common/CMakeLists.txt:33 (message):
+  Git repository not found; to enable automatic generation of build info,
+  make sure Git is installed and the project is a Git repository.
+
+
+-- Generating embedded license file for target: llama-app
+-- Configuring done (19.2s)
+-- Generating done (14.0s)
+-- Build files have been written to: /root/llm/test/v100-opt/llama.cpp/build-nccl
+=== cache option diff (build vs build-nccl) ===
+153c153
+< NCCL_INCLUDE_DIR:PATH=NCCL_INCLUDE_DIR-NOTFOUND
+---
+> NCCL_INCLUDE_DIR:PATH=/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/include
+155c155
+< NCCL_LIBRARY:FILEPATH=NCCL_LIBRARY-NOTFOUND
+---
+> NCCL_LIBRARY:FILEPATH=/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2
+(diff exit=1)
+=== build (this is the long part) ===
+=== still running? === 
+1132454 bash /root/build-nccl-inner.sh
+DONE 

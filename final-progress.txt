@@ -1,0 +1,102 @@
+===FINAL===
+=== waiting for NCCL env sweep to finish ===
+env sweep done
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+lrwxrwxrwx 1 root root 102 Sep 20 19:22 /root/libdir-nccl/libnccl.so.2 -> /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2
+##### FINAL ARM final-bf-tp3 libdir=/root/libdir-rt split=tensor
+=== p60-ab-harness ===============================================
+TAG=final-bf-tp3
+config: cards=0,1,2 (n=3)  split=tensor  tensor-split=1,1,1
+        spec='--model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7'  n_predict=512  ctx=8192  libdir=/root/libdir-rt
+libs:   70a4b50c8ae5d6c91014fc64f7d0b125 libllama.so.0.4.1
+        ed1b2f7fe61e300040d82ff392cfc15e libggml-cuda.so.0.24.0
+        4aa54a6301f88dc041a2181543f609e8 libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+gpu mem before launch:
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+health ok=1 after 270s
+prompt1: tg=80.42 tok/s  AL=5.21
+prompt2: tg=63.47 tok/s  AL=4.11
+prompt3: tg=92.81 tok/s  AL=6.08
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+
+MEDIAN_TG=80.42
+--- round breakdown (target) ---
+[RT] perf: rounds=302 reuse=277 rebuild=25 | build_us=45044 alloc_us=664210 setin_us=12852 enqueue_us=7157848
+--- draft phases ---
+4.51.934.272 I draft: spec timing: n=288 | draft_decode=14.40 selector=4.37 walk=0.10 ms/round
+P60_DONE TAG=final-bf-tp3 STATUS=OK
+##### FINAL ARM final-nccl-tp3 libdir=/root/libdir-nccl split=tensor
+=== p60-ab-harness ===============================================
+TAG=final-nccl-tp3
+config: cards=0,1,2 (n=3)  split=tensor  tensor-split=1,1,1
+        spec='--model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7'  n_predict=512  ctx=8192  libdir=/root/libdir-nccl
+libs:   d52347fa4d186aa592f1d7f1331b2323 libllama.so.0.4.1
+        faf9cc468a0a263997e15c7f885c75b9 libggml-cuda.so.0.24.0
+        2d63d90bd84ba98e607fda502b5b36ac libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+gpu mem before launch:
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+health ok=1 after 270s
+prompt1: tg=95.20 tok/s  AL=5.55
+prompt2: tg=78.21 tok/s  AL=4.22
+prompt3: tg=112.07 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+
+MEDIAN_TG=95.20
+--- round breakdown (target) ---
+[RT] perf: rounds=294 reuse=270 rebuild=24 | build_us=42533 alloc_us=631114 setin_us=9757 enqueue_us=6310375
+--- draft phases ---
+4.48.854.960 I draft: spec timing: n=272 | draft_decode=13.32 selector=4.29 walk=0.10 ms/round
+P60_DONE TAG=final-nccl-tp3 STATUS=OK
+=== greedy hash comparison ===
+final-bf-tp3     greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+final-nccl-tp3   greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+=== medians ===
+final-bf-tp3     prompt1: tg=80.42 tok/s  AL=5.21 prompt2: tg=63.47 tok/s  AL=4.11 prompt3: tg=92.81 tok/s  AL=6.08 MEDIAN_TG=80.42 
+final-nccl-tp3   prompt1: tg=95.20 tok/s  AL=5.55 prompt2: tg=78.21 tok/s  AL=4.22 prompt3: tg=112.07 tok/s  AL=6.38 MEDIAN_TG=95.20 
+FINAL_NCCL_DONE
+===ENVS===
+##### ENV ARM env-debug cards=0,1,2 env='NCCL_DEBUG=INFO'
+MEDIAN_TG=94.22
+##### ENV ARM env-plain cards=0,1,2 env=''
+MEDIAN_TG=94.02
+##### ENV ARM env-tp2 cards=0,1 env='NCCL_DEBUG=WARN'
+MEDIAN_TG=80.38
+##### ENV ARM env-ring cards=0,1,2 env='NCCL_ALGO=Ring'
+MEDIAN_TG=93.40
+##### ENV ARM env-ll cards=0,1,2 env='NCCL_PROTO=LL,Simple'
+MEDIAN_TG=93.44
+##### ENV ARM env-1ch cards=0,1,2 env='NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1 NCCL_NTHREADS=128'
+MEDIAN_TG=77.67
+##### ENV ARM env-ring1ch cards=0,1,2 env='NCCL_ALGO=Ring NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1'
+MEDIAN_TG=86.49
+##### ENV ARM env-ringll cards=0,1,2 env='NCCL_ALGO=Ring NCCL_PROTO=LL,Simple NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1'
+MEDIAN_TG=86.37
+env-debug    prompt1: tg=94.22 tok/s  AL=5.55 prompt2: tg=76.20 tok/s  AL=4.22 prompt3: tg=109.62 tok/s  AL=6.38 MEDIAN_TG=94.22 
+env-plain    prompt1: tg=94.02 tok/s  AL=5.55 prompt2: tg=75.27 tok/s  AL=4.22 prompt3: tg=108.68 tok/s  AL=6.38 MEDIAN_TG=94.02 
+env-tp2      prompt1: tg=80.38 tok/s  AL=4.87 prompt2: tg=78.95 tok/s  AL=4.64 prompt3: tg=110.51 tok/s  AL=6.67 MEDIAN_TG=80.38 
+env-ring     prompt1: tg=93.40 tok/s  AL=5.55 prompt2: tg=76.15 tok/s  AL=4.22 prompt3: tg=107.13 tok/s  AL=6.38 MEDIAN_TG=93.40 
+env-ll       prompt1: tg=93.44 tok/s  AL=5.55 prompt2: tg=75.74 tok/s  AL=4.22 prompt3: tg=109.49 tok/s  AL=6.38 MEDIAN_TG=93.44 
+env-1ch      prompt1: tg=77.67 tok/s  AL=5.49 prompt2: tg=65.48 tok/s  AL=4.48 prompt3: tg=93.70 tok/s  AL=6.62 MEDIAN_TG=77.67 
+env-ring1ch  prompt1: tg=86.49 tok/s  AL=5.49 prompt2: tg=74.16 tok/s  AL=4.48 prompt3: tg=105.74 tok/s  AL=6.62 MEDIAN_TG=86.49 
+env-ringll   prompt1: tg=86.37 tok/s  AL=5.49 prompt2: tg=74.18 tok/s  AL=4.48 prompt3: tg=105.45 tok/s  AL=6.62 MEDIAN_TG=86.37 
+===KNOBS===
+DONE 

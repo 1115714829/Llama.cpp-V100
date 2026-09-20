@@ -1,0 +1,9 @@
+=== snapshot md5s (bf arm must be the butterfly build) ===
+ed1b2f7fe61e300040d82ff392cfc15e  /root/libdir-bf-ppl/libggml-cuda.so.0.24.0
+70a4b50c8ae5d6c91014fc64f7d0b125  /root/libdir-bf-ppl/libllama.so.0.4.1
+4aa54a6301f88dc041a2181543f609e8  /root/libdir-bf-ppl/libllama-common.so.0.4.1
+ls: cannot access '/root/libdir-bf-ppl/llama-perplexity': No such file or directory
+exit=127
+env: '/root/libdir-bf-ppl/llama-perplexity': No such file or directory
+PPL_BF2_DONE
+DONE 

@@ -1,0 +1,12 @@
+=== launcher md5: reuse vs original source ===
+5005b9d358583e996b784cbeea59c970  /root/libdir-nccl/llama-perplexity
+5005b9d358583e996b784cbeea59c970  /root/libdir-bf-ppl/llama-perplexity
+=== bf libs (must be ed1b2f7f = butterfly build) ===
+ed1b2f7fe61e300040d82ff392cfc15e  /root/libdir-bf-ppl/libggml-cuda.so.0.24.0
+exit=0
+0.32.530.601 I Final estimate: PPL = 3.7745 +/- 0.06409
+=== confirm which allreduce the bf arm used ===
+0.03.041.976 W NCCL not compiled in; falling back to internal AllReduce.  Recompile with -DGGML_CUDA_NCCL=ON for best multi-GPU performance.
+0.03.041.995 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+PPL_BF3_DONE
+DONE 

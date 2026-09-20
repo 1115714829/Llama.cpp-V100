@@ -1,0 +1,24 @@
+########## /tmp/nsys-pristine.nsys-rep
+-rw-rw-r-- 1 root root 15230136 Sep 20 13:09 /tmp/nsys-pristine.nsys-rep
+--- kernel sum ---
+
+NOTICE: Existing SQLite export found: /tmp/nsys-pristine.sqlite
+        It is assumed file was previously exported from: /tmp/nsys-pristine.nsys-rep
+        Consider using --force-export=true if needed.
+
+Processing [/tmp/nsys-pristine.sqlite] with [/usr/local/cuda-12.4/nsight-systems-2023.4.4/target-linux-ppc64le/reports/cuda_gpu_kern_sum.py]... 
+SKIPPED: /tmp/nsys-pristine.sqlite does not contain CUDA kernel data.
+
+########## /tmp/nsys-volta2.nsys-rep
+-rw-rw-r-- 1 root root 15208477 Sep 20 13:10 /tmp/nsys-volta2.nsys-rep
+--- kernel sum ---
+
+NOTICE: Existing SQLite export found: /tmp/nsys-volta2.sqlite
+        It is assumed file was previously exported from: /tmp/nsys-volta2.nsys-rep
+        Consider using --force-export=true if needed.
+
+Processing [/tmp/nsys-volta2.sqlite] with [/usr/local/cuda-12.4/nsight-systems-2023.4.4/target-linux-ppc64le/reports/cuda_gpu_kern_sum.py]... 
+SKIPPED: /tmp/nsys-volta2.sqlite does not contain CUDA kernel data.
+
+READ_NSYS_DONE
+DONE 

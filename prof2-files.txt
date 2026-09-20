@@ -1,0 +1,22 @@
+=== /tmp/prof2* === 
+-rw-r--r-- 1 root root     2274 Sep 20 19:49 /tmp/prof2-resp.json
+-rw-r--r-- 1 root root     6987 Sep 20 19:49 /tmp/prof2-server.log
+-rw-rw-r-- 1 root root 21249421 Sep 20 19:49 /tmp/prof2.qdstrm
+=== nsys messages in server log === 
+0.20.377.359 I slot print_timing: id  0 | task 0 | draft acceptance = 0.65265 (  419 accepted /   642 generated), mean len =  5.55
+Generating '/tmp/nsys-report-4750.qdstrm'
+[1/1] [0%                          ] prof2.nsys-rep[1/1] [0%                          ] prof2.nsys-rep[1/1] [12%                         ] prof2.nsys-rep[1/1] [11%                         ] prof2.nsys-rep[1/1] [10%                         ] prof2.nsys-rep[1/1] [9%                          ] prof2.nsys-rep[1/1] [8%                          ] prof2.nsys-rep[1/1] [10%                         ] prof2.nsys-rep[1/1] [9%                          ] prof2.nsys-rep[1/1] [8%                          ] prof2.nsys-rep[1/1] [7%                          ] prof2.nsys-rep[1/1] [6%                          ] prof2.nsys-rep[1/1] [5%                          ] prof2.nsys-rep
+Importer error status: Importation failed.
+Error {
+  Type: RuntimeError
+  SubError {
+        Type: ErrorText
+Generated:
+    /tmp/prof2.qdstrm
+=== server log last 5 === 
+    }
+  }
+}
+Generated:
+    /tmp/prof2.qdstrm
+DONE 

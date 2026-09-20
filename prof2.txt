@@ -1,0 +1,17 @@
+=== make sure no stale server ===
+none
+=== launch under nsys ===
+health after 15s
+=== request ===
+74.43 tokens per second
+=== terminate the APP so nsys finalizes ===
+app pid=1243117
+nsys exit=0
+ls: cannot access '/tmp/prof2.nsys-rep': No such file or directory
+=== kernel summary ===
+ERROR: Specified input file (/tmp/prof2.nsys-rep) does not exist.
+
+usage: nsys stats [<args>] <input-file>
+Try 'nsys stats --help' for more information.
+PROF2_DONE
+DONE 

@@ -1,0 +1,54 @@
+=== summary === 
+=== p60-ab-harness2 ==============================================
+TAG=ab-bf-tp3
+config: cards=0,1,2 (n=3)  split=tensor  tensor-split=1,1,1
+        spec='--model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7'  n_predict=512  ctx=8192  libdir=/root/libdir-rt
+        LDPATH_EXTRA=''
+libs:   70a4b50c8ae5d6c91014fc64f7d0b125 libllama.so.0.4.1
+        ed1b2f7fe61e300040d82ff392cfc15e libggml-cuda.so.0.24.0
+        4aa54a6301f88dc041a2181543f609e8 libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+NODROP=1: skipping drop_caches (diagnostic run, model stays page-cache hot)
+gpu mem before launch:
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+=== ab log === 
+=== waiting for NCCL build ===
+build done after 20 polls
+=== nccl linkage of built lib ===
+	linux-vdso64.so.1 (0x00007fff88040000)
+	libggml-base.so.0 => /root/llm/test/v100-opt/llama.cpp/build-nccl/bin/libggml-base.so.0 (0x00007fff809e0000)
+	libcudart.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcudart.so.12 (0x00007fff808f0000)
+	libcublas.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcublas.so.12 (0x00007fff79bd0000)
+	libcuda.so.1 => /lib64/libcuda.so.1 (0x00007fff77e10000)
+	libnccl.so.2 => /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2 (0x00007fff75f00000)
+	libcublasLt.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcublasLt.so.12 (0x00007fff62070000)
+	librt.so.1 => /lib64/glibc-hwcaps/power9/librt-2.28.so (0x00007fff62040000)
+	libpthread.so.0 => /lib64/glibc-hwcaps/power9/libpthread-2.28.so (0x00007fff61ff0000)
+	libdl.so.2 => /lib64/libdl.so.2 (0x00007fff61fc0000)
+	libstdc++.so.6 => /lib64/libstdc++.so.6 (0x00007fff61d90000)
+	libm.so.6 => /lib64/glibc-hwcaps/power9/libm-2.28.so (0x00007fff61c60000)
+	libgcc_s.so.1 => /lib64/libgcc_s.so.1 (0x00007fff61c20000)
+	libc.so.6 => /lib64/glibc-hwcaps/power9/libc-2.28.so (0x00007fff61a10000)
+	libgomp.so.1 => /lib64/libgomp.so.1 (0x00007fff619a0000)
+	/lib64/ld64.so.2 (0x00007fff88060000)
+-rwxr-xr-x 1 root root 209952 Sep 20 19:08 /root/libdir-nccl/llama-perplexity
+-rwxr-xr-x 1 root root 209944 Sep 20 19:09 /root/libdir-nccl/llama-server
+=== free gpu ===
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+##### ARM ab-bf-tp3 libdir=/root/libdir-rt ldextra= cards=0,1,2 split=tensor
+=== running === 
+1136498 bash /root/nccl-ab.sh
+1142066 tee -a /tmp/nccl-ab-summary.log
+1142113 /root/libdir-rt/llama-server --model /root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf --model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7 --spec-draft-ngl 999 --split-mode tensor --tensor-split 1,1,1 --ctx-size 8192 -ngl 999 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --parallel 1 --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0 --repeat-penalty 1.0 --host 127.0.0.1 --port 8131 --api-key-file /etc/llama-server/api-keys
+DONE 

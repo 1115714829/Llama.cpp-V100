@@ -1,0 +1,11 @@
+TAG=final-bf-tp3
+config: cards=0,1,2 (n=3)  split=tensor  tensor-split=1,1,1
+health ok=1 after 270s
+prompt1: tg=80.42 tok/s  AL=5.21
+prompt2: tg=63.47 tok/s  AL=4.11
+prompt3: tg=92.81 tok/s  AL=6.08
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=80.42
+[RT] perf: rounds=302 reuse=277 rebuild=25 | build_us=45044 alloc_us=664210 setin_us=12852 enqueue_us=7157848
+4.51.934.272 I draft: spec timing: n=288 | draft_decode=14.40 selector=4.37 walk=0.10 ms/round
+DONE 

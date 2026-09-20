@@ -1,0 +1,101 @@
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+##### DEVD ARM devd-none devd='' env=''
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+health ok=1 after 15s
+--- allreduce init lines from server log ---
+prompt1: tg=96.60 tok/s  AL=5.55
+prompt2: tg=77.92 tok/s  AL=4.22
+prompt3: tg=112.05 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+
+MEDIAN_TG=96.60
+--- round breakdown (target host side) ---
+[RT] perf: rounds=294 reuse=270 rebuild=24 | build_us=41925 alloc_us=627909 setin_us=10233 enqueue_us=6115833
+--- target decode+sync per round ---
+[RT] target decode+sync: 43.350 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 32.341 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 39.813 ms/round over 288 rounds (last n_tokens=8)
+--- draft phases ---
+0.33.730.896 I draft: spec timing: n=272 | draft_decode=13.25 selector=4.21 walk=0.07 ms/round
+P60_DONE TAG=devd-none STATUS=OK
+##### DEVD ARM devd-cuda0 devd='CUDA0' env=''
+libs:   d52347fa4d186aa592f1d7f1331b2323 libllama.so.0.4.1
+        faf9cc468a0a263997e15c7f885c75b9 libggml-cuda.so.0.24.0
+        2d63d90bd84ba98e607fda502b5b36ac libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+NODROP=1: skipping drop_caches (diagnostic run, model stays page-cache hot)
+gpu mem before launch:
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+draft placement: device=CUDA0 ngl=999
+/root/p60-ab-harness2.sh: line 94: 1248836 Aborted                 (core dumped) env CUDA_VISIBLE_DEVICES="$CARDS" LD_LIBRARY_PATH="$L${LDEXTRA:+:$LDEXTRA}" LLAMA_ROUND_TIMING=1 LLAMA_SPEC_TIMING=1 nohup "$L/llama-server" --model "$M" $SPEC $DRAFT_ARGS --split-mode "$SPLIT" --tensor-split "$TS" --ctx-size 8192 -ngl 999 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --parallel 1 --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0 --repeat-penalty 1.0 --host 127.0.0.1 --port "$PORT" --api-key-file /etc/llama-server/api-keys > "$SLOG" 2>&1
+health ok=0 after 15s
+--- launch failure evidence ---
+0.00.360.411 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/root/libdir-nccl/libggml-base.so.0(ggml_abort+0xe4)[0x7fffb4665a04]
+P60_DONE TAG=devd-cuda0 STATUS=LAUNCH_FAILED
+##### DEVD ARM devd-cuda1 devd='CUDA1' env=''
+libs:   d52347fa4d186aa592f1d7f1331b2323 libllama.so.0.4.1
+        faf9cc468a0a263997e15c7f885c75b9 libggml-cuda.so.0.24.0
+        2d63d90bd84ba98e607fda502b5b36ac libllama-common.so.0.4.1
+oracle: target 29047086048 B  draft 1143006816 B
+NODROP=1: skipping drop_caches (diagnostic run, model stays page-cache hot)
+gpu mem before launch:
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+draft placement: device=CUDA1 ngl=999
+/root/p60-ab-harness2.sh: line 94: 1249327 Aborted                 (core dumped) env CUDA_VISIBLE_DEVICES="$CARDS" LD_LIBRARY_PATH="$L${LDEXTRA:+:$LDEXTRA}" LLAMA_ROUND_TIMING=1 LLAMA_SPEC_TIMING=1 nohup "$L/llama-server" --model "$M" $SPEC $DRAFT_ARGS --split-mode "$SPLIT" --tensor-split "$TS" --ctx-size 8192 -ngl 999 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --parallel 1 --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0 --repeat-penalty 1.0 --host 127.0.0.1 --port "$PORT" --api-key-file /etc/llama-server/api-keys > "$SLOG" 2>&1
+health ok=0 after 15s
+--- launch failure evidence ---
+0.00.373.780 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/root/libdir-nccl/libggml-base.so.0(ggml_abort+0xe4)[0x7fff83105a04]
+P60_DONE TAG=devd-cuda1 STATUS=LAUNCH_FAILED
+##### DEVD ARM devd-none2 devd='' env=''
+4, 0 MiB
+5, 0 MiB
+extra env: GGML_CUDA_P2P=1
+health ok=1 after 15s
+--- allreduce init lines from server log ---
+prompt1: tg=96.35 tok/s  AL=5.55
+prompt2: tg=77.82 tok/s  AL=4.22
+prompt3: tg=111.59 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+
+MEDIAN_TG=96.35
+--- round breakdown (target host side) ---
+[RT] perf: rounds=294 reuse=270 rebuild=24 | build_us=42640 alloc_us=629674 setin_us=9804 enqueue_us=6242944
+--- target decode+sync per round ---
+[RT] target decode+sync: 43.675 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 32.321 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 39.972 ms/round over 288 rounds (last n_tokens=8)
+--- draft phases ---
+0.33.998.824 I draft: spec timing: n=272 | draft_decode=13.35 selector=4.21 walk=0.07 ms/round
+P60_DONE TAG=devd-none2 STATUS=OK
+=== medians + draft phase ===
+devd-none   prompt1: tg=96.60 tok/s  AL=5.55 prompt2: tg=77.92 tok/s  AL=4.22 prompt3: tg=112.05 tok/s  AL=6.38 MEDIAN_TG=96.60 
+0.33.730.896 I draft: spec timing: n=272 | draft_decode=13.25 selector=4.21 walk=0.07 ms/round
+devd-cuda0  
+/root/libdir-nccl/libggml-base.so.0(ggml_abort+0xe4)[0x7fffb4665a04]
+devd-cuda1  
+/root/libdir-nccl/libggml-base.so.0(ggml_abort+0xe4)[0x7fff83105a04]
+devd-none2  prompt1: tg=96.35 tok/s  AL=5.55 prompt2: tg=77.82 tok/s  AL=4.22 prompt3: tg=111.59 tok/s  AL=6.38 MEDIAN_TG=96.35 
+0.33.998.824 I draft: spec timing: n=272 | draft_decode=13.35 selector=4.21 walk=0.07 ms/round
+DEVD_RETEST_DONE
+DONE 

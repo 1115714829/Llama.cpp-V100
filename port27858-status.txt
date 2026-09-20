@@ -1,0 +1,68 @@
+=== git status --porcelain === 
+ M common/common.cpp
+ M common/speculative.cpp
+ M common/speculative.h
+ M ggml/src/ggml-cuda/mmvq.cu
+ M ggml/src/ggml-cuda/mmvq.cuh
+ M src/llama-ext.h
+ M src/llama-model.cpp
+ M src/llama-model.h
+ M src/models/dflash.cpp
+ 
+=== git diff --stat === 
+ common/common.cpp           |   6 +
+ common/speculative.cpp      | 271 ++++++++++++++++++++++++++++++++++++++++----
+ common/speculative.h        |  16 +++
+ ggml/src/ggml-cuda/mmvq.cu  |  35 +++++-
+ ggml/src/ggml-cuda/mmvq.cuh |   4 +
+ src/llama-ext.h             |   3 +
+ src/llama-model.cpp         |   4 +
+ src/llama-model.h           |   2 +
+ src/models/dflash.cpp       |  30 +++--
+ 9 files changed, 338 insertions(+), 33 deletions(-)
+ 
+=== grep port symbols (should be 
+src\models\dflash.cpp:20:    ml.get_key(LLM_KV_DFLASH_SELECTOR_RANK,    hparams.dflash_selector_rank,    false);
+src\models\dflash.cpp:130:        const int64_t rank = hparams.dflash_selector_rank;
+src\models\dflash.cpp:145:        const bool use_cpu_selector = params.split_mode == LLAMA_SPLIT_MODE_TENSOR;
+src\models\dflash.cpp:146:        dflash_selector_prev   = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_PREV,   "weight"), { rank, n_vocab }, use_cpu_selector ? TENSOR_SKIP : 0);
+src\models\dflash.cpp:147:        dflash_selector_next   = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_NEXT,   "weight"), { rank, n_vocab }, use_cpu_selector ? TENSOR_SKIP : 0);
+src\models\dflash.cpp:152:                hparams.dflash_selector_rank, hparams.dflash_selector_top_k);
+src\models\dflash.cpp:465:// via load_dflash2_selector()/build_dflash2_selector_cpu() in common/speculative.cpp;
+src\models\dflash.cpp:476:    const int64_t rank     = hparams.dflash_selector_rank;
+common\speculative.cpp:929:    bool    is_dflash2_cpu = false;  // ranks the lm_head output on the host when it is split (tensor parallelism)
+common\speculative.cpp:932:    int32_t selector_rank  = 0;
+common\speculative.cpp:936:    std::vector<float> sel_next;     // [selector_rank, n_vocab]
+common\speculative.cpp:937:    std::vector<float> sel_prev;     // [selector_rank, n_vocab]
+common\speculative.cpp:938:    std::vector<float> sel_hidden;   // [n_embd_dec, selector_rank]
+common\speculative.cpp:991:        is_dflash2_cpu = is_dflash2 && llama_model_get_split_mode(model_dft) == LLAMA_SPLIT_MODE_TENSOR;
+common\speculative.cpp:994:        if (is_dflash2_cpu) {
+common\speculative.cpp:997:            load_dflash2_selector();
+common\speculative.cpp:1077:    void load_dflash2_selector() {
+common\speculative.cpp:1150:        selector_rank = (int32_t) rank;
+common\speculative.cpp:1151:        GGML_ASSERT((size_t) selector_rank * n_vocab == sel_next.size());
+common\speculative.cpp:1152:        GGML_ASSERT((size_t) selector_rank * n_vocab == sel_prev.size());
+common\speculative.cpp:1153:        GGML_ASSERT((size_t) n_embd_dec * selector_rank == sel_hidden.size());
+common\speculative.cpp:1160:    void build_dflash2_selector_cpu(std::vector<int32_t> & cand, std::vector<float> & unary, std::vector<float> & gate) {
+common\speculative.cpp:1166:        const int32_t rank     = selector_rank;
+common\speculative.cpp:1371:                common_batch_add(batch, i == 0 ? dp.id_last : mask_token_id, n + i, { seq_id }, !is_dflash2 || is_dflash2_cpu);
+common\speculative.cpp:1390:        if (is_dflash2_cpu) {
+common\speculative.cpp:1391:            build_dflash2_selector_cpu(cand, unary, gate);
+common\speculative.cpp:1408:                if (is_dflash2_cpu) {
+common\speculative.cpp:1417:                        const float   * gi = gate.data()  + (size_t) pos * selector_rank;
+common\speculative.cpp:1429:                            for (int32_t k = 0; k < selector_rank; ++k) {
+common\speculative.cpp:1430:                                s += sel_next[(size_t) cj * selector_rank + k] * sel_prev[(size_t) pred_id * selector_rank + k] * gi[k];
+common\speculative.cpp:2721:    if (common_speculative_is_block_draft(params.speculative.types)) {
+common\speculative.cpp:2769:    // common_speculative_block_draft_n_ubatch for the cap rationale
+common\speculative.cpp:2770:    if (common_speculative_is_block_draft(params.speculative.types)) {
+common\speculative.cpp:2771:        const uint32_t n_ubatch_dft = common_speculative_block_draft_n_ubatch(params.n_parallel, params.speculative.draft.n_max);
+common\speculative.h:52:inline bool common_speculative_is_block_draft(const std::vector<common_speculative_type> & types) {
+common\speculative.h:61:inline uint32_t common_speculative_block_draft_n_ubatch(uint32_t n_parallel, int32_t n_max) {
+common\common.cpp:1314:        if (common_speculative_is_block_draft(params.speculative.types)) {
+common\common.cpp:1316:                    common_speculative_block_draft_n_ubatch(params_dft.n_parallel, params_dft.speculative.draft.n_max));
+src\llama-ext.h:126:LLAMA_API enum llama_split_mode llama_model_get_split_mode(const struct llama_model * model);
+src\llama-model.cpp:2851:llama_split_mode llama_model_get_split_mode(const llama_model * model) {
+ 
+=== meta.cpp diagnostic must be absent === 
+EXITCODE=1 
+DONE 

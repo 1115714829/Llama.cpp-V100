@@ -1,0 +1,264 @@
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1d212a;
+    --line: #2a2f3a;
+    --fg: #e6e9ef;
+    --muted: #98a2b3;
+    --accent: #5b9cff;
+    --good: #46c98b;
+    --bad: #ff6b6b;
+    --warn: #f5b544;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 20px 72px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.65; font-size: 16px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header { padding: 44px 0 8px; border-bottom: 1px solid var(--line); margin-bottom: 32px; }
+  h1 { font-size: 1.85rem; line-height: 1.25; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0; }
+  .badge {
+    display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+    background: rgba(70,201,139,0.14); color: var(--good); border: 1px solid rgba(70,201,139,0.35);
+    margin-right: 8px;
+  }
+  .badge.warn { background: rgba(245,181,68,0.13); color: var(--warn); border-color: rgba(245,181,68,0.35); }
+  h2 {
+    font-size: 1.2rem; margin: 40px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 1rem; margin: 24px 0 10px; color: #cdd5e0; }
+  p { margin: 10px 0; }
+  .muted { color: var(--muted); }
+  ul { margin: 10px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  code, pre { font-family: var(--mono); font-size: 0.86rem; }
+  code { background: var(--panel-2); padding: 2px 6px; border-radius: 5px; color: #cfe1ff; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 14px 0; color: #d7dee9;
+  }
+  .scroll { overflow-x: auto; margin: 16px 0; }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; background: var(--panel); }
+  tbody tr:hover { background: rgba(91,156,255,0.05); }
+  td.num { font-family: var(--mono); }
+  .win { color: var(--good); font-weight: 600; }
+  .lose { color: var(--bad); font-weight: 600; }
+  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin: 18px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .card .k { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .card .v { font-size: 1.5rem; font-family: var(--mono); margin: 6px 0 2px; }
+  .card .n { font-size: 0.82rem; color: var(--muted); }
+  .callout {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--warn);
+    border-radius: 8px; padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.good { border-left-color: var(--good); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout h3 { margin-top: 0; }
+  .files { font-size: 0.88rem; }
+  .files td:first-child { font-family: var(--mono); color: #cfe1ff; }
+  .files td:last-child { white-space: normal; color: var(--muted); }
+  footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Phase 1a &mdash; DFlash2 under <code>--split-mode tensor</code> on Tesla V100</h1>
+    <p class="sub">
+      <span class="badge">crash fixed &amp; verified</span>
+      <span class="badge warn">but no speedup over MTP</span>
+      llama.cpp b11053 + C4 + C5 + upstream PR&nbsp;#27858 port &middot; AC922 / 6&times;V100-SXM2-16GB &middot; 2026-09-20
+    </p>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="k">crash before</div>
+      <div class="v lose">SIGABRT</div>
+      <div class="n">assert at load time (axis-0 split)</div>
+    </div>
+    <div class="card">
+      <div class="k">crash after</div>
+      <div class="v win">5 s</div>
+      <div class="n">health OK, no assertion</div>
+    </div>
+    <div class="card">
+      <div class="k">ported diff</div>
+      <div class="v">7 files</div>
+      <div class="n">+338 / &minus;33 lines, total tree</div>
+    </div>
+    <div class="card">
+      <div class="k">CUDA kernels touched</div>
+      <div class="v win">0</div>
+      <div class="n">libggml-cuda md5 byte-identical</div>
+    </div>
+  </div>
+
+  <h2>1. What was ported</h2>
+  <p>
+    Upstream PR&nbsp;#27858 makes <code>draft-dflash</code> work when the <code>lm_head</code> is split along the
+    vocabulary. Its core idea: when <code>--split-mode tensor</code> is active, skip the in-graph selector and rank
+    the candidates on the <strong>host</strong>, reading the selector tables straight from the draft GGUF.
+    The port covers exactly the 7 files of that diff, plus the removal of a temporary diagnostic I had added to
+    <code>ggml/src/ggml-backend-meta.cpp</code>.
+  </p>
+  <div class="scroll">
+    <table class="files">
+      <thead><tr><th>File</th><th>Change</th></tr></thead>
+      <tbody>
+        <tr><td>common/speculative.h</td><td><code>common_speculative_is_block_draft()</code>, <code>common_speculative_block_draft_n_ubatch()</code>, <code>&lt;algorithm&gt;</code></td></tr>
+        <tr><td>common/speculative.cpp</td><td><code>is_dflash2_cpu</code>, <code>sel_next/sel_prev/sel_hidden</code>, <code>load_dflash2_selector()</code>, <code>build_dflash2_selector_cpu()</code>, block-walk branch, ubatch cap</td></tr>
+        <tr><td>common/common.cpp</td><td>keep the fit estimate in sync with the draft ubatch cap</td></tr>
+        <tr><td>src/llama-ext.h</td><td><code>llama_model_get_split_mode()</code> decl</td></tr>
+        <tr><td>src/llama-model.cpp</td><td><code>llama_model_get_split_mode()</code> impl</td></tr>
+        <tr><td>src/llama-model.h</td><td>comment on the dual-purpose selector tables</td></tr>
+        <tr><td>src/models/dflash.cpp</td><td><code>use_cpu_selector</code> &rarr; <code>TENSOR_SKIP</code>; <code>res-&gt;t_h_nextn = cur</code>; gate the in-graph selector on <code>!= LLAMA_SPLIT_MODE_TENSOR</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre>cmake --build build --config Release -j8 --target llama-server llama-bench
+# no error / FAILED; libllama.so + libggml-base.so + both executables relinked
+# snapshot -> /root/libdir-27858
+
+libggml-cuda.so.0.24.0  b4b467736ca4a58ac1c747c7ff14fb00   == libdir-final  (CUDA untouched)
+libllama.so.0.4.1       c2bb2b3062a07779b7d334230ce5ac06   != libdir-final 811b90a9...  (new code loaded)</pre>
+
+  <h2>2. The crash is gone</h2>
+  <p>1 card, Q2_K_XL target, <code>--split-mode tensor --spec-type draft-dflash</code> &mdash; the exact configuration that used to abort during load.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th></th><th>old build</th><th>new build (libdir-27858)</th></tr></thead>
+      <tbody>
+        <tr><td>result</td><td class="lose">SIGABRT in <code>ggml-backend-meta.cpp:543</code></td><td class="win">health OK, 5 s, no assertion</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">Two direct pieces of evidence that the host-side path is actually taken:</p>
+  <pre>I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+W model has unused tensor selector_predecessor.weight (size = 35758080 bytes) -- ignoring
+W model has unused tensor selector_successor.weight   (size = 35758080 bytes) -- ignoring</pre>
+  <p class="muted">The <code>TENSOR_SKIP</code> path means the selector tables no longer go to device memory &mdash; they are read from the GGUF on the host.</p>
+
+  <h2>3. Three-card matrix &mdash; production model Q4_K_M</h2>
+  <p class="muted">
+    GPUs 0/1/2 (one NUMA node), ctx 8192, official sampling temp 1.0 / top-p 0.95 / top-k 20, seed 42,
+    3 reasoning prompts, n_predict 512, <strong>all four arms on the same libdir</strong> (single variable: spec type).
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>config</th><th>tg (3 prompts, t/s)</th><th>mean</th><th>acceptance</th><th>mean len</th></tr></thead>
+      <tbody>
+        <tr><td><code>tensor + draft-mtp n=4</code> (baseline)</td><td class="num">54.93 / 56.77 / 64.37</td><td class="num win">58.7</td><td class="num">0.565 / 0.591 / 0.694</td><td class="num">3.25 / 3.36 / 3.78</td></tr>
+        <tr><td><code>tensor + draft-dflash n=7</code> (used to crash)</td><td class="num">13.04 / 13.60 / 14.90</td><td class="num lose">13.8</td><td class="num lose">0.031 / 0.037 / 0.053</td><td class="num">1.22 / 1.26 / 1.37</td></tr>
+        <tr><td><code>tensor + draft-dflash n=4</code></td><td class="num">15.56 / 16.08 / 17.87</td><td class="num lose">16.5</td><td class="num">0.049 / 0.058 / 0.091</td><td class="num">1.20 / 1.23 / 1.36</td></tr>
+        <tr><td><code>layer + draft-dflash n=7</code></td><td class="num">15.35 / 14.51 / 15.02</td><td class="num lose">15.0</td><td class="num">0.041 / 0.040 / 0.048</td><td class="num">1.28 / 1.27 / 1.33</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    The crash is fixed, but acceptance on the production model stays at <strong>~4%</strong> &mdash; and it is
+    <strong>independent of split mode</strong>: <code>layer</code> (in-graph selector) and <code>tensor</code>
+    (host selector) land on the same floor. That pointed at the target model, not the selector.
+  </p>
+
+  <h2>4. Isolation experiment &mdash; swap the target</h2>
+  <p class="muted">
+    Same draft, same libdir, same 3 cards, same tensor split, same sampling / seed / prompts, n_predict 1024.
+    Only the <em>target</em> changes: Q2_K_XL instead of TurboFCFusion Q4_K_M.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>config</th><th>tg (3 prompts, t/s)</th><th>mean</th><th>acceptance</th><th>mean len</th></tr></thead>
+      <tbody>
+        <tr><td><code>tensor + draft-dflash n=7</code></td><td class="num">46.75 / 50.91 / 67.23</td><td class="num">54.9</td><td class="num win">0.473 / 0.516 / 0.746</td><td class="num win">4.31 / 4.61 / 6.22</td></tr>
+        <tr><td><code>tensor + draft-mtp n=4</code></td><td class="num">66.25 / 68.53 / 81.11</td><td class="num win">72.0</td><td class="num">0.599 / 0.600 / 0.787</td><td class="num">3.40 / 3.40 / 4.15</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout good">
+    <h3>Conclusion 1 &mdash; the port is correct</h3>
+    <p>
+      The very same host-selector code path, same draft, same tensor split now yields mean accepted length
+      <strong>4.31&ndash;6.22</strong> &mdash; the level of the official Q4_K_M number (5.39), and of the earlier
+      single-card official-condition run (4.92). A buggy port could not suddenly become good just by changing the
+      target. <strong>The "port has a bug" hypothesis is excluded.</strong>
+    </p>
+  </div>
+
+  <div class="callout bad">
+    <h3>Conclusion 2 &mdash; the ~4% is target incompatibility</h3>
+    <p>
+      Q2_K_XL target &rarr; mean len 4.3&ndash;6.2. TurboFCFusion Q4_K_M target &rarr; mean len 1.2&ndash;1.4.
+      Same draft, same code. The DFlash2 draft consumes the target's extracted layer input embeddings
+      (<code>n_extract=5</code>) and the target's <code>lm_head</code>; it was trained on the
+      <strong>base</strong> Qwen3.8-27B, while TurboFCFusion is a merged/fine-tuned variant with its own MTP head and
+      output head. The candidate ranking collapses.
+      <br><strong>&rArr; DFlash2 cannot be used with the production TurboFCFusion model</strong> short of retraining
+      the draft.
+    </p>
+  </div>
+
+  <div class="callout">
+    <h3>Conclusion 3 &mdash; even on a compatible target, DFlash2 is slower than MTP</h3>
+    <p>
+      Higher mean accepted length (4.3&ndash;6.2 vs 3.4&ndash;4.2) but lower throughput
+      (46.8 / 50.9 / 67.2 vs <strong>66.3 / 68.5 / 81.1</strong> t/s): DFlash2 must read a separate
+      <strong>1.14 GB</strong> draft model every step. On a bandwidth-bound decode that costs more than the extra
+      acceptance buys. This matches the earlier three-prose-prompt result (37.88 vs 40.66 t/s).
+    </p>
+  </div>
+
+  <h2>5. Correction to the earlier record</h2>
+  <p>
+    An earlier note in <code>dflash-in-llamacpp.md</code> &sect;10.2 claimed <code>dflash 66.7</code> &gt;
+    <code>mtp 40.66</code> t/s. Those two arms used <strong>different prompts</strong> (reasoning type vs prose
+    type) and were therefore not comparable. This run's same-prompt comparison shows <strong>MTP ahead by ~31%</strong>.
+    The claim is retracted; on V100, <strong>MTP is the faster speculative scheme</strong>.
+  </p>
+
+  <h2>6. What this means for the project goal</h2>
+  <p>"Reach 1cat-vLLM's speed (DFlash2 + FP8, 120&ndash;200 t/s)" does not hold on this box, for three independent reasons:</p>
+  <ul>
+    <li>the production target is incompatible with the DFlash2 draft (&sect;4);</li>
+    <li>on a compatible target DFlash2 is still slower than MTP &mdash; bandwidth-bound (&sect;4);</li>
+    <li>V100 has <strong>no FP8</strong> (SM_89/SM_90 only) &mdash; the 120&ndash;200 t/s figure rests on different hardware premises.</li>
+  </ul>
+  <p>
+    Practical output of the speculative-decoding line: <strong>freeze and document the MTP configuration</strong>
+    (<code>--spec-type draft-mtp --spec-draft-n-max 4</code>) and <strong>show, with data, that DFlash2 is not the
+    answer here</strong>. Phase&nbsp;1a's engineering value is fixing an open upstream crash and proving the
+    host-side selector correct &mdash; not a speedup.
+  </p>
+
+  <h2>7. Reproduce</h2>
+  <pre>/root/p27-build-27858.sh     build the port (llama-server + llama-bench)
+/root/p28-verify27858.sh     crash repro + binary self-check, 1 card
+/root/p29-mg27858.sh         three-card matrix (4 arms)
+/root/p30-iso27858.sh        target isolation experiment
+
+logs: /tmp/verify27858.log  /tmp/mg27858.log  /tmp/iso27858.log</pre>
+  <p class="muted">
+    Note: under <code>--split-mode tensor</code> a harmless warning appears &mdash;
+    <code>common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for
+    SPLIT_MODE_TENSOR, abort</code>. That is the unimplemented fit feature, not a crash; do not mistake it for one
+    when grepping for <code>abort</code>.
+  </p>
+
+  <footer>
+    llama.cpp SM_70 (V100) research branch &middot; base <code>1af554f8f</code> (b11053, 0.4.1-dev) &middot;
+    branch changes: <code>mmvq.cu</code>/<code>mmvq.cuh</code> (C4, C5) + PR&nbsp;#27858 port &middot;
+    full write-up: <code>1cat-vllm-v100-study/dflash-in-llamacpp.md</code> &sect;16
+  </footer>
+</div>

@@ -1,0 +1,182 @@
+=== build verdict (tail) === 
+=== verify nccl linkage of the built lib ===
+	linux-vdso64.so.1 (0x00007fff96590000)
+	libggml-base.so.0 => /root/llm/test/v100-opt/llama.cpp/build-nccl/bin/libggml-base.so.0 (0x00007fff8ef30000)
+	libcudart.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcudart.so.12 (0x00007fff8ee40000)
+	libcublas.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcublas.so.12 (0x00007fff88120000)
+	libcuda.so.1 => /lib64/libcuda.so.1 (0x00007fff86360000)
+	libnccl.so.2 => /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2 (0x00007fff84450000)
+	libcublasLt.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcublasLt.so.12 (0x00007fff705c0000)
+	librt.so.1 => /lib64/glibc-hwcaps/power9/librt-2.28.so (0x00007fff70590000)
+	libpthread.so.0 => /lib64/glibc-hwcaps/power9/libpthread-2.28.so (0x00007fff70540000)
+	libdl.so.2 => /lib64/libdl.so.2 (0x00007fff70510000)
+	libstdc++.so.6 => /lib64/libstdc++.so.6 (0x00007fff702e0000)
+	libm.so.6 => /lib64/glibc-hwcaps/power9/libm-2.28.so (0x00007fff701b0000)
+	libgcc_s.so.1 => /lib64/libgcc_s.so.1 (0x00007fff70170000)
+	libc.so.6 => /lib64/glibc-hwcaps/power9/libc-2.28.so (0x00007fff6ff60000)
+	libgomp.so.1 => /lib64/libgomp.so.1 (0x00007fff6fef0000)
+	/lib64/ld64.so.2 (0x00007fff965b0000)
+=== snapshot to /root/libdir-nccl ===
+faf9cc468a0a263997e15c7f885c75b9  /root/libdir-nccl/libggml-cuda.so.0.24.0
+d52347fa4d186aa592f1d7f1331b2323  /root/libdir-nccl/libllama.so.0.4.1
+2d63d90bd84ba98e607fda502b5b36ac  /root/libdir-nccl/libllama-common.so.0.4.1
+BUILD_NCCL_DONE
+=== ab running? === 
+1136498 bash /root/nccl-ab.sh
+1142066 tee -a /tmp/nccl-ab-summary.log
+1142113 /root/libdir-rt/llama-server --model /root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf --model-draft /root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7 --spec-draft-ngl 999 --split-mode tensor --tensor-split 1,1,1 --ctx-size 8192 -ngl 999 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --parallel 1 --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0 --repeat-penalty 1.0 --host 127.0.0.1 --port 8131 --api-key-file /etc/llama-server/api-keys
+=== libdir-nccl contents === 
+total 174516
+lrwxrwxrwx 1 root root        17 Sep 20 19:04 libggml-base.so -> libggml-base.so.0
+lrwxrwxrwx 1 root root        22 Sep 20 19:04 libggml-base.so.0 -> libggml-base.so.0.24.0
+-rwxr-xr-x 1 root root   1222024 Sep 20 19:04 libggml-base.so.0.24.0
+lrwxrwxrwx 1 root root        16 Sep 20 19:04 libggml-cpu.so -> libggml-cpu.so.0
+lrwxrwxrwx 1 root root        21 Sep 20 19:04 libggml-cpu.so.0 -> libggml-cpu.so.0.24.0
+-rwxr-xr-x 1 root root   1263856 Sep 20 19:04 libggml-cpu.so.0.24.0
+lrwxrwxrwx 1 root root        17 Sep 20 19:07 libggml-cuda.so -> libggml-cuda.so.0
+lrwxrwxrwx 1 root root        22 Sep 20 19:07 libggml-cuda.so.0 -> libggml-cuda.so.0.24.0
+-rwxr-xr-x 1 root root 124911672 Sep 20 19:07 libggml-cuda.so.0.24.0
+lrwxrwxrwx 1 root root        12 Sep 20 19:07 libggml.so -> libggml.so.0
+lrwxrwxrwx 1 root root        17 Sep 20 19:07 libggml.so.0 -> libggml.so.0.24.0
+-rwxr-xr-x 1 root root    387840 Sep 20 19:07 libggml.so.0.24.0
+-rwxr-xr-x 1 root root    208024 Sep 20 19:08 libllama-batched-bench-impl.so
+-rwxr-xr-x 1 root root    614576 Sep 20 19:09 libllama-bench-impl.so
+-rwxr-xr-x 1 root root    380592 Sep 20 19:09 libllama-cli-impl.so
+lrwxrwxrwx 1 root root        20 Sep 20 19:08 libllama-common.so -> libllama-common.so.0
+lrwxrwxrwx 1 root root        24 Sep 20 19:08 libllama-common.so.0 -> libllama-common.so.0.4.1
+-rwxr-xr-x 1 root root   6506720 Sep 20 19:08 libllama-common.so.0.4.1
+-rwxr-xr-x 1 root root    289224 Sep 20 19:08 libllama-completion-impl.so
+-rwxr-xr-x 1 root root    206344 Sep 20 19:08 libllama-fit-params-impl.so
+-rwxr-xr-x 1 root root    294768 Sep 20 19:08 libllama-perplexity-impl.so
+-rwxr-xr-x 1 root root    219344 Sep 20 19:08 libllama-quantize-impl.so
+-rwxr-xr-x 1 root root   7354232 Sep 20 19:09 libllama-server-impl.so
+lrwxrwxrwx 1 root root        13 Sep 20 19:08 libllama.so -> libllama.so.0
+lrwxrwxrwx 1 root root        17 Sep 20 19:08 libllama.so.0 -> libllama.so.0.4.1
+-rwxr-xr-x 1 root root   5179560 Sep 20 19:08 libllama.so.0.4.1
+lrwxrwxrwx 1 root root        12 Sep 20 19:08 libmtmd.so -> libmtmd.so.0
+lrwxrwxrwx 1 root root        16 Sep 20 19:08 libmtmd.so.0 -> libmtmd.so.0.4.1
+-rwxr-xr-x 1 root root   2224296 Sep 20 19:08 libmtmd.so.0.4.1
+-rwxr-xr-x 1 root root    217432 Sep 20 19:09 llama
+-rwxr-xr-x 1 root root    218352 Sep 20 19:08 llama-batched
+-rwxr-xr-x 1 root root    209952 Sep 20 19:08 llama-batched-bench
+-rwxr-xr-x 1 root root    209944 Sep 20 19:09 llama-bench
+-rwxr-xr-x 1 root root    209944 Sep 20 19:09 llama-cli
+-rwxr-xr-x 1 root root    209952 Sep 20 19:08 llama-completion
+-rwxr-xr-x 1 root root    224160 Sep 20 19:08 llama-convert-llama2c-to-ggml
+-rwxr-xr-x 1 root root    230112 Sep 20 19:08 llama-cvector-generator
+-rwxr-xr-x 1 root root    391848 Sep 20 19:08 llama-debug
+-rwxr-xr-x 1 root root    222000 Sep 20 19:08 llama-diffusion-cli
+-rwxr-xr-x 1 root root    220976 Sep 20 19:08 llama-embedding
+-rwxr-xr-x 1 root root    215704 Sep 20 19:08 llama-eval-callback
+-rwxr-xr-x 1 root root    229568 Sep 20 19:08 llama-export-lora
+-rwxr-xr-x 1 root root    216272 Sep 20 19:08 llama-finetune
+-rwxr-xr-x 1 root root    209952 Sep 20 19:08 llama-fit-params
+-rwxr-xr-x 1 root root    211784 Sep 20 19:04 llama-gemma3-cli
+-rwxr-xr-x 1 root root    220848 Sep 20 19:08 llama-gen-docs
+-rwxr-xr-x 1 root root    217944 Sep 20 19:07 llama-gguf
+-rwxr-xr-x 1 root root    289880 Sep 20 19:08 llama-gguf-hash
+-rwxr-xr-x 1 root root    224456 Sep 20 19:08 llama-gguf-split
+-rwxr-xr-x 1 root root    216192 Sep 20 19:08 llama-idle
+-rwxr-xr-x 1 root root    469528 Sep 20 19:09 llama-imatrix
+-rwxr-xr-x 1 root root    211784 Sep 20 19:04 llama-llava-cli
+-rwxr-xr-x 1 root root    218288 Sep 20 19:08 llama-lookahead
+-rwxr-xr-x 1 root root    219976 Sep 20 19:08 llama-lookup
+-rwxr-xr-x 1 root root    215720 Sep 20 19:08 llama-lookup-create
+-rwxr-xr-x 1 root root    213384 Sep 20 19:08 llama-lookup-merge
+-rwxr-xr-x 1 root root    217720 Sep 20 19:08 llama-lookup-stats
+-rwxr-xr-x 1 root root    211784 Sep 20 19:04 llama-minicpmv-cli
+-rwxr-xr-x 1 root root    229544 Sep 20 19:08 llama-mtmd-cli
+-rwxr-xr-x 1 root root    218024 Sep 20 19:08 llama-mtmd-debug
+-rwxr-xr-x 1 root root    222312 Sep 20 19:08 llama-parallel
+-rwxr-xr-x 1 root root    218920 Sep 20 19:08 llama-passkey
+-rwxr-xr-x 1 root root    209952 Sep 20 19:08 llama-perplexity
+-rwxr-xr-x 1 root root    211384 Sep 20 19:08 llama-q8dot
+-rwxr-xr-x 1 root root    209952 Sep 20 19:08 llama-quantize
+-rwxr-xr-x 1 root root    211784 Sep 20 19:04 llama-qwen2vl-cli
+-rwxr-xr-x 1 root root    219136 Sep 20 19:08 llama-results
+-rwxr-xr-x 1 root root    223272 Sep 20 19:08 llama-retrieval
+-rwxr-xr-x 1 root root    209944 Sep 20 19:09 llama-server
+-rwxr-xr-x 1 root root    216160 Sep 20 19:08 llama-simple
+-rwxr-xr-x 1 root root    218392 Sep 20 19:08 llama-simple-chat
+-rwxr-xr-x 1 root root    224520 Sep 20 19:08 llama-speculative
+-rwxr-xr-x 1 root root    220496 Sep 20 19:08 llama-speculative-simple
+-rwxr-xr-x 1 root root    217440 Sep 20 19:08 llama-tokenize
+-rwxr-xr-x 1 root root    217000 Sep 20 19:08 llama-tts
+-rwxr-xr-x 1 root root    212456 Sep 20 19:08 llama-vdot
+-rwxr-xr-x 1 root root    218280 Sep 20 19:08 test-alloc
+-rwxr-xr-x 1 root root    219880 Sep 20 19:08 test-arg-parser
+-rwxr-xr-x 1 root root    213080 Sep 20 19:08 test-autorelease
+-rwxr-xr-x 1 root root   1638912 Sep 20 19:09 test-backend-ops
+-rwxr-xr-x 1 root root    309312 Sep 20 19:08 test-backend-sampler
+-rwxr-xr-x 1 root root    214008 Sep 20 19:08 test-barrier
+-rwxr-xr-x 1 root root    456856 Sep 20 19:09 test-batch-alloc
+-rwxr-xr-x 1 root root    209856 Sep 20 19:08 test-c
+-rwxr-xr-x 1 root root   1320912 Sep 20 19:10 test-chat
+-rwxr-xr-x 1 root root    307256 Sep 20 19:08 test-chat-analysis
+-rwxr-xr-x 1 root root    856944 Sep 20 19:09 test-chat-auto-parser
+-rwxr-xr-x 1 root root    655112 Sep 20 19:09 test-chat-peg-parser
+-rwxr-xr-x 1 root root    310096 Sep 20 19:08 test-chat-template
+-rwxr-xr-x 1 root root    212888 Sep 20 19:08 test-col2im-1d
+-rwxr-xr-x 1 root root    218600 Sep 20 19:08 test-export-graph-ops
+-rwxr-xr-x 1 root root    230576 Sep 20 19:08 test-fusion
+-rwxr-xr-x 1 root root    215208 Sep 20 19:08 test-gbnf-validator
+-rwxr-xr-x 1 root root    223616 Sep 20 19:08 test-gguf
+-rwxr-xr-x 1 root root    285296 Sep 20 19:08 test-grammar-integration
+-rwxr-xr-x 1 root root    215728 Sep 20 19:08 test-grammar-parser
+-rwxr-xr-x 1 root root    812600 Sep 20 19:09 test-jinja
+-rwxr-xr-x 1 root root    458272 Sep 20 19:08 test-json-schema
+-rwxr-xr-x 1 root root    386032 Sep 20 19:08 test-json-schema-to-grammar
+-rwxr-xr-x 1 root root    226872 Sep 20 19:08 test-llama-archs
+-rwxr-xr-x 1 root root    217744 Sep 20 19:08 test-llama-grammar
+-rwxr-xr-x 1 root root    212976 Sep 20 19:08 test-log
+-rwxr-xr-x 1 root root    210808 Sep 20 19:08 test-model-load-cancel
+-rwxr-xr-x 1 root root    297064 Sep 20 19:08 test-model-resolution
+-rwxr-xr-x 1 root root    212440 Sep 20 19:08 test-mtmd-c-api
+-rwxr-xr-x 1 root root    386656 Sep 20 19:08 test-mtmd-impl
+-rwxr-xr-x 1 root root    220440 Sep 20 19:08 test-opt
+-rwxr-xr-x 1 root root   1129504 Sep 20 19:09 test-peg-parser
+-rwxr-xr-x 1 root root    212528 Sep 20 19:08 test-quantize-fns
+-rwxr-xr-x 1 root root    216848 Sep 20 19:08 test-quantize-perf
+-rwxr-xr-x 1 root root    323192 Sep 20 19:08 test-quantize-stats
+-rwxr-xr-x 1 root root    215112 Sep 20 19:08 test-reasoning-budget
+-rwxr-xr-x 1 root root    219160 Sep 20 19:08 test-recurrent-state-rollback
+-rwxr-xr-x 1 root root    212288 Sep 20 19:08 test-rope
+-rwxr-xr-x 1 root root    216488 Sep 20 19:08 test-sampling
+-rwxr-xr-x 1 root root    291248 Sep 20 19:08 test-save-load-state
+-rwxr-xr-x 1 root root    215816 Sep 20 19:08 test-state-restore-fragmented
+-rwxr-xr-x 1 root root    218560 Sep 20 19:08 test-thread-safety
+-rwxr-xr-x 1 root root    223000 Sep 20 19:08 test-tokenizer-0
+-rwxr-xr-x 1 root root    215968 Sep 20 19:08 test-tokenizer-1-bpe
+-rwxr-xr-x 1 root root    215016 Sep 20 19:08 test-tokenizer-1-spm
+-rwxr-xr-x 1 root root    213032 Sep 20 19:08 test-unicode
+=== ab log so far === 
+=== waiting for NCCL build ===
+build done after 20 polls
+=== nccl linkage of built lib ===
+	linux-vdso64.so.1 (0x00007fff88040000)
+	libggml-base.so.0 => /root/llm/test/v100-opt/llama.cpp/build-nccl/bin/libggml-base.so.0 (0x00007fff809e0000)
+	libcudart.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcudart.so.12 (0x00007fff808f0000)
+	libcublas.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcublas.so.12 (0x00007fff79bd0000)
+	libcuda.so.1 => /lib64/libcuda.so.1 (0x00007fff77e10000)
+	libnccl.so.2 => /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2 (0x00007fff75f00000)
+	libcublasLt.so.12 => /usr/local/cuda-12.4/targets/ppc64le-linux/lib/libcublasLt.so.12 (0x00007fff62070000)
+	librt.so.1 => /lib64/glibc-hwcaps/power9/librt-2.28.so (0x00007fff62040000)
+	libpthread.so.0 => /lib64/glibc-hwcaps/power9/libpthread-2.28.so (0x00007fff61ff0000)
+	libdl.so.2 => /lib64/libdl.so.2 (0x00007fff61fc0000)
+	libstdc++.so.6 => /lib64/libstdc++.so.6 (0x00007fff61d90000)
+	libm.so.6 => /lib64/glibc-hwcaps/power9/libm-2.28.so (0x00007fff61c60000)
+	libgcc_s.so.1 => /lib64/libgcc_s.so.1 (0x00007fff61c20000)
+	libc.so.6 => /lib64/glibc-hwcaps/power9/libc-2.28.so (0x00007fff61a10000)
+	libgomp.so.1 => /lib64/libgomp.so.1 (0x00007fff619a0000)
+	/lib64/ld64.so.2 (0x00007fff88060000)
+-rwxr-xr-x 1 root root 209952 Sep 20 19:08 /root/libdir-nccl/llama-perplexity
+-rwxr-xr-x 1 root root 209944 Sep 20 19:09 /root/libdir-nccl/llama-server
+=== free gpu ===
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+##### ARM ab-bf-tp3 libdir=/root/libdir-rt ldextra= cards=0,1,2 split=tensor
+DONE 

@@ -1,0 +1,47 @@
+=== devd-cuda0 log (full, short) === 
+0.00.000.271 I srv  llama_server: initializing ...
+0.00.358.468 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.360.330 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.360.411 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.102.558 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.102.572 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.102.590 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.102.597 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.102.603 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.102.625 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.102.632 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.102.639 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.102.646 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.102.653 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.102.659 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.102.667 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.102.674 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.102.681 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.102.701 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.10.391.045 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.10.599.941 I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+0.10.599.948 I common_speculative_init_result: loading draft model '/root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf'
+/root/llm/test/v100-opt/llama.cpp/ggml/src/ggml-backend.cpp:941: pre-allocated tensor (output.weight) in a buffer (Meta()) that cannot run the operation (NONE)
+/root/libdir-nccl/libggml-base.so.0(+0x25268)[0x7fffb4665268]
+/root/libdir-nccl/libggml-base.so.0(ggml_print_backtrace+0x308)[0x7fffb4665868]
+/root/libdir-nccl/libggml-base.so.0(ggml_abort+0xe4)[0x7fffb4665a04]
+/root/libdir-nccl/libggml-base.so.0(+0x4925c)[0x7fffb468925c]
+/root/libdir-nccl/libggml-base.so.0(ggml_backend_sched_split_graph+0xe18)[0x7fffb468bd78]
+/root/libdir-nccl/libllama.so.0(_ZN13llama_context13graph_reserveEjjjPK22llama_memory_context_ibPm+0xa20)[0x7fffbc0c6160]
+/root/libdir-nccl/libllama.so.0(_ZN13llama_context17resolve_fused_opsEPK22llama_memory_context_ij+0x504)[0x7fffbc0c6d64]
+/root/libdir-nccl/libllama.so.0(_ZN13llama_context13sched_reserveEv+0x6a0)[0x7fffbc0c8440]
+/root/libdir-nccl/libllama.so.0(_ZN13llama_contextC1ERK11llama_model20llama_context_params+0xcac)[0x7fffbc0cbe8c]
+/root/libdir-nccl/libllama.so.0(llama_init_from_model+0x340)[0x7fffbc0cd660]
+/root/libdir-nccl/libllama-common.so.0(_ZN30common_speculative_init_resultC1ER13common_paramsP11llama_modelP13llama_context+0x400)[0x7fffbc856c40]
+/root/libdir-nccl/libllama-common.so.0(_Z35common_speculative_init_from_paramsR13common_paramsP11llama_modelP13llama_context+0x54)[0x7fffbc857074]
+/root/libdir-nccl/libllama-server-impl.so(_ZN19server_context_impl10load_modelER13common_params+0x1758)[0x7fffbcc026e8]
+/root/libdir-nccl/libllama-server-impl.so(_ZN14server_context10load_modelER13common_params+0x1c)[0x7fffbcbe39bc]
+/root/libdir-nccl/libllama-server-impl.so(_Z12llama_serverR13common_paramsiPPc+0x3da8)[0x7fffbcb2f6e8]
+/root/libdir-nccl/libllama-server-impl.so(_Z12llama_serveriPPc+0x134)[0x7fffbcb31f24]
+/root/libdir-nccl/llama-server[0x100100d8]
+/lib64/glibc-hwcaps/power9/libc-2.28.so(+0x29f5c)[0x7fffb4059f5c]
+/lib64/glibc-hwcaps/power9/libc-2.28.so(__libc_start_main+0xb4)[0x7fffb405a0f4]
+DONE 

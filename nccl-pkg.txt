@@ -1,0 +1,163 @@
+=== pkg tree === 
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime:
+total 12
+-rw-r--r-- 1 root root   87 Sep  7 16:52 __init__.py
+drwxr-xr-x 2 root root 4096 Sep  7 16:52 include
+drwxr-xr-x 2 root root 4096 Sep  7 16:52 lib
+
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/include:
+total 32
+-rw-r--r-- 1 root root 31989 Sep  7 16:52 nccl.h
+
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib:
+total 58472
+-rwxr-xr-x 1 root root 59872280 Sep  7 16:52 libnccl.so.2
+=== nccl version macros === 
+20:#define NCCL_MAJOR 2
+21:#define NCCL_MINOR 29
+22:#define NCCL_PATCH 7
+25:#define NCCL_VERSION_CODE 22907
+112:  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH),  /* version */      \
+144:  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */           \
+157:/* Return the NCCL_VERSION_CODE of the NCCL library in the supplied integer.
+=== exported nccl symbols === 
+00000000000822b0 W ncclAllGather
+00000000000834c0 W ncclAllReduce
+0000000000082bc0 W ncclAlltoAll
+00000000000846e0 W ncclBcast
+0000000000083de0 W ncclBroadcast
+00000000000b8720 W ncclCommAbort
+00000000000b17f0 W ncclCommCount
+00000000000b1e30 W ncclCommCuDevice
+00000000001ccd20 W ncclCommDeregister
+00000000000bba20 W ncclCommDestroy
+00000000000bd3e0 W ncclCommFinalize
+00000000000b0bc0 W ncclCommGetAsyncError
+00000000000b1270 W ncclCommGetUniqueId
+00000000000beea0 W ncclCommGrow
+00000000000bc5d0 W ncclCommInitAll
+00000000000b9360 W ncclCommInitRank
+00000000000b9ee0 W ncclCommInitRankConfig
+00000000000bac60 W ncclCommInitRankScalable
+00000000000febb0 W ncclCommMemStats
+00000000000f0660 W ncclCommQueryProperties
+00000000001cbca0 W ncclCommRegister
+00000000000fe400 W ncclCommResume
+00000000000b7840 W ncclCommRevoke
+00000000000be230 W ncclCommShrink
+00000000000c0a70 W ncclCommSplit
+0000000000100170 W ncclCommSuspend
+00000000000b2470 W ncclCommUserRank
+00000000000f0190 W ncclCommWindowDeregister
+00000000000ef700 W ncclCommWindowRegister
+00000000000f0fe0 W ncclDevCommCreate
+00000000000f1720 W ncclDevCommDestroy
+0000000000084740 W ncclGather
+00000000000b0ab0 W ncclGetErrorString
+00000000000b0ba0 W ncclGetLastError
+00000000000f2e00 W ncclGetLsaDevicePointer
+00000000000f2980 W ncclGetLsaMultimemDevicePointer
+00000000000f25b0 W ncclGetMultimemDevicePointer
+00000000000f32b0 W ncclGetPeerDevicePointer
+00000000000aef70 W ncclGetUniqueId
+00000000000ae390 W ncclGetVersion
+00000000001e38d0 W ncclGinBarrierCreateRequirement
+00000000001e39b0 W ncclGinInboxA2ACreateRequirement
+00000000001e3920 W ncclGinOutboxCreateRequirement
+00000000000a5890 W ncclGroupEnd
+00000000000a5db0 W ncclGroupSimulateEnd
+00000000000a4590 W ncclGroupStart
+00000000001e3a40 W ncclLLA2ACalcSlots
+00000000001e3a70 W ncclLLA2ACreateRequirement
+00000000001e3600 W ncclLsaBarrierCreateRequirement
+00000000000e50d0 W ncclMemAlloc
+00000000000e5bd0 W ncclMemFree
+0000000000087e00 W ncclPutSignal
+00000000000874e0 W ncclRecv
+000000000009ec40 W ncclRedOpCreatePreMulSum
+000000000009f1f0 W ncclRedOpDestroy
+0000000000085060 W ncclReduce
+0000000000085980 W ncclReduceScatter
+000000000008b0d0 W ncclResetDebugInit
+000000000008b040 T ncclResetDebugInitInternal
+00000000000862a0 W ncclScatter
+0000000000086bc0 W ncclSend
+0000000000088790 W ncclSignal
+00000000001e3690 W ncclTeamLsa
+00000000001e3740 W ncclTeamRail
+00000000001e3830 W ncclTeamRankToLsa
+00000000001e3800 W ncclTeamRankToWorld
+00000000001e3660 W ncclTeamWorld
+00000000000890a0 W ncclWaitSignal
+00000000000f1b90 W ncclWinGetUserPtr
+00000000000822b0 T pncclAllGather
+00000000000834c0 T pncclAllReduce
+0000000000082bc0 T pncclAlltoAll
+00000000000846e0 T pncclBcast
+0000000000083de0 T pncclBroadcast
+00000000000b8720 T pncclCommAbort
+00000000000b17f0 T pncclCommCount
+00000000000b1e30 T pncclCommCuDevice
+00000000001ccd20 T pncclCommDeregister
+00000000000bba20 T pncclCommDestroy
+00000000000bd3e0 T pncclCommFinalize
+00000000000b0bc0 T pncclCommGetAsyncError
+00000000000b1270 T pncclCommGetUniqueId
+00000000000beea0 T pncclCommGrow
+00000000000bc5d0 T pncclCommInitAll
+00000000000b9360 T pncclCommInitRank
+00000000000b9ee0 T pncclCommInitRankConfig
+00000000000bac60 T pncclCommInitRankScalable
+00000000000febb0 T pncclCommMemStats
+00000000000f0660 T pncclCommQueryProperties
+00000000001cbca0 T pncclCommRegister
+00000000000fe400 T pncclCommResume
+00000000000b7840 T pncclCommRevoke
+00000000000be230 T pncclCommShrink
+00000000000c0a70 T pncclCommSplit
+0000000000100170 T pncclCommSuspend
+00000000000b2470 T pncclCommUserRank
+00000000000f0190 T pncclCommWindowDeregister
+00000000000ef700 T pncclCommWindowRegister
+00000000000f0fe0 T pncclDevCommCreate
+00000000000f1720 T pncclDevCommDestroy
+0000000000084740 T pncclGather
+00000000000b0ab0 T pncclGetErrorString
+00000000000b0ba0 T pncclGetLastError
+00000000000f2e00 T pncclGetLsaDevicePointer
+00000000000f2980 T pncclGetLsaMultimemDevicePointer
+00000000000f25b0 T pncclGetMultimemDevicePointer
+00000000000f32b0 T pncclGetPeerDevicePointer
+00000000000aef70 T pncclGetUniqueId
+00000000000ae390 T pncclGetVersion
+00000000001e38d0 T pncclGinBarrierCreateRequirement
+00000000001e39b0 T pncclGinInboxA2ACreateRequirement
+00000000001e3920 T pncclGinOutboxCreateRequirement
+00000000000a5890 T pncclGroupEnd
+00000000000a5db0 T pncclGroupSimulateEnd
+00000000000a4590 T pncclGroupStart
+00000000001e3a40 T pncclLLA2ACalcSlots
+00000000001e3a70 T pncclLLA2ACreateRequirement
+00000000001e3600 T pncclLsaBarrierCreateRequirement
+00000000000e50d0 T pncclMemAlloc
+00000000000e5bd0 T pncclMemFree
+0000000000087e00 T pncclPutSignal
+00000000000874e0 T pncclRecv
+000000000009ec40 T pncclRedOpCreatePreMulSum
+000000000009f1f0 T pncclRedOpDestroy
+0000000000085060 T pncclReduce
+0000000000085980 T pncclReduceScatter
+000000000008b0d0 T pncclResetDebugInit
+00000000000862a0 T pncclScatter
+0000000000086bc0 T pncclSend
+0000000000088790 T pncclSignal
+00000000001e3690 T pncclTeamLsa
+00000000001e3740 T pncclTeamRail
+00000000001e3830 T pncclTeamRankToLsa
+00000000001e3800 T pncclTeamRankToWorld
+00000000001e3660 T pncclTeamWorld
+00000000000890a0 T pncclWaitSignal
+00000000000f1b90 T pncclWinGetUserPtr
+=== pkg metadata === 
+ls: cannot access '/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime.dist-info': No such file or directory
+DONE 

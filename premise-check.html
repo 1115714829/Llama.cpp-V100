@@ -1,0 +1,226 @@
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --panel-2:#1d212a; --line:#2a2f3a;
+    --fg:#e6e9ef; --muted:#98a2b3; --accent:#5b9cff; --good:#46c98b; --bad:#ff6b6b; --warn:#f5b544;
+    --mono: ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:0 20px 72px;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.65;font-size:16px}
+  .wrap{max-width:1060px;margin:0 auto}
+  header{padding:44px 0 8px;border-bottom:1px solid var(--line);margin-bottom:30px}
+  h1{font-size:1.8rem;line-height:1.25;margin:0 0 10px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:.95rem;margin:0}
+  .badge{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    padding:3px 9px;border-radius:999px;background:rgba(70,201,139,.14);color:var(--good);
+    border:1px solid rgba(70,201,139,.35);margin-right:8px}
+  .badge.warn{background:rgba(245,181,68,.13);color:var(--warn);border-color:rgba(245,181,68,.35)}
+  .badge.bad{background:rgba(255,107,107,.13);color:var(--bad);border-color:rgba(255,107,107,.35)}
+  h2{font-size:1.18rem;margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:1rem;margin:22px 0 10px;color:#cdd5e0}
+  p{margin:10px 0}
+  .muted{color:var(--muted)}
+  ul{margin:10px 0;padding-left:22px} li{margin:6px 0}
+  code,pre{font-family:var(--mono);font-size:.86rem}
+  code{background:var(--panel-2);padding:2px 6px;border-radius:5px;color:#cfe1ff}
+  pre{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:8px;padding:14px 16px;overflow-x:auto;margin:14px 0;color:#d7dee9}
+  .scroll{overflow-x:auto;margin:16px 0}
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:.9rem}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;background:var(--panel)}
+  tbody tr:hover{background:rgba(91,156,255,.05)}
+  td.num{font-family:var(--mono)}
+  .win{color:var(--good);font-weight:600} .lose{color:var(--bad);font-weight:600}
+  .cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:18px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .card .k{font-size:.74rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .card .v{font-size:1.45rem;font-family:var(--mono);margin:6px 0 2px}
+  .card .n{font-size:.82rem;color:var(--muted)}
+  .callout{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
+    border-radius:8px;padding:14px 18px;margin:18px 0}
+  .callout.good{border-left-color:var(--good)} .callout.bad{border-left-color:var(--bad)}
+  .callout h3{margin-top:0}
+  footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Premise check &mdash; is 1cat's 120&ndash;200 tok/s real, and where does the 4&times; gap live?</h1>
+    <p class="sub">
+      <span class="badge">measured on this box</span>
+      <span class="badge warn">corrects the earlier DFlash2 conclusion</span>
+      AC922 &middot; 6&times;V100-SXM2-16GB &middot; 2026-09-20
+    </p>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="k">1cat-vLLM (measured, this box)</div>
+      <div class="v win">221.6&ndash;263.2</div>
+      <div class="n">tok/s, single stream, short context<br>FP8 27B + DFlash2, 4&times;V100 TP4</div>
+    </div>
+    <div class="card">
+      <div class="k">llama.cpp (our best)</div>
+      <div class="v lose">54.9&ndash;58.7</div>
+      <div class="n">tok/s, 3&times;V100 TP3<br>Q2_K_XL+DFlash2 / Q4_K_M+MTP4</div>
+    </div>
+    <div class="card">
+      <div class="k">gap</div>
+      <div class="v">~4&times;</div>
+      <div class="n">but acceptance length is at parity</div>
+    </div>
+    <div class="card">
+      <div class="k">so the gap is</div>
+      <div class="v">per-round latency</div>
+      <div class="n">17.5 ms vs 63&ndash;91 ms per round</div>
+    </div>
+  </div>
+
+  <h2>1. Measured, not theoretical</h2>
+  <p>
+    I started the real production unit <code>/root/llm/systemd/vllm-1cat.service</code> (read-only; the unit file is untouched)
+    and issued three single-stream requests at temp 1.0 / top-p 0.95 / top-k 20, seed 42.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>request</th><th>prompt tok</th><th>completion tok</th><th>wall</th><th>tok/s (incl. prefill)</th><th>finish</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="num">106</td><td class="num">512</td><td class="num">2310 ms</td><td class="num win">221.6</td><td>length (capped)</td></tr>
+        <tr><td>2</td><td class="num">76</td><td class="num">512</td><td class="num">2218 ms</td><td class="num win">230.8</td><td>length (capped)</td></tr>
+        <tr><td>3</td><td class="num">84</td><td class="num">260</td><td class="num">988 ms</td><td class="num win">263.2</td><td>stop (natural)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">
+    Requests 1&ndash;2 were <em>penalised</em> by Triton JIT compilation during inference
+    (<code>_dflash2_sparse_topk_rejection_kernel ... causes a latency spike</code>), so steady state is higher.
+    Same session: <strong>mean acceptance length 5.21</strong>, draft acceptance 60.2%.
+    The journal also holds earlier runs at <strong>AL 7.99&ndash;8.00 / 100% acceptance / 274.6 tok/s</strong> (repeated-context workload).
+  </p>
+  <p>
+    Their unit: model <code>Qwen3.8-27B-FP8</code> (<strong>FP8</strong>), draft <code>Qwen3.8-27B-DFlash2</code> via
+    <code>method=dflash</code>, <code>--tensor-parallel-size 4</code> on GPU 0/1/3/4,
+    <code>--attention-backend FLASH_ATTN_V100</code>, <code>--kv-cache-dtype fp8_e5m2</code>,
+    <code>--max-model-len 262144</code>, <code>--max-num-seqs 1</code>.
+  </p>
+  <div class="callout good">
+    <h3>Verdict: your number is real</h3>
+    <p>
+      Measured <strong>222&ndash;263 tok/s</strong> on this machine. My earlier framing &mdash; that the fast numbers
+      belonged to the NVFP4 path and that plain FP8 was the slow one &mdash; was wrong for short context.
+      (FP8 <em>is</em> slower at 256K: their README lists FP8 256K no-MTP at 41.11 tok/s and NVFP4 256K at 50.376.)
+    </p>
+  </div>
+
+  <h2>2. What their own README says the numbers mean</h2>
+  <p class="muted">All rows 4&times;V100 TP4. They explicitly warn these are not one benchmark.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>their row</th><th>context / contract</th><th>result</th></tr></thead>
+      <tbody>
+        <tr><td>Qwen3.8-27B NVFP4 + DFlash2</td><td>production web prompt, 512 output</td><td class="num">206.06 tok/s (AL 4.686)</td></tr>
+        <tr><td>Qwen3.8-27B NVFP4 + DFlash2</td><td>MBPP item, natural EOS</td><td class="num">251.60 tok/s</td></tr>
+        <tr><td>Qwen3.8 DFlash2 + adaptive lookup q16</td><td>special opt-in repeated-context</td><td class="num">316.27 tok/s</td></tr>
+        <tr><td>Qwen3.8-27B NVFP4, no-MTP</td><td>exact 256K</td><td class="num">50.376 tok/s</td></tr>
+        <tr><td>Qwen3.8-27B FP8, no-MTP</td><td>256K</td><td class="num">41.11 tok/s</td></tr>
+        <tr><td>batched long decode (#268)</td><td>B16 / 16K pure decode</td><td class="num">570.982 tok/s</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    And your own observation &mdash; <em>"before 1.5.0 with MTP4 it was ~40&ndash;60 t/s, DFlash2 greatly increased
+    speed"</em> &mdash; matches our llama.cpp MTP4 numbers exactly (58.7 t/s at 3 cards; 33.97&ndash;56.6 t/s at 256K).
+    <strong>MTP-level parity already holds; the whole gap is DFlash2 execution efficiency.</strong>
+  </p>
+
+  <h2>3. The gap is per-round latency, not draft quality</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>stack</th><th>acceptance length</th><th>ms per round</th><th>tok/s</th></tr></thead>
+      <tbody>
+        <tr><td>1cat-vLLM FP8 + DFlash2 (4&times;V100)</td><td class="num">4.06&ndash;5.21</td><td class="num win">17.463</td><td class="num win">206&ndash;263</td></tr>
+        <tr><td>llama.cpp Q2_K_XL + DFlash2 n=7 (3&times;V100)</td><td class="num win">4.31&ndash;6.22</td><td class="num lose">~91</td><td class="num">54.9</td></tr>
+        <tr><td>llama.cpp Q4_K_M + MTP4 (3&times;V100)</td><td class="num">3.25&ndash;3.78</td><td class="num lose">~63</td><td class="num">58.7</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Our draft quality is <em>equal or better</em>. We simply spend 3.6&ndash;5.2&times; longer per verification round.
+    So the lever is one forward pass at M&asymp;5&ndash;8 &mdash; not the drafter, not <code>n_max</code>, not sampling.
+  </p>
+
+  <h2>4. Two explanations already excluded</h2>
+  <ul>
+    <li><strong>Not quantization bytes.</strong> Theirs: FP8 27 GB over 4 cards &asymp; <strong>6.75 GB/card</strong>.
+        Ours: Q4_K_M 18.5 GB over 3 cards &asymp; <strong>6.2 GB/card</strong>. Comparable, yet 4&times; apart.</li>
+    <li><strong>Not CUDA graphs being off.</strong> Our build has <code>GGML_CUDA_GRAPHS:BOOL=ON</code> (checked in
+        <code>build/CMakeCache.txt</code>), and the arch gate only disables <strong>pre-Volta</strong>
+        (<code>ggml-cuda.cu:4404</code>: <code>cc &lt; GGML_CUDA_CC_VOLTA</code> &rarr; disabled). V100 is allowed.
+        <span class="muted">(Whether the speculation round, whose batch shape changes every round, actually <em>hits</em> a cached graph still needs a separate A/B &mdash; tracked as a follow-up.)</span></li>
+  </ul>
+
+  <h2>5. The structural finding: decode never touches Volta's Tensor Cores</h2>
+  <div class="callout bad">
+    <h3>llama.cpp runs its decode matmul as a GEMV, on zero Tensor Cores</h3>
+    <p>
+      Our own <code>ncu</code> profiling already showed decode is <strong>~77% <code>mul_mat_vec_q</code></strong> &mdash;
+      a pure GEMV. In llama.cpp the only route to Volta's FP16 Tensor Cores is the <code>mmf</code>/FP16-MMA path at
+      <strong><code>ne11 &ge; 64</code></strong>, i.e. <strong>prefill only</strong>. Decode (M=1) and the M&asymp;5&ndash;8
+      speculation verification batch all go through GEMV / <code>dp4a</code>.
+    </p>
+    <p>
+      1cat does the opposite: they run the <strong>M&asymp;5 verification GEMM on Volta Tensor Cores</strong> &mdash;
+      vendored <code>csrc/sm70_turbomind/</code> (lmdeploy SM70 GEMM, <strong>884 = HMMA m8n8k4</strong> tile),
+      plus a dedicated study of exactly this shape set in
+      <code>docs/design/sm70_awq_exact_m5_batched_gemv.md</code>
+      (<code>5&times;17408&times;5120</code>, <code>5&times;5120&times;8704</code>, <code>5&times;8192&times;5120</code>,
+      <code>5&times;5120&times;3072</code>; 236 calls/rank per verification round; accepted operator = TurboMind
+      FP32-accumulating HMMA with <code>CTA_N=32/64</code>, 9.7688 ms, 236/236 bitwise-equal).
+    </p>
+    <p>
+      <strong>The physics:</strong> at M=1 a GEMV is purely bandwidth-bound, so Tensor Cores cannot help &mdash;
+      reading the weights is the entire cost. At <strong>M&asymp;5&ndash;8 the arithmetic intensity rises 5&ndash;8&times;</strong>,
+      the GEMV stops being bandwidth-only, and whoever can use Tensor Cores wins.
+      That is the physical origin of 222&ndash;263 tok/s, and of our 63&ndash;91 ms rounds.
+    </p>
+  </div>
+
+  <h2>6. Correcting the record</h2>
+  <p>
+    My earlier report (<code>phase1a-report.html</code>) concluded "even on a compatible target DFlash2 loses to MTP,
+    so the 120&ndash;200 target rests on FP8 which V100 lacks &mdash; the goal does not hold on this box."
+    <strong>That conclusion is retracted.</strong> Both of its load-bearing reasons were wrong:
+  </p>
+  <ul>
+    <li><em>"DFlash2 is slower than MTP"</em> &mdash; true only of <strong>llama.cpp's unoptimised DFlash2 path</strong>.
+        1cat runs the same DFlash2 idea on the same hardware generation at 222&ndash;263 tok/s.</li>
+    <li><em>"V100 has no FP8, so the premise fails"</em> &mdash; not a barrier: 1cat stores FP8 and bridges it to FP16 compute.
+        Verified live on this machine.</li>
+  </ul>
+  <p class="muted">
+    What still stands from that report: the port is correct (PR #27858 fixed a real crash, host selector verified);
+    and the production <code>TurboFCFusion Q4_K_M</code> target is genuinely incompatible with the base-model
+    DFlash2 drafter (AL 1.2&ndash;1.4) &mdash; a separate, target-side fact.
+  </p>
+  <p><strong>The goal is reachable.</strong> Same hardware generation, comparable weight bytes per card, equal acceptance
+    length. The gap is implementation efficiency in the decode round.</p>
+
+  <h2>7. Levers, in value order</h2>
+  <ul>
+    <li><strong>1. Run the M&asymp;5&ndash;8 quantized matmul on Volta FP16 Tensor Cores (HMMA m8n8k4).</strong>
+        Directly attacks the 4&times;. Landing zone: <code>mmq.cuh</code> / <code>mmq.cu</code>'s Volta dispatch
+        (today ne11 5&ndash;63 goes to MMQ with <code>dp4a</code>). Big engineering, V100-specific &mdash; exactly this project's mandate.</li>
+    <li><strong>2. Verify the speculation round actually hits a CUDA graph.</strong> Cheap: A/B with
+        <code>GGML_CUDA_DISABLE_GRAPHS=1</code>, plus graph-hit counters. Shape churn may be invalidating the key.</li>
+    <li><strong>3. GDN fusion</strong> (their <code>FUSED_GDN_VERIFY</code> / FlashQLA). Low priority: our GDN is only ~1.4% of kernel time.</li>
+    <li><strong>4. Draft-side cost</strong> &mdash; they keep the draft in the graph and quantize the lm_head
+        (<code>VLLM_SM70_DFLASH2_QUANT_LM_HEAD</code>); we read a separate 1.14 GB draft per round.</li>
+  </ul>
+
+  <footer>
+    Reproduce: <code>/root/p32-vllm1cat-bench.sh</code>; log <code>/tmp/vllm1cat-bench.log</code>; responses <code>/tmp/vllm-r{1,2,3}.json</code>.<br>
+    Full record: <code>1cat-vllm-v100-study/premise-check-1cat-vs-llamacpp.md</code> &middot;
+    llama.cpp branch = b11053 + C4 + C5 + PR&nbsp;#27858 port (uncommitted).
+  </footer>
+</div>

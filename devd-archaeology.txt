@@ -1,0 +1,153 @@
+=== p60 logs mentioning draft device / abort === 
+=== abort context === 
+/tmp/p60-ab-bf-tp3-server.log:0.00.487.916 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ab-bf-tp3-server.log:2.38.914.864 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ab-bf-tp3-server.log:2.40.093.967 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ab-nccl-tp3-server.log:0.00.358.060 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ab-nccl-tp4-server.log:0.00.451.172 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ab-nccl-tp6-server.log:0.00.719.921 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-acc-tensor-server.log:0.00.148.818 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-acc-tensor-server.log:0.02.911.553 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-acc-tensor-server.log:0.04.046.961 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-base-tensor-server.log:0.00.252.081 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-base-tensor-server.log:4.10.233.429 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-base-tensor-server.log:4.21.238.579 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ckpt-tensor-server.log:0.00.370.241 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ckpt-tensor-server.log:0.03.402.055 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ckpt-tensor-server.log:0.04.564.914 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-devd-tensor-server.log:0.00.381.925 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-devd-tensor-server.log:0.02.924.962 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-devd-tensor-server.log:/root/libdir-rt/libggml-base.so.0(ggml_abort+0xe4)[0x7fff86525a04]
+/tmp/p60-devd2-tensor-server.log:0.00.370.580 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-devd2-tensor-server.log:0.02.968.076 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-devd2-tensor-server.log:/root/libdir-rt/libggml-base.so.0(ggml_abort+0xe4)[0x7fffa4005a04]
+/tmp/p60-env-debug-server.log:0.00.382.685 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-final-tensor-server.log:0.00.612.748 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-final-tensor-server.log:4.10.794.710 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-final-tensor-server.log:4.21.774.893 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-graph-off-server.log:0.00.344.223 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-graph-off-server.log:0.02.974.346 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-graph-off-server.log:0.04.123.046 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-graph-on-server.log:0.00.382.721 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-graph-on-server.log:1.32.099.898 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-graph-on-server.log:1.33.267.676 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-nw4-server.log:0.00.364.297 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-nw4-server.log:0.03.149.993 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-nw4-server.log:0.04.266.011 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-nw8-server.log:0.00.374.254 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-nw8-server.log:0.08.474.595 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-nw8-server.log:0.09.619.696 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-p2p-tensor-server.log:0.00.344.022 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-p2p-tensor-server.log:0.03.319.730 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-p2p-tensor-server.log:0.04.471.777 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-q2tp1-tensor-server.log:0.00.078.574 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-q2tp1-tensor-server.log:1.31.415.857 W llama_init_from_model: SPLIT_MODE_TENSOR being used for a single device is not recommended
+/tmp/p60-q2tp1-tensor-server.log:1.36.814.898 W llama_init_from_model: SPLIT_MODE_TENSOR being used for a single device is not recommended
+/tmp/p60-ref-tensor-server.log:0.00.148.280 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ref-tensor-server.log:0.03.177.841 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ref-tensor-server.log:0.04.320.671 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-sampt-tensor-server.log:0.00.368.840 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-sampt-tensor-server.log:0.02.924.044 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-sampt-tensor-server.log:0.04.091.324 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-sel-tensor-server.log:0.00.140.688 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-sel-tensor-server.log:0.02.829.283 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-sel-tensor-server.log:0.03.970.296 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-sync-tensor-server.log:0.00.367.951 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-sync-tensor-server.log:0.02.988.415 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-sync-tensor-server.log:0.04.144.484 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ten-n7-server.log:0.00.136.541 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ten-n7-server.log:0.02.908.094 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ten-n7-server.log:0.04.034.394 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-ten-none-server.log:0.00.137.771 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-ten-none-server.log:0.02.908.202 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tgt-tensor-server.log:0.00.378.636 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-tgt-tensor-server.log:0.02.923.953 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tgt-tensor-server.log:0.04.071.634 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tp2-tensor-server.log:0.00.251.616 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-tp4-tensor-server.log:0.00.274.106 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-tp4-tensor-server.log:4.10.485.945 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tp4-tensor-server.log:4.21.558.886 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tp4p2p-tensor-server.log:0.00.473.534 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-tp4p2p-tensor-server.log:0.03.376.075 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tp4p2p-tensor-server.log:0.04.608.260 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tp6p2p-tensor-server.log:0.00.728.770 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+/tmp/p60-tp6p2p-tensor-server.log:0.05.923.910 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+/tmp/p60-tp6p2p-tensor-server.log:0.07.366.837 W internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly
+=== list p60 logs === 
+-rw-r--r-- 1 root root 21789 Sep 20 19:17 /tmp/p60-env-debug-server.log
+-rw-r--r-- 1 root root  1418 Sep 20 19:17 /tmp/p60-env-debug.log
+-rw-r--r-- 1 root root 15665 Sep 20 19:17 /tmp/p60-ab-nccl-layer-server.log
+-rw-r--r-- 1 root root  1700 Sep 20 19:17 /tmp/p60-ab-nccl-layer.log
+-rw-r--r-- 1 root root 15666 Sep 20 19:16 /tmp/p60-ab-bf-layer-server.log
+-rw-r--r-- 1 root root  1607 Sep 20 19:16 /tmp/p60-ab-bf-layer.log
+-rw-r--r-- 1 root root 17153 Sep 20 19:15 /tmp/p60-ab-nccl-tp6-server.log
+-rw-r--r-- 1 root root  1715 Sep 20 19:15 /tmp/p60-ab-nccl-tp6.log
+-rw-r--r-- 1 root root 17953 Sep 20 19:14 /tmp/p60-ab-nccl-tp4-server.log
+-rw-r--r-- 1 root root  1706 Sep 20 19:14 /tmp/p60-ab-nccl-tp4.log
+-rw-r--r-- 1 root root 16694 Sep 20 19:14 /tmp/p60-ab-nccl-tp3-server.log
+-rw-r--r-- 1 root root  1703 Sep 20 19:14 /tmp/p60-ab-nccl-tp3.log
+-rw-r--r-- 1 root root 17744 Sep 20 19:13 /tmp/p60-ab-bf-tp3-server.log
+-rw-r--r-- 1 root root  2100 Sep 20 19:13 /tmp/p60-ab-bf-tp3.log
+-rw-r--r-- 1 root root 17743 Sep 20 18:57 /tmp/p60-final-tensor-server.log
+-rw-r--r-- 1 root root  1196 Sep 20 18:57 /tmp/p60-final-tensor.log
+-rw-r--r-- 1 root root 17852 Sep 20 18:48 /tmp/p60-graph-off-server.log
+-rw-r--r-- 1 root root  1307 Sep 20 18:48 /tmp/p60-graph-off.log
+-rw-r--r-- 1 root root 17744 Sep 20 18:48 /tmp/p60-graph-on-server.log
+-rw-r--r-- 1 root root  1268 Sep 20 18:48 /tmp/p60-graph-on.log
+-rw-r--r-- 1 root root 18691 Sep 20 18:44 /tmp/p60-q2tp1-tensor-server.log
+-rw-r--r-- 1 root root  1040 Sep 20 18:44 /tmp/p60-q2tp3-tensor.log
+-rw-r--r-- 1 root root   399 Sep 20 18:43 /tmp/p60-q2tp3-tensor-server.log
+-rw-r--r-- 1 root root   724 Sep 20 18:41 /tmp/p60-q2tp1-tensor.log
+-rw-r--r-- 1 root root 17064 Sep 20 18:41 /tmp/p60-tp2-tensor-server.log
+-rw-r--r-- 1 root root  1266 Sep 20 18:41 /tmp/p60-tp2-tensor.log
+-rw-r--r-- 1 root root 16468 Sep 20 18:36 /tmp/p60-tgt-tensor-server.log
+-rw-r--r-- 1 root root  1269 Sep 20 18:36 /tmp/p60-tgt-tensor.log
+-rw-r--r-- 1 root root 15871 Sep 20 18:32 /tmp/p60-nw8-server.log
+-rw-r--r-- 1 root root  1262 Sep 20 18:32 /tmp/p60-nw8.log
+-rw-r--r-- 1 root root 17340 Sep 20 18:30 /tmp/p60-nw4-server.log
+-rw-r--r-- 1 root root  1262 Sep 20 18:30 /tmp/p60-nw4.log
+-rw-r--r-- 1 root root  1062 Sep 20 18:25 /tmp/p60-devd2-tensor.log
+-rw-r--r-- 1 root root  4490 Sep 20 18:24 /tmp/p60-devd2-tensor-server.log
+-rw-r--r-- 1 root root  1061 Sep 20 18:24 /tmp/p60-devd-tensor.log
+-rw-r--r-- 1 root root  4490 Sep 20 18:24 /tmp/p60-devd-tensor-server.log
+-rw-r--r-- 1 root root 15068 Sep 20 18:20 /tmp/p60-tp6p2p-layer-server.log
+-rw-r--r-- 1 root root  1279 Sep 20 18:20 /tmp/p60-tp6p2p-layer.log
+-rw-r--r-- 1 root root 16943 Sep 20 18:19 /tmp/p60-tp6p2p-tensor-server.log
+-rw-r--r-- 1 root root  1285 Sep 20 18:19 /tmp/p60-tp6p2p-tensor.log
+-rw-r--r-- 1 root root 16348 Sep 20 18:18 /tmp/p60-tp4p2p-tensor-server.log
+-rw-r--r-- 1 root root  1277 Sep 20 18:18 /tmp/p60-tp4p2p-tensor.log
+-rw-r--r-- 1 root root 17072 Sep 20 18:14 /tmp/p60-ckpt-tensor-server.log
+-rw-r--r-- 1 root root  1270 Sep 20 18:14 /tmp/p60-ckpt-tensor.log
+-rw-r--r-- 1 root root 16590 Sep 20 18:08 /tmp/p60-sampt-tensor-server.log
+-rw-r--r-- 1 root root  1271 Sep 20 18:08 /tmp/p60-sampt-tensor.log
+-rw-r--r-- 1 root root 15474 Sep 20 18:04 /tmp/p60-sync-tensor-server.log
+-rw-r--r-- 1 root root  1270 Sep 20 18:04 /tmp/p60-sync-tensor.log
+-rw-r--r-- 1 root root 13774 Sep 20 17:58 /tmp/p60-p2p-tensor-server.log
+-rw-r--r-- 1 root root  1269 Sep 20 17:58 /tmp/p60-p2p-tensor.log
+-rw-r--r-- 1 root root 13774 Sep 20 17:58 /tmp/p60-ref-tensor-server.log
+-rw-r--r-- 1 root root  1242 Sep 20 17:58 /tmp/p60-ref-tensor.log
+-rw-r--r-- 1 root root 13774 Sep 20 17:53 /tmp/p60-acc-tensor-server.log
+-rw-r--r-- 1 root root  1242 Sep 20 17:53 /tmp/p60-acc-tensor.log
+-rw-r--r-- 1 root root 12607 Sep 20 17:50 /tmp/p60-sel-tensor-server.log
+-rw-r--r-- 1 root root  1242 Sep 20 17:50 /tmp/p60-sel-tensor.log
+-rw-r--r-- 1 root root  1047 Sep 20 17:49 /tmp/p60-ten-n7.log
+-rw-r--r-- 1 root root  4829 Sep 20 17:49 /tmp/p60-ten-n7-server.log
+-rw-r--r-- 1 root root  8107 Sep 20 17:48 /tmp/p60-ten-none-server.log
+-rw-r--r-- 1 root root  1019 Sep 20 17:48 /tmp/p60-ten-none.log
+-rw-r--r-- 1 root root 10657 Sep 20 17:47 /tmp/p60-lay-n7-server.log
+-rw-r--r-- 1 root root  1234 Sep 20 17:47 /tmp/p60-lay-n7.log
+-rw-r--r-- 1 root root 16282 Sep 20 17:46 /tmp/p60-lay-n1-server.log
+-rw-r--r-- 1 root root  1235 Sep 20 17:46 /tmp/p60-lay-n1.log
+-rw-r--r-- 1 root root  7916 Sep 20 17:45 /tmp/p60-lay-none-server.log
+-rw-r--r-- 1 root root  1016 Sep 20 17:45 /tmp/p60-lay-none.log
+-rw-r--r-- 1 root root 10658 Sep 20 17:40 /tmp/p60-tp4-layer-server.log
+-rw-r--r-- 1 root root  1166 Sep 20 17:40 /tmp/p60-tp4-layer.log
+-rw-r--r-- 1 root root 11451 Sep 20 17:35 /tmp/p60-tp4-tensor-server.log
+-rw-r--r-- 1 root root  1173 Sep 20 17:35 /tmp/p60-tp4-tensor.log
+-rw-r--r-- 1 root root 10658 Sep 20 17:29 /tmp/p60-rt-layer-server.log
+-rw-r--r-- 1 root root  1161 Sep 20 17:29 /tmp/p60-rt-layer.log
+-rw-r--r-- 1 root root 10628 Sep 20 17:19 /tmp/p60-base-tensor-server.log
+-rw-r--r-- 1 root root  1147 Sep 20 17:19 /tmp/p60-base-tensor.log
+-rw-r--r-- 1 root root  9750 Sep 20 17:14 /tmp/p60-base-layer-server.log
+-rw-r--r-- 1 root root  1142 Sep 20 17:14 /tmp/p60-base-layer.log
+DONE 

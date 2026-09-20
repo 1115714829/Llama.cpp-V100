@@ -1,0 +1,16 @@
+cuh reverted
+cu reverted
+=== residual references (expect none) ===
+ggml/src/ggml-cuda/mmvq.cuh:0
+ggml/src/ggml-cuda/mmvq.cu:0
+=== server md5 (LF) ===
+dfd78c4f3b8eae6a402c58cc6ea05497  ggml/src/ggml-cuda/mmvq.cuh
+ffe63a60bac7fd0c2ad9034adbd352ce  ggml/src/ggml-cuda/mmvq.cu
+=== as CRLF (to compare with the Windows tree) ===
+52288c1e997b4116b023e237f9c2d6ec  -
+905574967a547db2e97389b897d6a5a6  -
+=== ppl both arms ===
+0.00.369.660 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.28.705.992 I Final estimate: PPL = 3.7751 +/- 0.06410
+REVERT_DONE
+DONE 

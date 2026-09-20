@@ -1,0 +1,89 @@
+=== perplexity binaries in libdirs === 
+ls: cannot access '/root/libdir-rt/llama-perplexity': No such file or directory
+ls: cannot access '/root/libdir-goal-base/llama-perplexity': No such file or directory
+-rwxr-xr-x 1 root root 209944 Sep 20 16:13 /root/libdir-rt/llama-bench
+=== candidate corpus files === 
+/root/llm/models:
+total 32
+drwxr-xr-x 4 root root 4096 Aug 31 15:43 Qwen3.8-27B-DFlash2
+drwxr-xr-x 2 root root 4096 Aug 31 16:51 Qwen3.8-27B-DFlash2-FP8
+drwxr-xr-x 2 root root 4096 Sep 10 15:27 Qwen3.8-27B-DFlash2-GGUF
+drwxr-xr-x 3 root root 4096 Aug 18 11:30 Qwen3.8-27B-FP8
+drwxr-xr-x 2 root root 4096 Sep 20 16:12 Qwen3.8-27B-GGUF
+drwxr-xr-x 4 root root 4096 Aug 31 15:47 Qwen3.8-27B-NVFP4-DFlash2
+drwxr-xr-x 3 root root 4096 Sep  5 11:59 Qwen3.8-27B-QUASAR-NVFP4
+drwxr-xr-x 2 root root 4096 Sep 10 11:37 Qwen3.8-27B-TurboFCFusion-gguf
+
+/root/llm/test/v100-opt/llama.cpp/tests:
+total 2160
+-rwxrwxrwx 1 1000 1000  16238 Sep 20 00:17 CMakeLists.txt
+drwxrwxrwx 2 1000 1000   4096 Sep 20 00:17 fusion
+-rwxrwxrwx 1 1000 1000  23987 Sep 20 00:17 gguf-model-data.cpp
+-rwxrwxrwx 1 1000 1000   2036 Sep 20 00:17 gguf-model-data.h
+drwxrwxrwx 2 1000 1000   4096 Sep 20 00:17 peg-parser
+drwxrwxrwx 2 1000 1000   4096 Sep 20 00:17 snapshots
+-rwxrwxrwx 1 1000 1000  25796 Sep 20 00:17 test-alloc.cpp
+-rwxrwxrwx 1 1000 1000  17681 Sep 20 00:17 test-arg-parser.cpp
+-rwxrwxrwx 1 1000 1000    701 Sep 20 00:17 test-autorelease.cpp
+-rwxrwxrwx 1 1000 1000 534033 Sep 20 00:17 test-backend-ops.cpp
+-rwxrwxrwx 1 1000 1000  90813 Sep 20 00:17 test-backend-sampler.cpp
+-rwxrwxrwx 1 1000 1000   7907 Sep 20 00:17 test-barrier.cpp
+-rwxrwxrwx 1 1000 1000  23886 Sep 20 00:17 test-batch-alloc.cpp
+-rwxrwxrwx 1 1000 1000     41 Sep 20 00:17 test-c.c
+-rwxrwxrwx 1 1000 1000  26447 Sep 20 00:17 test-chat-analysis.cpp
+-rwxrwxrwx 1 1000 1000 127402 Sep 20 00:17 test-chat-auto-parser.cpp
+-rwxrwxrwx 1 1000 1000  48730 Sep 20 00:17 test-chat-peg-parser.cpp
+-rwxrwxrwx 1 1000 1000  69799 Sep 20 00:17 test-chat-template.cpp
+-rwxrwxrwx 1 1000 1000 321325 Sep 20 00:17 test-chat.cpp
+-rwxrwxrwx 1 1000 1000   6865 Sep 20 00:17 test-col2im-1d.cpp
+-rwxrwxrwx 1 1000 1000   1894 Sep 20 00:17 test-double-float.cpp
+-rwxrwxrwx 1 1000 1000   6684 Sep 20 00:17 test-export-graph-ops.cpp
+-rwxrwxrwx 1 1000 1000  23741 Sep 20 00:17 test-fusion.cpp
+-rwxrwxrwx 1 1000 1000   3511 Sep 20 00:17 test-gbnf-validator.cpp
+-rwxrwxrwx 1 1000 1000   7105 Sep 20 00:17 test-gguf-model-data.cpp
+-rwxrwxrwx 1 1000 1000  54092 Sep 20 00:17 test-gguf.cpp
+-rwxrwxrwx 1 1000 1000  43955 Sep 20 00:17 test-grammar-integration.cpp
+-rwxrwxrwx 1 1000 1000  40769 Sep 20 00:17 test-grammar-llguidance.cpp
+-rwxrwxrwx 1 1000 1000  18992 Sep 20 00:17 test-grammar-parser.cpp
+-rwxrwxrwx 1 1000 1000  82596 Sep 20 00:17 test-jinja.cpp
+-rwxrwxrwx 1 1000 1000  51203 Sep 20 00:17 test-json-schema-to-grammar.cpp
+-rwxrwxrwx 1 1000 1000  25447 Sep 20 00:17 test-json-schema.cpp
+-rwxrwxrwx 1 1000 1000  40101 Sep 20 00:17 test-llama-archs.cpp
+-rwxrwxrwx 1 1000 1000  11708 Sep 20 00:17 test-llama-grammar.cpp
+-rwxrwxrwx 1 1000 1000   1348 Sep 20 00:17 test-log.cpp
+-rwxrwxrwx 1 1000 1000   5792 Sep 20 00:17 test-lora-conversion-inference.sh
+-rwxrwxrwx 1 1000 1000    810 Sep 20 00:17 test-model-load-cancel.cpp
+-rwxrwxrwx 1 1000 1000  20612 Sep 20 00:17 test-model-resolution.cpp
+-rwxrwxrwx 1 1000 1000   7296 Sep 20 00:17 test-mtmd-c-api.c
+-rwxrwxrwx 1 1000 1000   5015 Sep 20 00:17 test-mtmd-impl.cpp
+-rwxrwxrwx 1 1000 1000  41320 Sep 20 00:17 test-opt.cpp
+-rwxrwxrwx 1 1000 1000    650 Sep 20 00:17 test-peg-parser.cpp
+-rwxrwxrwx 1 1000 1000  19633 Sep 20 00:17 test-quant-type-selection.cpp
+-rwxrwxrwx 1 1000 1000  11424 Sep 20 00:17 test-quantize-fns.cpp
+-rwxrwxrwx 1 1000 1000  14236 Sep 20 00:17 test-quantize-perf.cpp
+-rwxrwxrwx 1 1000 1000  16668 Sep 20 00:17 test-quantize-stats.cpp
+-rwxrwxrwx 1 1000 1000  23034 Sep 20 00:17 test-reasoning-budget.cpp
+-rwxrwxrwx 1 1000 1000  17497 Sep 20 00:17 test-recurrent-state-rollback.cpp
+-rwxrwxrwx 1 1000 1000   8410 Sep 20 00:17 test-rope.cpp
+-rwxrwxrwx 1 1000 1000   1675 Sep 20 00:17 test-rpc-multi-server.cpp
+-rwxrwxrwx 1 1000 1000    998 Sep 20 00:17 test-rpc-multi-server.sh
+-rwxrwxrwx 1 1000 1000   1847 Sep 20 00:17 test-rset-release.cpp
+-rwxrwxrwx 1 1000 1000  18085 Sep 20 00:17 test-sampling.cpp
+-rwxrwxrwx 1 1000 1000  25438 Sep 20 00:17 test-save-load-state.cpp
+-rwxrwxrwx 1 1000 1000   4653 Sep 20 00:17 test-state-restore-fragmented.cpp
+-rwxrwxrwx 1 1000 1000   5896 Sep 20 00:17 test-thread-safety.cpp
+-rwxrwxrwx 1 1000 1000  11891 Sep 20 00:17 test-tokenizer-0.cpp
+-rwxrwxrwx 1 1000 1000   2050 Sep 20 00:17 test-tokenizer-0.py
+-rwxrwxrwx 1 1000 1000   1192 Sep 20 00:17 test-tokenizer-0.sh
+-rwxrwxrwx 1 1000 1000   5022 Sep 20 00:17 test-tokenizer-1-bpe.cpp
+-rwxrwxrwx 1 1000 1000   3769 Sep 20 00:17 test-tokenizer-1-spm.cpp
+-rwxrwxrwx 1 1000 1000  22757 Sep 20 00:17 test-tokenizer-random.py
+-rwxrwxrwx 1 1000 1000    936 Sep 20 00:17 test-tokenizers-repo.sh
+-rwxrwxrwx 1 1000 1000    613 Sep 20 00:17 test-unicode.cpp
+-rwxrwxrwx 1 1000 1000   7868 Sep 20 00:17 testing.h
+=== build still running? === 
+1142119 bash -c pgrep -af build-nccl-inner; tail -3 /tmp/build-nccl.log
+d52347fa4d186aa592f1d7f1331b2323  /root/libdir-nccl/libllama.so.0.4.1
+2d63d90bd84ba98e607fda502b5b36ac  /root/libdir-nccl/libllama-common.so.0.4.1
+BUILD_NCCL_DONE
+DONE 

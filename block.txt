@@ -1,0 +1,27 @@
+Sun Sep 20 19:39:13 CST 2026
+MARK
+1
+1
+1
+FINAL2
+prompt1: tg=80.42 tok/s  AL=5.21
+prompt2: tg=63.47 tok/s  AL=4.11
+prompt3: tg=92.81 tok/s  AL=6.08
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=80.42
+prompt1: tg=95.20 tok/s  AL=5.55
+prompt2: tg=78.21 tok/s  AL=4.22
+prompt3: tg=112.07 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=95.20
+PPL
+corpus: 6737ebfc032119d7daa00ae5046252c2  bytes=336180
+##### PPL ARM bf  libdir=/root/libdir-rt  ldextra=
+##### PPL ARM nccl  libdir=/root/libdir-nccl  ldextra=/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib
+0.28.705.992 I Final estimate: PPL = 3.7751 +/- 0.06410
+Q8
+q8-mmq     prompt1: tg=64.47 tok/s  AL=4.37 prompt2: tg=59.42 tok/s  AL=3.90 prompt3: tg=92.25 tok/s  AL=6.38 MEDIAN_TG=64.47 
+q8-mmvq2   prompt1: tg=93.54 tok/s  AL=5.55 prompt2: tg=75.82 tok/s  AL=4.22 prompt3: tg=108.10 tok/s  AL=6.38 MEDIAN_TG=93.54 
+q8-mmq2    prompt1: tg=64.93 tok/s  AL=4.37 prompt2: tg=59.12 tok/s  AL=3.90 prompt3: tg=91.70 tok/s  AL=6.38 MEDIAN_TG=64.93 
+Q8MMQ_AB_DONE
+DONE 

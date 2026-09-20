@@ -1,0 +1,7 @@
+=== import + kernel summary ===
+ERROR: Input file not a .nsys-rep, .qdrep or .sqlite file.
+
+usage: nsys stats [<args>] <input-file>
+Try 'nsys stats --help' for more information.
+NSYS_STATS_DONE
+DONE 

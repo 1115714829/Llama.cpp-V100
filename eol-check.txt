@@ -1,0 +1,28 @@
+=== server: lf vs crlf md5 === 
+common/common.cpp                             server_lf=4cddd204ea4601957b978e84dbacaff4  server_as_crlf=32115fa0796960a6d30cf3eaa6c48e88
+common/sampling.cpp                           server_lf=7b9712a0ac9367aab931d314d1b60744  server_as_crlf=219982226cb3e4e21704396ede9deaf2
+common/speculative.cpp                        server_lf=e8f8c5cb969a8482787dd9d87a742185  server_as_crlf=b213a18beb64680c478b57cde8db37eb
+common/speculative.h                          server_lf=67a6fb10c931d6df0fbece158032d6d8  server_as_crlf=c78876777f889a71ef7b2d846aa37888
+ggml/src/ggml-cuda/mmvq.cu                    server_lf=ffe63a60bac7fd0c2ad9034adbd352ce  server_as_crlf=905574967a547db2e97389b897d6a5a6
+ggml/src/ggml-cuda/mmvq.cuh                   server_lf=dfd78c4f3b8eae6a402c58cc6ea05497  server_as_crlf=52288c1e997b4116b023e237f9c2d6ec
+src/llama-context.cpp                         server_lf=a64c791c28b4d24aa9b0fc1c440710bc  server_as_crlf=30000e4eef188c11df56d7c6377e546f
+src/llama-context.h                           server_lf=a07ad186cb954d2d30b0ba332877a37d  server_as_crlf=89d0e8851a964011bb0a2c6ea44a814e
+src/llama-ext.h                               server_lf=0f1dc7143eede59a907d42df8458ed40  server_as_crlf=84ce45439341a507e6b4a97f43e5c8e7
+src/llama-model.cpp                           server_lf=faab7438926e7f42b5de41a271486909  server_as_crlf=f16735175374626363597947845c387c
+src/llama-model.h                             server_lf=dff70377d5c0b1bac077632d69defcba  server_as_crlf=ddb38f9da32a06d23b7ce815cfae4216
+src/models/dflash.cpp                         server_lf=1468a237b1a95e4e33504b1cf0824833  server_as_crlf=d5db7e6f7c8263e3e9fa67261f805fc8
+tools/server/server-context.cpp               server_lf=0e8012005994a74e38d512b29ec45e50  server_as_crlf=3d47149f06d61ade4d86e98059d20f18
+--- line-ending sample (first CR byte if any) ---
+common/speculative.cpp:     C++ source, UTF-8 Unicode text
+src/llama-context.cpp:      C source, ASCII text
+ggml/src/ggml-cuda/mmvq.cu: C source, ASCII text
+EOLCHECK_DONE
+=== local: git ls-files --eol === 
+i/lf    w/crlf  attr/                 	common/common.cpp
+i/lf    w/crlf  attr/                 	common/speculative.cpp
+i/lf    w/crlf  attr/                 	ggml/src/ggml-cuda/mmvq.cu
+i/lf    w/crlf  attr/                 	src/llama-context.cpp
+i/lf    w/crlf  attr/                 	src/llama.cpp
+=== local: core.autocrlf === 
+true
+DONE 

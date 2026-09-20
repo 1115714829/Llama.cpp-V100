@@ -1,0 +1,38 @@
+llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+
+Volta decode / speculative-verify kernel selection:
+- add MMVQ_PARAMETERS_VOLTA and route CC 700-749 to it; Volta previously fell
+  through to the generic table. ncols_dst=1 -> nwarps=2 (measured best on AC922:
+  8=32.05, 4=36.23, 2=37.52, 1=37.24 tok/s single card), ncols 2-4 -> 4, 5-8 -> 2.
+- add the Volta mmvq/mmq crossover for K-quants: MMVQ_VOLTA_MAX_BATCH_SIZE_K 4,
+  so ne11 <= 4 keeps MMVQ and 5..63 uses MMQ (measured: ne11=8 +2.6%, ne11=6 +1.1%,
+  ne11=4 MMVQ still better by 1.2%). Legacy dp4a quants (e.g. Q8_0) intentionally
+  keep the existing limit of 8: routing them to MMQ at ne11=8 measured -31%.
+- no MMA path is touched; prefill above the crossover still uses MMQ.
+
+DFlash2 draft (--spec-type draft-dflash) with --split-mode tensor:
+- port the CPU-side selector and split-mode aware gating (upstream #27858):
+  use_cpu_selector + TENSOR_SKIP, load_dflash2_selector(),
+  build_dflash2_selector_cpu(), common_speculative_is_block_draft()/_block_draft_n_ubatch(),
+  llama_model_get_split_mode(). Fixes a hard ggml_abort during model load when
+  tensor split and a block draft are combined.
+- parallelize build_dflash2_selector_cpu() over the block positions: the 8 positions
+  are independent, so each gets its own thread with unchanged per-position arithmetic
+  (bit-identical output). 23.45 -> 4.29 ms/round; selector cost was 25% of the round.
+
+Measurement probes, all env-gated and free when unset:
+- LLAMA_ROUND_TIMING: build/alloc/set-inputs/graph_compute and graph reuse counters.
+- LLAMA_SPEC_TIMING: draft() phases (draft_decode / selector / walk).
+- [RT] stderr probes in llama-context, sampling and server-context for the remaining
+  unattributed parts of a round.
+
+Measured on AC922 (3x V100 same NUMA, Qwen3.8-27B-Q8_0 + official DFlash2 draft n=7,
+ctx 8192, official thinking sampling, seed 42, fixed 3-prompt set, drop_caches):
+single-stream decode median 55.95 -> 95.20 tok/s. The larger part of that comes from
+enabling NCCL, which is a build flag, not a source change: this box already ships
+NCCL 2.29.7, so configure with
+  -DNCCL_INCLUDE_DIR=<nccl>/include -DNCCL_LIBRARY=<nccl>/lib/libnccl.so.2
+Without it the allreduce chain falls back to the meta-backend butterfly. PPL over a
+fixed 336 KB corpus is 3.7745 (butterfly) -> 3.7751 (NCCL), a +0.016% change.
+
+Assisted-by: Qwen Code

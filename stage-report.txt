@@ -1,0 +1,8 @@
+=== HEAD (base) === 
+79504e72b llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+b11053-1-g79504e72b
+=== stage all === 
+=== git status --porcelain (staged) === 
+=== git diff --cached --stat === 
+=== untracked left === 
+DONE 

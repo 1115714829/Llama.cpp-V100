@@ -1,0 +1,44 @@
+=== queue === 
+1165081 bash /root/final-nccl.sh
+1171028 bash -c for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do if grep -q FINAL_NCCL_DONE /tmp/final-nccl.log 2>/dev/null; then break; fi; sleep 30; done; echo ===FINAL===; cat /tmp/final-nccl.log; echo ===ENVS===; grep -aE '^##### ENV ARM|MEDIAN_TG=' /tmp/nccl-env-sweep.log; echo ===KNOBS===; grep -aE '^##### KNOB ARM|MEDIAN_TG=' /tmp/nccl-knobs2.log 2>/dev/null
+1181708 bash /root/ppl-after-final.sh
+1183249 tee -a /tmp/final-nccl-summary.log
+=== sweep arms === 
+##### ENV ARM env-debug cards=0,1,2 env='NCCL_DEBUG=INFO'
+MEDIAN_TG=94.22
+##### ENV ARM env-plain cards=0,1,2 env=''
+MEDIAN_TG=94.02
+##### ENV ARM env-tp2 cards=0,1 env='NCCL_DEBUG=WARN'
+MEDIAN_TG=80.38
+##### ENV ARM env-ring cards=0,1,2 env='NCCL_ALGO=Ring'
+MEDIAN_TG=93.40
+##### ENV ARM env-ll cards=0,1,2 env='NCCL_PROTO=LL,Simple'
+MEDIAN_TG=93.44
+##### ENV ARM env-1ch cards=0,1,2 env='NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1 NCCL_NTHREADS=128'
+MEDIAN_TG=77.67
+##### ENV ARM env-ring1ch cards=0,1,2 env='NCCL_ALGO=Ring NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1'
+MEDIAN_TG=86.49
+##### ENV ARM env-ringll cards=0,1,2 env='NCCL_ALGO=Ring NCCL_PROTO=LL,Simple NCCL_MIN_NCHANNELS=1 NCCL_MAX_NCHANNELS=1'
+MEDIAN_TG=86.37
+env-debug    prompt1: tg=94.22 tok/s  AL=5.55 prompt2: tg=76.20 tok/s  AL=4.22 prompt3: tg=109.62 tok/s  AL=6.38 MEDIAN_TG=94.22 
+env-plain    prompt1: tg=94.02 tok/s  AL=5.55 prompt2: tg=75.27 tok/s  AL=4.22 prompt3: tg=108.68 tok/s  AL=6.38 MEDIAN_TG=94.02 
+env-tp2      prompt1: tg=80.38 tok/s  AL=4.87 prompt2: tg=78.95 tok/s  AL=4.64 prompt3: tg=110.51 tok/s  AL=6.67 MEDIAN_TG=80.38 
+env-ring     prompt1: tg=93.40 tok/s  AL=5.55 prompt2: tg=76.15 tok/s  AL=4.22 prompt3: tg=107.13 tok/s  AL=6.38 MEDIAN_TG=93.40 
+env-ll       prompt1: tg=93.44 tok/s  AL=5.55 prompt2: tg=75.74 tok/s  AL=4.22 prompt3: tg=109.49 tok/s  AL=6.38 MEDIAN_TG=93.44 
+env-1ch      prompt1: tg=77.67 tok/s  AL=5.49 prompt2: tg=65.48 tok/s  AL=4.48 prompt3: tg=93.70 tok/s  AL=6.62 MEDIAN_TG=77.67 
+env-ring1ch  prompt1: tg=86.49 tok/s  AL=5.49 prompt2: tg=74.16 tok/s  AL=4.48 prompt3: tg=105.74 tok/s  AL=6.62 MEDIAN_TG=86.49 
+env-ringll   prompt1: tg=86.37 tok/s  AL=5.49 prompt2: tg=74.18 tok/s  AL=4.48 prompt3: tg=105.45 tok/s  AL=6.62 MEDIAN_TG=86.37 
+NCCL_ENV_SWEEP_DONE
+=== final log === 
+=== waiting for NCCL env sweep to finish ===
+env sweep done
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+lrwxrwxrwx 1 root root 102 Sep 20 19:22 /root/libdir-nccl/libnccl.so.2 -> /root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2
+##### FINAL ARM final-bf-tp3 libdir=/root/libdir-rt split=tensor
+=== ppl log === 
+DONE 

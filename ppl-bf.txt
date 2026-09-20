@@ -1,0 +1,22 @@
+=== ppl-bf tail 25 === 
+env: '/root/libdir-rt/llama-perplexity': No such file or directory
+=== ppl-bf size === 
+   1 /tmp/ppl-bf.log
+  32 /tmp/ppl-nccl.log
+  33 total
+=== ppl-nccl estimate === 
+0.28.705.992 I Final estimate: PPL = 3.7751 +/- 0.06410
+=== finish-ppl tail === 
+2, 1 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+corpus: 6737ebfc032119d7daa00ae5046252c2  bytes=336180
+##### PPL ARM bf  libdir=/root/libdir-rt  ldextra=
+exit=127  ed1b2f7fe61e300040d82ff392cfc15e libggml-cuda
+##### PPL ARM nccl  libdir=/root/libdir-nccl  ldextra=/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib
+exit=0  faf9cc468a0a263997e15c7f885c75b9 libggml-cuda
+0.28.705.992 I Final estimate: PPL = 3.7751 +/- 0.06410
+PPL_AB_DONE
+FINISH_PPL_DONE
+DONE 

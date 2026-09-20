@@ -1,0 +1,47 @@
+===Q8LOG===
+=== patch ===
+patched ok
+ggml/src/ggml-cuda/mmvq.cuh:11:#define MMVQ_VOLTA_MAX_BATCH_SIZE_LEGACY 4
+ggml/src/ggml-cuda/mmvq.cu:381:                return ne11 <= MMVQ_VOLTA_MAX_BATCH_SIZE_LEGACY;
+[ 99%] Built target llama-server
+[100%] Built target llama-cli-impl
+[100%] Built target llama-cli
+[100%] Built target llama-app
+e890211aa3dbfbcfc611c5ba9aef73ac  /root/libdir-nccl-q8mmq/libggml-cuda.so.0.24.0
+faf9cc468a0a263997e15c7f885c75b9  /root/libdir-nccl/libggml-cuda.so.0.24.0
+=== A/B: MMVQ@8 (current) vs MMQ@8 (patched) ===
+##### Q8 ARM q8-mmvq libdir=/root/libdir-nccl
+MEDIAN_TG=93.86
+##### Q8 ARM q8-mmq libdir=/root/libdir-nccl-q8mmq
+MEDIAN_TG=64.47
+##### Q8 ARM q8-mmvq2 libdir=/root/libdir-nccl
+MEDIAN_TG=93.54
+##### Q8 ARM q8-mmq2 libdir=/root/libdir-nccl-q8mmq
+MEDIAN_TG=64.93
+=== medians ===
+q8-mmvq    prompt1: tg=93.86 tok/s  AL=5.55 prompt2: tg=75.32 tok/s  AL=4.22 prompt3: tg=107.93 tok/s  AL=6.38 MEDIAN_TG=93.86 
+q8-mmq     prompt1: tg=64.47 tok/s  AL=4.37 prompt2: tg=59.42 tok/s  AL=3.90 prompt3: tg=92.25 tok/s  AL=6.38 MEDIAN_TG=64.47 
+q8-mmvq2   prompt1: tg=93.54 tok/s  AL=5.55 prompt2: tg=75.82 tok/s  AL=4.22 prompt3: tg=108.10 tok/s  AL=6.38 MEDIAN_TG=93.54 
+q8-mmq2    prompt1: tg=64.93 tok/s  AL=4.37 prompt2: tg=59.12 tok/s  AL=3.90 prompt3: tg=91.70 tok/s  AL=6.38 MEDIAN_TG=64.93 
+Q8MMQ_AB_DONE
+===FORMAL2===
+prompt1: tg=80.42 tok/s  AL=5.21
+prompt2: tg=63.47 tok/s  AL=4.11
+prompt3: tg=92.81 tok/s  AL=6.08
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=80.42
+prompt1: tg=95.20 tok/s  AL=5.55
+prompt2: tg=78.21 tok/s  AL=4.22
+prompt3: tg=112.07 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=95.20
+final-bf-tp3     prompt1: tg=80.42 tok/s  AL=5.21 prompt2: tg=63.47 tok/s  AL=4.11 prompt3: tg=92.81 tok/s  AL=6.08 MEDIAN_TG=80.42 
+final-nccl-tp3   prompt1: tg=95.20 tok/s  AL=5.55 prompt2: tg=78.21 tok/s  AL=4.22 prompt3: tg=112.07 tok/s  AL=6.38 MEDIAN_TG=95.20 
+FINAL_NCCL_DONE
+===PPL===
+corpus: 6737ebfc032119d7daa00ae5046252c2  bytes=336180
+##### PPL ARM bf  libdir=/root/libdir-rt  ldextra=
+##### PPL ARM nccl  libdir=/root/libdir-nccl  ldextra=/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib
+0.28.705.992 I Final estimate: PPL = 3.7751 +/- 0.06410
+FINISH_PPL_DONE
+DONE 

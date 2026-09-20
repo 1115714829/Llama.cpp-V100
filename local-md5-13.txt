@@ -1,0 +1,41 @@
+=== local md5 of the 13 modified files ===
+MD5 的 common\common.cpp 哈希:
+32115fa0796960a6d30cf3eaa6c48e88
+CertUtil: -hashfile 命令成功完成。
+MD5 的 common\sampling.cpp 哈希:
+219982226cb3e4e21704396ede9deaf2
+CertUtil: -hashfile 命令成功完成。
+MD5 的 common\speculative.cpp 哈希:
+b213a18beb64680c478b57cde8db37eb
+CertUtil: -hashfile 命令成功完成。
+MD5 的 common\speculative.h 哈希:
+c78876777f889a71ef7b2d846aa37888
+CertUtil: -hashfile 命令成功完成。
+MD5 的 ggml\src\ggml-cuda\mmvq.cu 哈希:
+905574967a547db2e97389b897d6a5a6
+CertUtil: -hashfile 命令成功完成。
+MD5 的 ggml\src\ggml-cuda\mmvq.cuh 哈希:
+52288c1e997b4116b023e237f9c2d6ec
+CertUtil: -hashfile 命令成功完成。
+MD5 的 src\llama-context.cpp 哈希:
+30000e4eef188c11df56d7c6377e546f
+CertUtil: -hashfile 命令成功完成。
+MD5 的 src\llama-context.h 哈希:
+89d0e8851a964011bb0a2c6ea44a814e
+CertUtil: -hashfile 命令成功完成。
+MD5 的 src\llama-ext.h 哈希:
+84ce45439341a507e6b4a97f43e5c8e7
+CertUtil: -hashfile 命令成功完成。
+MD5 的 src\llama-model.cpp 哈希:
+f16735175374626363597947845c387c
+CertUtil: -hashfile 命令成功完成。
+MD5 的 src\llama-model.h 哈希:
+ddb38f9da32a06d23b7ce815cfae4216
+CertUtil: -hashfile 命令成功完成。
+MD5 的 src\models\dflash.cpp 哈希:
+d5db7e6f7c8263e3e9fa67261f805fc8
+CertUtil: -hashfile 命令成功完成。
+MD5 的 tools\server\server-context.cpp 哈希:
+3d47149f06d61ade4d86e98059d20f18
+CertUtil: -hashfile 命令成功完成。
+DONE 

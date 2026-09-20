@@ -1,0 +1,26 @@
+1cat-vLLM fork-point diff aggregated by top-level directory
+base = 4ff865c38eac3c3602c064fd43b00836805cd0a4 (vllm v0.21.1rc0-438)
+head = b711d5304525dfc0cca6bc8a0bb005f33fe1bbf8 (1cat-vLLM main)
+generated from: git -C 1cat-vllm diff --numstat <base>..HEAD
+
+FILES   ADDED       REMOVED     TOP-LEVEL
+---------------------------------------------------------------
+437     +136564     -3348       vllm
+290     +63163      -136        tests
+261     +128510     -19         benchmarks
+221     +83801      -78         csrc
+127     +84739      -10         docs
+30      +19771      -0          flash-attention-v100
+23      +7398       -0          flash_qla
+13      +206        -239        requirements
+12      +4216       -172        (file)
+11      +1227       -2          tools
+6       +3872       -0          cmake
+4       +15         -14         .buildkite
+4       +574        -0          flashinfer-sm70
+2       +0          -0          assets
+1       +26         -2          docker
+1       +92         -0          scripts
+
+TOTAL (files / added / removed):
+1443 files  +534174 / -4020

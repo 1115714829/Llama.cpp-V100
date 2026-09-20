@@ -1,0 +1,18 @@
+=== find in /root === 
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2
+=== find nccl.h === 
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime/include/nccl.h
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/torch/include/torch/csrc/cuda/nccl.h
+/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/torch/csrc/cuda/nccl.h
+=== find in /usr === 
+=== pip nccl === 
+Package    Version
+---------- -------
+pip        22.3.1
+setuptools 65.5.1
+wheel      0.38.4
+=== pip3 list done === 
+ls: cannot access '/root/*venv*': No such file or directory
+ls: cannot access '/opt/*venv*': No such file or directory
+/root/p45-env-check.sh
+DONE 
