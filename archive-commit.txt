@@ -3,3 +3,935 @@ Initialized empty Git repository in F:/vllm+llama.cpp/1cat-vllm-v100-study/.git/
 momo
 1115714829@qq.com
 === add === 
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '1cat-changed-files-vs-forkpoint.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '1cat-changes-by-dir.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '1cat-diffstat-vs-forkpoint.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '1cat-sm70-gemm-tactics.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'COMMIT-MSG.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'FINAL-REPORT.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'FlashAttention-V100-reference.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'WORKPLAN.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ab-now.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'all-jobs.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'archive-commit.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'arm1.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'baseline.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'big-ab-256k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'block.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'build-c4.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'build-nccl-inner.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'build-nccl-progress.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'build-nccl.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'build-orig.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'c1-build.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'c4-correct.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'c4-mmvq-volta.patch', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'c5-volta-crossover.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'changed-files.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-128k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-256k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-bench.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-build.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-c4-256k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-c4-build.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-crash.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-ctx.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-current-test.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-env.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-fp8-detail.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-fp8-line.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-fp8.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-log.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-mtp.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-orig-log.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-progress.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-resp.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-server.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-test-server.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-tools.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'check-vmm.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'cleanup-128k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'collect-final.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'collect-final.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'collect2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'collect2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'commit-report.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'convert-and-stats.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'convstats.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'core-changes.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'devd-abort.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'devd-archaeology.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'devd-crash.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'devd-retest.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'devd2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'dflash-in-llamacpp.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'dflash-test.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'dflash-test2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'dflash2-llama-cpp-research.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'diag-l1.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'eol-check.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'existing-kern.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'fa-v100-verified.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'final-nccl-launch.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'final-nccl.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'final-progress.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'finish-ppl.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'gather-state.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'gather2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'gather3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'get-orig-mmvq.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'gguf-config.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'goal-git-status.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'goal-git-status2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'goal-git-status3.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'goal-phase1-findings.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'harness.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'health-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'hex-dump.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'importer.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'inspect-draft-gguf.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'install-l3-units.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'kernsum.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'l1-sweep.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'l3-acceptance.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'l3-decode.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'l3-decode2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'l3-decode3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'l3-run.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'launch-stress.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'local-patch-check.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'md5-eol-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'mk-corpus.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'mmvq-orig.cu', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'mtp-exp.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'mtp-sampler-cpu.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'mtp-sweep.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-ab-launch.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-ab-progress.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-check.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-env-sweep-launch.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-env-sweep.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-find.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-knobs2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-pkg.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-plan.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nccl-transport.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'norm-speed.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'nsys-stats-qdstrm.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p1-free-and-build.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p10-volta-sweep.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p11-volta-final.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p12-q4km-c5.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p13-ncu-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p14-profiler-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p15-ncu2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p16-nsys.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p17-nsys2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p18-t3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p19-t3b.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p2-save-pristine.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p20-t3diag.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p21-revert-t3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p22-inspect-l3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p23-dflash2-nmax.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p24-dflash2-official.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p25-multigpu.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p26-diag1a.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p27-build-27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p28-verify27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p29-mg27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p3-quick-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p30-iso27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p31-struct.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p32-vllm1cat-bench.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p33-verify-q8.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p34-start-build.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p35-base-q8.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p36-sha-gate.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p37-rt-debug.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p38-locate.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p39-rt3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p4-interleaved-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p40-locate2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p41-bench-rt.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p42-rpath.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p43-maps.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p44-rt-probe.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p45-env-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p46-real-config.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p47-mcurve.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p48-spec-timing.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p49-matched.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p5-ab-raw.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p50-clean.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p51-holders.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p52-memclass.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p53-caches.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p6-stub-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p60-ab-harness.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p60-ab-harness2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p61-baseline.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p62-attribution.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p63-tp4.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p64-nsys.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p65-nsys.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p66-layercurve.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p67-tensorcurve.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p68-selector.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p69-acctiming.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p7-libdirs.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p70-p2p.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p71-synctime.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p72-sampler.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p73-ckpt.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p74-morecards.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p75-devd.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p76-nwarps-sweep.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p77-targetcost.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p78-discriminator.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p79-graphs.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p8-real-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p80-final.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'p9-build-volta.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phase0-round-breakdown.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phase1a-report.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'poll-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'port27858-status.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-after-final.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-bf.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-bf2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-bf2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-bf3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-bf3.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ppl-tooling.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'premise-check-1cat-vs-llamacpp.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'premise-check.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prep-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prep-prompt.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prof-files.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prof-tgt.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prof2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'profile-tgt.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'profile-tgt2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'prompt-robust.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'q8.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'q8mmq-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'read-256k-result.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'read-ctx.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'read-existing-nsys.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'recon6gpu.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'reestablish-ssh.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'restart-mtp.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'revert-q8.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'revert.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'same-source-ab.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'send-256k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'setup-ssh.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'spec-help.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'spec-sweep.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'speed-test.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'stage-report.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'start-and-bench.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'start-c4-server.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'start-test-server.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'state-commit2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'state2.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'state3.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'state4.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'state5.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'state6.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'status-now.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'stress-test-256k.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'stuck-check.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'sweep-medians.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test-256k-mem.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test-256k.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test-2gpu.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test-split.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tiny.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-cleanup.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-gguf.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-gguf2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-gpuutil.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-mtp-check.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-parse.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'v100-profile.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'verify-binaries.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'vllm-vs-1cat-vllm-diff.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-base-q8.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-df2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-dflash.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-dflash2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-diag.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-iso27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-l3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-l3dec.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-l3dec2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-l3dec3.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-mg.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-mg27858.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-mtp.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-mtp2.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-official.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-robust.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-rt.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-spec.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait-vllm1cat.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wait2-ab.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'which-commit.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wsl-check.sh', LF will be replaced by CRLF the next time Git touches it
+=== staged count + size sanity === 
+ 356 files changed, 21653 insertions(+)
+356
+=== confirm the big blob is excluded === 
+!! tmp-src.tgz
+=== commit === 
+[master (root-commit) 218055b] archive : llama.cpp V100/SM70 study — 1cat-vLLM comparison, NCCL finding, measurement tooling
+ 356 files changed, 21653 insertions(+)
+ create mode 100644 .gitignore
+ create mode 100644 1cat-changed-files-vs-forkpoint.txt
+ create mode 100644 1cat-changes-by-dir.txt
+ create mode 100644 1cat-diffstat-vs-forkpoint.txt
+ create mode 100644 1cat-sm70-gemm-tactics.md
+ create mode 100644 COMMIT-MSG.txt
+ create mode 100644 FINAL-REPORT.md
+ create mode 100644 FlashAttention-V100-reference.md
+ create mode 100644 WORKPLAN.md
+ create mode 100644 ab-now.bat
+ create mode 100644 ab-now.txt
+ create mode 100644 all-jobs.bat
+ create mode 100644 all-jobs.txt
+ create mode 100644 archive-commit.bat
+ create mode 100644 archive-commit.txt
+ create mode 100644 arm1.bat
+ create mode 100644 arm1.txt
+ create mode 100644 baseline.md
+ create mode 100644 big-ab-256k.sh
+ create mode 100644 block.bat
+ create mode 100644 block.txt
+ create mode 100644 build-c4.sh
+ create mode 100644 build-nccl-inner.sh
+ create mode 100644 build-nccl-progress.txt
+ create mode 100644 build-nccl.sh
+ create mode 100644 build-orig.sh
+ create mode 100644 c1-build.sh
+ create mode 100644 c4-correct.sh
+ create mode 100644 c4-mmvq-volta.patch
+ create mode 100644 c5-volta-crossover.md
+ create mode 100644 changed-files.txt
+ create mode 100644 check-128k.sh
+ create mode 100644 check-256k.sh
+ create mode 100644 check-bench.sh
+ create mode 100644 check-build.sh
+ create mode 100644 check-c4-256k.sh
+ create mode 100644 check-c4-build.sh
+ create mode 100644 check-crash.sh
+ create mode 100644 check-ctx.sh
+ create mode 100644 check-current-test.sh
+ create mode 100644 check-env.sh
+ create mode 100644 check-fp8-detail.sh
+ create mode 100644 check-fp8-line.sh
+ create mode 100644 check-fp8.sh
+ create mode 100644 check-log.sh
+ create mode 100644 check-mtp.sh
+ create mode 100644 check-orig-log.sh
+ create mode 100644 check-ppl.bat
+ create mode 100644 check-progress.sh
+ create mode 100644 check-resp.sh
+ create mode 100644 check-server.sh
+ create mode 100644 check-test-server.sh
+ create mode 100644 check-tools.sh
+ create mode 100644 check-vmm.sh
+ create mode 100644 cleanup-128k.sh
+ create mode 100644 collect-final.bat
+ create mode 100644 collect-final.sh
+ create mode 100644 collect-final.txt
+ create mode 100644 collect2.sh
+ create mode 100644 collect2.txt
+ create mode 100644 commit-report.txt
+ create mode 100644 convert-and-stats.sh
+ create mode 100644 convstats.bat
+ create mode 100644 convstats.txt
+ create mode 100644 core-changes.md
+ create mode 100644 devd-abort.bat
+ create mode 100644 devd-abort.txt
+ create mode 100644 devd-arch.bat
+ create mode 100644 devd-archaeology.txt
+ create mode 100644 devd-crash.bat
+ create mode 100644 devd-crash.txt
+ create mode 100644 devd-retest.sh
+ create mode 100644 devd2.txt
+ create mode 100644 dflash-in-llamacpp.md
+ create mode 100644 dflash-test.sh
+ create mode 100644 dflash-test2.sh
+ create mode 100644 dflash2-llama-cpp-research.md
+ create mode 100644 diag-l1.sh
+ create mode 100644 dirlist.bat
+ create mode 100644 dirlist.txt
+ create mode 100644 do-commit.bat
+ create mode 100644 eol-check.bat
+ create mode 100644 eol-check.txt
+ create mode 100644 existing-kern.txt
+ create mode 100644 fa-v100-verified.md
+ create mode 100644 final-nccl-launch.sh
+ create mode 100644 final-nccl.sh
+ create mode 100644 final-progress.txt
+ create mode 100644 finish-ppl.sh
+ create mode 100644 fix-ppl.bat
+ create mode 100644 gather-state.sh
+ create mode 100644 gather2.sh
+ create mode 100644 gather3.sh
+ create mode 100644 get-collect2.bat
+ create mode 100644 get-devd.bat
+ create mode 100644 get-harness.bat
+ create mode 100644 get-orig-mmvq.sh
+ create mode 100644 get-prof.bat
+ create mode 100644 get-prof2.bat
+ create mode 100644 gguf-config.py
+ create mode 100644 goal-git-status.bat
+ create mode 100644 goal-git-status.txt
+ create mode 100644 goal-git-status2.bat
+ create mode 100644 goal-git-status2.txt
+ create mode 100644 goal-git-status3.bat
+ create mode 100644 goal-git-status3.txt
+ create mode 100644 goal-phase1-findings.md
+ create mode 100644 harness.txt
+ create mode 100644 health-ab.sh
+ create mode 100644 hex-dump.py
+ create mode 100644 importer.bat
+ create mode 100644 importer.txt
+ create mode 100644 inspect-draft-gguf.sh
+ create mode 100644 install-l3-units.sh
+ create mode 100644 kernsum.bat
+ create mode 100644 kernsum.txt
+ create mode 100644 l1-sweep.sh
+ create mode 100644 l3-acceptance.md
+ create mode 100644 l3-decode.sh
+ create mode 100644 l3-decode2.sh
+ create mode 100644 l3-decode3.sh
+ create mode 100644 l3-run.sh
+ create mode 100644 launch-build-nccl.bat
+ create mode 100644 launch-collect2.bat
+ create mode 100644 launch-devd.bat
+ create mode 100644 launch-env-sweep.bat
+ create mode 100644 launch-final.bat
+ create mode 100644 launch-finish-ppl.bat
+ create mode 100644 launch-knobs2.bat
+ create mode 100644 launch-nccl-ab.bat
+ create mode 100644 launch-ppl-after.bat
+ create mode 100644 launch-prof2.bat
+ create mode 100644 launch-profile.bat
+ create mode 100644 launch-q8mmq.bat
+ create mode 100644 launch-stress.sh
+ create mode 100644 local-md5-13.txt
+ create mode 100644 local-md5.bat
+ create mode 100644 local-patch-check.bat
+ create mode 100644 local-patch-check.txt
+ create mode 100644 md5-eol-check.sh
+ create mode 100644 mk-corpus.bat
+ create mode 100644 mk-corpus.sh
+ create mode 100644 mmvq-orig.cu
+ create mode 100644 mtp-exp.sh
+ create mode 100644 mtp-sampler-cpu.md
+ create mode 100644 mtp-sweep.sh
+ create mode 100644 nccl-ab-launch.sh
+ create mode 100644 nccl-ab-progress.txt
+ create mode 100644 nccl-ab.sh
+ create mode 100644 nccl-check.bat
+ create mode 100644 nccl-check.txt
+ create mode 100644 nccl-env-sweep-launch.sh
+ create mode 100644 nccl-env-sweep.sh
+ create mode 100644 nccl-find.bat
+ create mode 100644 nccl-find.txt
+ create mode 100644 nccl-knobs2.sh
+ create mode 100644 nccl-pkg.bat
+ create mode 100644 nccl-pkg.txt
+ create mode 100644 nccl-plan.bat
+ create mode 100644 nccl-plan.txt
+ create mode 100644 nccl-transport.bat
+ create mode 100644 nccl-transport.txt
+ create mode 100644 norm-speed.sh
+ create mode 100644 nsys-stats-qdstrm.sh
+ create mode 100644 p1-free-and-build.sh
+ create mode 100644 p10-volta-sweep.sh
+ create mode 100644 p11-volta-final.sh
+ create mode 100644 p12-q4km-c5.sh
+ create mode 100644 p13-ncu-check.sh
+ create mode 100644 p14-profiler-check.sh
+ create mode 100644 p15-ncu2.sh
+ create mode 100644 p16-nsys.sh
+ create mode 100644 p17-nsys2.sh
+ create mode 100644 p18-t3.sh
+ create mode 100644 p19-t3b.sh
+ create mode 100644 p2-save-pristine.sh
+ create mode 100644 p20-t3diag.sh
+ create mode 100644 p21-revert-t3.sh
+ create mode 100644 p22-inspect-l3.sh
+ create mode 100644 p23-dflash2-nmax.sh
+ create mode 100644 p24-dflash2-official.sh
+ create mode 100644 p25-multigpu.sh
+ create mode 100644 p26-diag1a.sh
+ create mode 100644 p27-build-27858.sh
+ create mode 100644 p28-verify27858.sh
+ create mode 100644 p29-mg27858.sh
+ create mode 100644 p3-quick-ab.sh
+ create mode 100644 p30-iso27858.sh
+ create mode 100644 p31-struct.sh
+ create mode 100644 p32-vllm1cat-bench.sh
+ create mode 100644 p33-verify-q8.sh
+ create mode 100644 p34-start-build.sh
+ create mode 100644 p35-base-q8.sh
+ create mode 100644 p36-sha-gate.sh
+ create mode 100644 p37-rt-debug.sh
+ create mode 100644 p38-locate.sh
+ create mode 100644 p39-rt3.sh
+ create mode 100644 p4-interleaved-ab.sh
+ create mode 100644 p40-locate2.sh
+ create mode 100644 p41-bench-rt.sh
+ create mode 100644 p42-rpath.sh
+ create mode 100644 p43-maps.sh
+ create mode 100644 p44-rt-probe.sh
+ create mode 100644 p45-env-check.sh
+ create mode 100644 p46-real-config.sh
+ create mode 100644 p47-mcurve.sh
+ create mode 100644 p48-spec-timing.sh
+ create mode 100644 p49-matched.sh
+ create mode 100644 p5-ab-raw.sh
+ create mode 100644 p50-clean.sh
+ create mode 100644 p51-holders.sh
+ create mode 100644 p52-memclass.sh
+ create mode 100644 p53-caches.sh
+ create mode 100644 p6-stub-check.sh
+ create mode 100644 p60-ab-harness.sh
+ create mode 100644 p60-ab-harness2.sh
+ create mode 100644 p61-baseline.sh
+ create mode 100644 p62-attribution.sh
+ create mode 100644 p63-tp4.sh
+ create mode 100644 p64-nsys.sh
+ create mode 100644 p65-nsys.sh
+ create mode 100644 p66-layercurve.sh
+ create mode 100644 p67-tensorcurve.sh
+ create mode 100644 p68-selector.sh
+ create mode 100644 p69-acctiming.sh
+ create mode 100644 p7-libdirs.sh
+ create mode 100644 p70-p2p.sh
+ create mode 100644 p71-synctime.sh
+ create mode 100644 p72-sampler.sh
+ create mode 100644 p73-ckpt.sh
+ create mode 100644 p74-morecards.sh
+ create mode 100644 p75-devd.sh
+ create mode 100644 p76-nwarps-sweep.sh
+ create mode 100644 p77-targetcost.sh
+ create mode 100644 p78-discriminator.sh
+ create mode 100644 p79-graphs.sh
+ create mode 100644 p8-real-ab.sh
+ create mode 100644 p80-final.sh
+ create mode 100644 p9-build-volta.sh
+ create mode 100644 peek-ab.bat
+ create mode 100644 phase0-round-breakdown.md
+ create mode 100644 phase1a-report.html
+ create mode 100644 poll-ab.bat
+ create mode 100644 poll-ab.sh
+ create mode 100644 poll-build.bat
+ create mode 100644 port27858-check.bat
+ create mode 100644 port27858-status.txt
+ create mode 100644 ppl-ab.sh
+ create mode 100644 ppl-after-final.sh
+ create mode 100644 ppl-bf.bat
+ create mode 100644 ppl-bf.txt
+ create mode 100644 ppl-bf2.bat
+ create mode 100644 ppl-bf2.sh
+ create mode 100644 ppl-bf2.txt
+ create mode 100644 ppl-bf3.bat
+ create mode 100644 ppl-bf3.sh
+ create mode 100644 ppl-bf3.txt
+ create mode 100644 ppl-tooling.txt
+ create mode 100644 premise-check-1cat-vs-llamacpp.md
+ create mode 100644 premise-check.html
+ create mode 100644 prep-ab.sh
+ create mode 100644 prep-prompt.sh
+ create mode 100644 prof-files.bat
+ create mode 100644 prof-files.txt
+ create mode 100644 prof-tgt.txt
+ create mode 100644 prof2-files.bat
+ create mode 100644 prof2-files.txt
+ create mode 100644 prof2.txt
+ create mode 100644 profile-tgt.sh
+ create mode 100644 profile-tgt2.sh
+ create mode 100644 prompt-robust.sh
+ create mode 100644 q8.txt
+ create mode 100644 q8mmq-ab.sh
+ create mode 100644 read-256k-result.sh
+ create mode 100644 read-ctx.py
+ create mode 100644 read-existing-nsys.bat
+ create mode 100644 read-existing-nsys.sh
+ create mode 100644 recon6gpu.sh
+ create mode 100644 reestablish-ssh.sh
+ create mode 100644 restart-mtp.sh
+ create mode 100644 revert-q8.sh
+ create mode 100644 revert.bat
+ create mode 100644 revert.txt
+ create mode 100644 same-source-ab.md
+ create mode 100644 send-256k.sh
+ create mode 100644 setup-ssh.sh
+ create mode 100644 spec-help.sh
+ create mode 100644 spec-sweep.sh
+ create mode 100644 speed-test.sh
+ create mode 100644 stage-report.txt
+ create mode 100644 stage.bat
+ create mode 100644 start-and-bench.sh
+ create mode 100644 start-c4-server.sh
+ create mode 100644 start-test-server.sh
+ create mode 100644 state-commit2.bat
+ create mode 100644 state-commit2.txt
+ create mode 100644 state2.bat
+ create mode 100644 state2.txt
+ create mode 100644 state3.bat
+ create mode 100644 state3.txt
+ create mode 100644 state4.bat
+ create mode 100644 state4.txt
+ create mode 100644 state5.bat
+ create mode 100644 state5.txt
+ create mode 100644 state6.bat
+ create mode 100644 state6.txt
+ create mode 100644 status-now.sh
+ create mode 100644 stress-test-256k.md
+ create mode 100644 stuck-check.bat
+ create mode 100644 stuck-check.txt
+ create mode 100644 sweep-medians.bat
+ create mode 100644 sweep-medians.txt
+ create mode 100644 test-256k-mem.sh
+ create mode 100644 test-256k.sh
+ create mode 100644 test-2gpu.sh
+ create mode 100644 test-split.sh
+ create mode 100644 tiny.bat
+ create mode 100644 tiny.txt
+ create mode 100644 v100-check.sh
+ create mode 100644 v100-cleanup.sh
+ create mode 100644 v100-gguf.sh
+ create mode 100644 v100-gguf2.sh
+ create mode 100644 v100-gpuutil.sh
+ create mode 100644 v100-mtp-check.sh
+ create mode 100644 v100-parse.sh
+ create mode 100644 v100-profile.sh
+ create mode 100644 verify-binaries.sh
+ create mode 100644 vllm-vs-1cat-vllm-diff.md
+ create mode 100644 wait-27858.sh
+ create mode 100644 wait-ab.bat
+ create mode 100644 wait-ab.sh
+ create mode 100644 wait-base-q8.sh
+ create mode 100644 wait-build.bat
+ create mode 100644 wait-df2.sh
+ create mode 100644 wait-dflash.sh
+ create mode 100644 wait-dflash2.sh
+ create mode 100644 wait-diag.sh
+ create mode 100644 wait-final.bat
+ create mode 100644 wait-iso27858.sh
+ create mode 100644 wait-l3.sh
+ create mode 100644 wait-l3dec.sh
+ create mode 100644 wait-l3dec2.sh
+ create mode 100644 wait-l3dec3.sh
+ create mode 100644 wait-mg.sh
+ create mode 100644 wait-mg27858.sh
+ create mode 100644 wait-mtp.sh
+ create mode 100644 wait-mtp2.sh
+ create mode 100644 wait-official.sh
+ create mode 100644 wait-q8.bat
+ create mode 100644 wait-robust.sh
+ create mode 100644 wait-rt.sh
+ create mode 100644 wait-spec.sh
+ create mode 100644 wait-vllm1cat.sh
+ create mode 100644 wait2-ab.sh
+ create mode 100644 which-commit.sh
+ create mode 100644 wsl-check.sh
+=== log === 
+218055b archive : llama.cpp V100/SM70 study — 1cat-vLLM comparison, NCCL finding, measurement tooling
+ diag-l1.sh                          |   17 +
+ dirlist.bat                         |   10 +
+ dirlist.txt                         |  376 ++++++++
+ do-commit.bat                       |   17 +
+ eol-check.bat                       |   13 +
+ eol-check.txt                       |   28 +
+ existing-kern.txt                   |   24 +
+ fa-v100-verified.md                 |   50 ++
+ final-nccl-launch.sh                |    3 +
+ final-nccl.sh                       |   36 +
+ final-progress.txt                  |  102 +++
+ finish-ppl.sh                       |   10 +
+ fix-ppl.bat                         |   10 +
+ gather-state.sh                     |   40 +
+ gather2.sh                          |   40 +
+ gather3.sh                          |   14 +
+ get-collect2.bat                    |    5 +
+ get-devd.bat                        |    5 +
+ get-harness.bat                     |    4 +
+ get-orig-mmvq.sh                    |   11 +
+ get-prof.bat                        |    5 +
+ get-prof2.bat                       |    5 +
+ gguf-config.py                      |   45 +
+ goal-git-status.bat                 |   13 +
+ goal-git-status.txt                 |   32 +
+ goal-git-status2.bat                |   12 +
+ goal-git-status2.txt                |  138 +++
+ goal-git-status3.bat                |   12 +
+ goal-git-status3.txt                |   33 +
+ goal-phase1-findings.md             |  438 ++++++++++
+ harness.txt                         |  153 ++++
+ health-ab.sh                        |   17 +
+ hex-dump.py                         |   11 +
+ importer.bat                        |    8 +
+ importer.txt                        |  213 +++++
+ inspect-draft-gguf.sh               |   22 +
+ install-l3-units.sh                 |   75 ++
+ kernsum.bat                         |    6 +
+ kernsum.txt                         |    7 +
+ l1-sweep.sh                         |   42 +
+ l3-acceptance.md                    |   57 ++
+ l3-decode.sh                        |   64 ++
+ l3-decode2.sh                       |   34 +
+ l3-decode3.sh                       |   43 +
+ l3-run.sh                           |   45 +
+ launch-build-nccl.bat               |    6 +
+ launch-collect2.bat                 |    6 +
+ launch-devd.bat                     |    6 +
+ launch-env-sweep.bat                |    6 +
+ launch-final.bat                    |    7 +
+ launch-finish-ppl.bat               |    6 +
+ launch-knobs2.bat                   |    7 +
+ launch-nccl-ab.bat                  |    6 +
+ launch-ppl-after.bat                |    6 +
+ launch-prof2.bat                    |    6 +
+ launch-profile.bat                  |    6 +
+ launch-q8mmq.bat                    |    6 +
+ launch-stress.sh                    |   17 +
+ local-md5-13.txt                    |   41 +
+ local-md5.bat                       |    6 +
+ local-patch-check.bat               |    8 +
+ local-patch-check.txt               |  112 +++
+ md5-eol-check.sh                    |   15 +
+ mk-corpus.bat                       |    6 +
+ mk-corpus.sh                        |   10 +
+ mmvq-orig.cu                        | 1551 +++++++++++++++++++++++++++++++++
+ mtp-exp.sh                          |   83 ++
+ mtp-sampler-cpu.md                  |   87 ++
+ mtp-sweep.sh                        |   55 ++
+ nccl-ab-launch.sh                   |    3 +
+ nccl-ab-progress.txt                |  182 ++++
+ nccl-ab.sh                          |   35 +
+ nccl-check.bat                      |   16 +
+ nccl-check.txt                      |  491 +++++++++++
+ nccl-env-sweep-launch.sh            |    3 +
+ nccl-env-sweep.sh                   |   39 +
+ nccl-find.bat                       |   14 +
+ nccl-find.txt                       |   18 +
+ nccl-knobs2.sh                      |   38 +
+ nccl-pkg.bat                        |   13 +
+ nccl-pkg.txt                        |  163 ++++
+ nccl-plan.bat                       |   14 +
+ nccl-plan.txt                       |   45 +
+ nccl-transport.bat                  |   10 +
+ nccl-transport.txt                  |  332 +++++++
+ norm-speed.sh                       |   18 +
+ nsys-stats-qdstrm.sh                |    7 +
+ p1-free-and-build.sh                |   53 ++
+ p10-volta-sweep.sh                  |   47 +
+ p11-volta-final.sh                  |   52 ++
+ p12-q4km-c5.sh                      |   31 +
+ p13-ncu-check.sh                    |   24 +
+ p14-profiler-check.sh               |   18 +
+ p15-ncu2.sh                         |   22 +
+ p16-nsys.sh                         |   20 +
+ p17-nsys2.sh                        |   25 +
+ p18-t3.sh                           |   45 +
+ p19-t3b.sh                          |   39 +
+ p2-save-pristine.sh                 |   33 +
+ p20-t3diag.sh                       |   16 +
+ p21-revert-t3.sh                    |   40 +
+ p22-inspect-l3.sh                   |   29 +
+ p23-dflash2-nmax.sh                 |   65 ++
+ p24-dflash2-official.sh             |   61 ++
+ p25-multigpu.sh                     |   59 ++
+ p26-diag1a.sh                       |   48 ++
+ p27-build-27858.sh                  |   41 +
+ p28-verify27858.sh                  |   64 ++
+ p29-mg27858.sh                      |   68 ++
+ p3-quick-ab.sh                      |   20 +
+ p30-iso27858.sh                     |   61 ++
+ p31-struct.sh                       |   17 +
+ p32-vllm1cat-bench.sh               |   64 ++
+ p33-verify-q8.sh                    |   23 +
+ p34-start-build.sh                  |   22 +
+ p35-base-q8.sh                      |   84 ++
+ p36-sha-gate.sh                     |   27 +
+ p37-rt-debug.sh                     |   75 ++
+ p38-locate.sh                       |   31 +
+ p39-rt3.sh                          |   67 ++
+ p4-interleaved-ab.sh                |   34 +
+ p40-locate2.sh                      |   24 +
+ p41-bench-rt.sh                     |   27 +
+ p42-rpath.sh                        |   33 +
+ p43-maps.sh                         |   53 ++
+ p44-rt-probe.sh                     |   51 ++
+ p45-env-check.sh                    |   38 +
+ p46-real-config.sh                  |   59 ++
+ p47-mcurve.sh                       |   57 ++
+ p48-spec-timing.sh                  |   59 ++
+ p49-matched.sh                      |   63 ++
+ p5-ab-raw.sh                        |   35 +
+ p50-clean.sh                        |   28 +
+ p51-holders.sh                      |   33 +
+ p52-memclass.sh                     |   20 +
+ p53-caches.sh                       |   21 +
+ p6-stub-check.sh                    |   38 +
+ p60-ab-harness.sh                   |  152 ++++
+ p60-ab-harness2.sh                  |  150 ++++
+ p61-baseline.sh                     |   27 +
+ p62-attribution.sh                  |   37 +
+ p63-tp4.sh                          |   20 +
+ p64-nsys.sh                         |   54 ++
+ p65-nsys.sh                         |   59 ++
+ p66-layercurve.sh                   |   31 +
+ p67-tensorcurve.sh                  |   20 +
+ p68-selector.sh                     |   33 +
+ p69-acctiming.sh                    |   22 +
+ p7-libdirs.sh                       |   29 +
+ p70-p2p.sh                          |   30 +
+ p71-synctime.sh                     |   29 +
+ p72-sampler.sh                      |   25 +
+ p73-ckpt.sh                         |   28 +
+ p74-morecards.sh                    |   25 +
+ p75-devd.sh                         |   20 +
+ p76-nwarps-sweep.sh                 |   59 ++
+ p77-targetcost.sh                   |   31 +
+ p78-discriminator.sh                |   32 +
+ p79-graphs.sh                       |   45 +
+ p8-real-ab.sh                       |   53 ++
+ p80-final.sh                        |   18 +
+ p9-build-volta.sh                   |   32 +
+ peek-ab.bat                         |    3 +
+ phase0-round-breakdown.md           |  192 +++++
+ phase1a-report.html                 |  264 ++++++
+ poll-ab.bat                         |   12 +
+ poll-ab.sh                          |   13 +
+ poll-build.bat                      |    9 +
+ port27858-check.bat                 |   16 +
+ port27858-status.txt                |   68 ++
+ ppl-ab.sh                           |   23 +
+ ppl-after-final.sh                  |   10 +
+ ppl-bf.bat                          |   12 +
+ ppl-bf.txt                          |   22 +
+ ppl-bf2.bat                         |    6 +
+ ppl-bf2.sh                          |   21 +
+ ppl-bf2.txt                         |    9 +
+ ppl-bf3.bat                         |    6 +
+ ppl-bf3.sh                          |   24 +
+ ppl-bf3.txt                         |   12 +
+ ppl-tooling.txt                     |   89 ++
+ premise-check-1cat-vs-llamacpp.md   |  127 +++
+ premise-check.html                  |  226 +++++
+ prep-ab.sh                          |   25 +
+ prep-prompt.sh                      |   26 +
+ prof-files.bat                      |   12 +
+ prof-files.txt                      |   18 +
+ prof-tgt.txt                        |   13 +
+ prof2-files.bat                     |   10 +
+ prof2-files.txt                     |   22 +
+ prof2.txt                           |   17 +
+ profile-tgt.sh                      |   51 ++
+ profile-tgt2.sh                     |   55 ++
+ prompt-robust.sh                    |   59 ++
+ q8.txt                              |   47 +
+ q8mmq-ab.sh                         |   71 ++
+ read-256k-result.sh                 |    8 +
+ read-ctx.py                         |   65 ++
+ read-existing-nsys.bat              |    6 +
+ read-existing-nsys.sh               |   11 +
+ recon6gpu.sh                        |   40 +
+ reestablish-ssh.sh                  |   54 ++
+ restart-mtp.sh                      |   20 +
+ revert-q8.sh                        |   35 +
+ revert.bat                          |    6 +
+ revert.txt                          |   16 +
+ same-source-ab.md                   |   92 ++
+ send-256k.sh                        |   15 +
+ setup-ssh.sh                        |   16 +
+ spec-help.sh                        |   10 +
+ spec-sweep.sh                       |   60 ++
+ speed-test.sh                       |   17 +
+ stage-report.txt                    |    8 +
+ stage.bat                           |   15 +
+ start-and-bench.sh                  |   26 +
+ start-c4-server.sh                  |   68 ++
+ start-test-server.sh                |   59 ++
+ state-commit2.bat                   |   17 +
+ state-commit2.txt                   |   26 +
+ state2.bat                          |   12 +
+ state2.txt                          |   44 +
+ state3.bat                          |    9 +
+ state3.txt                          |    9 +
+ state4.bat                          |   14 +
+ state4.txt                          |   38 +
+ state5.bat                          |   19 +
+ state5.txt                          | 1626 +++++++++++++++++++++++++++++++++++
+ state6.bat                          |   12 +
+ state6.txt                          |   17 +
+ status-now.sh                       |   22 +
+ stress-test-256k.md                 |  189 ++++
+ stuck-check.bat                     |   14 +
+ stuck-check.txt                     |   64 ++
+ sweep-medians.bat                   |    8 +
+ sweep-medians.txt                   |   54 ++
+ test-256k-mem.sh                    |   21 +
+ test-256k.sh                        |    7 +
+ test-2gpu.sh                        |   10 +
+ test-split.sh                       |   29 +
+ tiny.bat                            |    5 +
+ tiny.txt                            |    5 +
+ v100-check.sh                       |   16 +
+ v100-cleanup.sh                     |   10 +
+ v100-gguf.sh                        |   15 +
+ v100-gguf2.sh                       |    9 +
+ v100-gpuutil.sh                     |   22 +
+ v100-mtp-check.sh                   |   15 +
+ v100-parse.sh                       |   28 +
+ v100-profile.sh                     |   15 +
+ verify-binaries.sh                  |   46 +
+ vllm-vs-1cat-vllm-diff.md           |  132 +++
+ wait-27858.sh                       |   32 +
+ wait-ab.bat                         |    3 +
+ wait-ab.sh                          |   27 +
+ wait-base-q8.sh                     |   14 +
+ wait-build.bat                      |    3 +
+ wait-df2.sh                         |   14 +
+ wait-dflash.sh                      |   16 +
+ wait-dflash2.sh                     |   15 +
+ wait-diag.sh                        |   16 +
+ wait-final.bat                      |    5 +
+ wait-iso27858.sh                    |   14 +
+ wait-l3.sh                          |   22 +
+ wait-l3dec.sh                       |   21 +
+ wait-l3dec2.sh                      |   20 +
+ wait-l3dec3.sh                      |   20 +
+ wait-mg.sh                          |   14 +
+ wait-mg27858.sh                     |   15 +
+ wait-mtp.sh                         |   21 +
+ wait-mtp2.sh                        |   16 +
+ wait-official.sh                    |   14 +
+ wait-q8.bat                         |    5 +
+ wait-robust.sh                      |   14 +
+ wait-rt.sh                          |   27 +
+ wait-spec.sh                        |   17 +
+ wait-vllm1cat.sh                    |   14 +
+ wait2-ab.sh                         |   42 +
+ which-commit.sh                     |   44 +
+ wsl-check.sh                        |   20 +
+ 356 files changed, 21653 insertions(+)
+=== status after === 
+ M archive-commit.txt
+DONE 

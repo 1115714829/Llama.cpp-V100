@@ -1,0 +1,5 @@
+=== status before === 
+ M archive-commit.txt
+ M dirlist.txt
+?? archive-commit2.bat
+?? archive-commit2.txt
