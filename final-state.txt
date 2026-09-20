@@ -1,0 +1,20 @@
+=== llama.cpp === 
+79504e72b llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+1af554f8f server : improve startup log messages (#29125)
+=== archive === 
+5402fc1 archive : Goal 8dbd30ea step 1 -- GDN vs attention op costs; ncu is dead on AC922
+78a2be7 archive : HANDOFF doc, HMMA/WMMA probes, card sweep, prefill measurements
+8a18a5b archive : add the directory listing and commit logs
+?? final-state.bat
+?? final-state.txt
+=== server === 
+inactive
+inactive
+active
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+DONE 
