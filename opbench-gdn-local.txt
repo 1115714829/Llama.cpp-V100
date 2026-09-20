@@ -1,0 +1,45 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 15360 MiB):
+  Device 0: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+Testing 2 devices
+
+Backend 1/2: CUDA0
+  Device description: Tesla V100-SXM2-16GB
+  Device memory: 15360 MB (15051 MB free)
+
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=1,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+             185518 runs -     5.50 us/run -     4160 kB/run - [1;34m 721.76 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=16,head_size=64,n_seq_tokens=1,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+              303030 runs -     3.38 us/run -      528 kB/run - [1;34m 149.03 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=1,n_seqs=1,v_repeat=1,permuted=0,kda=1,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+             184805 runs -     5.63 us/run -     4176 kB/run - [1;34m 707.78 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=64,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+             12267 runs -    99.21 us/run -     8208 kB/run - [1;34m  78.91 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=256,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+             3268 runs -   393.02 us/run -    20544 kB/run - [1;34m  49.87 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=512,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+             1816 runs -   790.70 us/run -    36992 kB/run - [1;34m  44.66 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=1024,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                     962 runs -  1577.06 us/run -    69888 kB/run - [1;34m  42.34 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=4,head_size=128,n_seq_tokens=64,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1):               32760 runs -    36.05 us/run -     1026 kB/run - [1;34m  27.15 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=4,head_size=128,n_seq_tokens=256,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1):               8190 runs -   126.77 us/run -     2568 kB/run - [1;34m  19.32 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=4,head_size=128,n_seq_tokens=512,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1):               7257 runs -   250.91 us/run -     4624 kB/run - [1;34m  17.58 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=4,head_size=128,n_seq_tokens=1024,n_seqs=1,v_repeat=1,permuted=0,kda=0,K=1): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+             3841 runs -   673.68 us/run -     8736 kB/run - [1;34m  12.37 GB/s[0m
+  GATED_DELTA_NET(type=f32,head_count=32,head_size=128,n_seq_tokens=64,n_seqs=1,v_repeat=1,permuted=0,kda=1,K=1):              10914 runs -   120.22 us/run -     9224 kB/run - [1;34m  73.18 GB/s[0m
+  Backend CUDA0: [1;32mOK[0m
+Backend 2/2: CPU
+  Skipping
+2/2 backends passed
+[1;32mOK[0m
+===FA_PROGRESS===
+40
+                 4770 runs -   216.33 us/run - 125.83 MFLOP/run - [1;34m581.66 GFLOPS[0m
+  FLASH_ATTN_EXT(hsk=64,hsv=64,nh=8,nr23=[8,1],kv=7680,nb=512,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_of_k=0,n_kv_max=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+===MAINLOG===
+=== which ===
+-rwxr-xr-x 1 root root 1638912 Sep 20 19:34 ./build-nccl/bin/test-backend-ops
+=== GATED_DELTA_NET perf ===
+gdn lines: 34
+=== FLASH_ATTN_EXT perf ===
+DONE 

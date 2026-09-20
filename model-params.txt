@@ -1,0 +1,9 @@
+===LOGS===
+/tmp/p60-c4-debug-server.log
+/tmp/p60-c6-012345-server.log
+/tmp/p60-c5-01234-server.log
+/tmp/p60-c4-0134-server.log
+/tmp/p60-c4-0123-server.log
+===PARAMS===
+FILE=/tmp/p60-ab-nccl-tp3-server.log
+DONE 

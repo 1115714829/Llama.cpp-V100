@@ -1,0 +1,14 @@
+===LOG===
+=== which ===
+-rwxr-xr-x 1 root root 1638912 Sep 20 19:34 ./build-nccl/bin/test-backend-ops
+=== GATED_DELTA_NET perf ===
+gdn lines: 34
+=== FLASH_ATTN_EXT perf ===
+fa lines: 356
+=== MUL_MAT q8_0 perf (for the incumbent reference) ===
+===PROC===
+1389818 ./build-nccl/bin/test-backend-ops perf -o MUL_MAT -b CUDA0
+===FA===
+356
+[1;32mOK[0m
+DONE 

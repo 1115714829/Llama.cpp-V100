@@ -14,7 +14,7 @@
 - **我们现在**：固定口径单流 decode 中位数 **95.20 tok/s**（正式、带 drop_caches），**NODROP 最好 96.60**（TP3 0,1,2）。起点基线 **55.95** ⇒ **+70%**。
 - **三项已落地且已验证正确性的提速**：① 并行化 CPU selector（+26.8%）；② `GGML_CUDA_P2P=1`（+10.6%）；③ **把 NCCL 编进来**（+18.4%）。
 - **已排除的头号假设**：把 MMQ 的 dp4a 换成 Volta FP16 HMMA。实测**这条路的天花板只有 ~1.36×**，够不到 110（详见 §6）。**不要再从零重做这条**。
-- **下一步已定**：Goal 8dbd30ea，**第一步量化 M=8 验证轮里 GDN 与 attention 的成本占比**（一次 ncu 已经跑过但结果没读，见 §10）。
+- **第一步已做完**：实测 **GDN + attention 合计只占每轮 3-6%**（ncu 在本机封死，改用 `test-backend-ops`；数据见 §10 待办 1）⇒ **它们不是 3× 差距之所在**。下一步转向 **draft 前向（头寸 8-12×，需先定论一轮几次）** 与 **每轮 ~21 ms 未归因**。
 - **当前服务状态**：`vllm-1cat` 与 `llmscope` 已 **stop**（我操作腾卡的）。恢复：`systemctl start vllm-1cat llmscope`。
 
 ---
@@ -159,7 +159,7 @@ cmake --build build --config Release -j82     # 空载时从 -j82 起步
 | 7 | `GGML_CUDA_FORCE_CUBLAS` | 它**不 gate** `should_use_mmvq`；且会给每层每轮加 ~178 MB 反量化写出 | 放弃 |
 | 8 | 手写 m8n8k4 fragment 映射 | 只产出**块对角**结果（rows0-3 × cols0-3 有值，rows4-7 全零） | 原因是合成后的 `(asup,bsup)` 对只允许两个对角 4×4 块 ⇒ **改走 WMMA** |
 | 9 | WMMA HMMA 原型 | v1 **8.8 GB/s** → v2（smem staging）**73** → v3（双缓冲流水）**89.6-90.2 GB/s** | 对比在任实现 **555 GB/s** ⇒ **慢 6.2×**。**这就是 §6 的结论来源** |
-| 10 | nsys / ncu profiling | nsys 两次都拿不到可用报告（`Importer error`）；两次成功的 `.nsys-rep` **不含 CUDA kernel 数据** | 见 §10 的替代方案 |
+| 10 | **ncu / nsys profiling 真实验证轮** | ncu：`Backing up device memory in system memory` → `==ERROR== UnknownError` → `Failed to profile "scale_f32"` → `No kernels were profiled`（Q8_0 29 GB × 3 卡，save/restore 崩）。nsys：两次 `Importer error`，侥幸写出的 `.nsys-rep` **不含 CUDA kernel 数据** | **两条路在本机都封死** ⇒ 改用 `test-backend-ops`（数据见 §10 待办 1） |
 | 11 | `LLAMA_LOG_INFO` 在 libllama 里埋点 | 连试 3 次**无输出**（原因未查明） | 先用 `fprintf(stderr,...)` 证明函数被执行，再切日志 |
 | 12 | `llama-bench` 验证库内埋点 | **一条 libllama INFO 日志都不打印** | 用 `llama-server`（会打印 `slot print_timing:`） |
 
@@ -320,6 +320,9 @@ Q8_0 GEMM 探针：128/128 单元填满，误差只在 f16 反量化层（8.2583
 11. 诊断可 `NODROP=1` 跳过 drop_caches（加载 15 s vs ~270 s），但**对外数字必须带 `drop_caches`**。
 12. **无盘 NFS**：下载 / 加载 / 编译共网卡 ⇒ **不要并行**。
 13. 跨架构：本地 Windows 树与服务器树 **md5 不同是因为行尾**（`core.autocrlf=true`，`i/lf w/crlf`）⇒ 用 `git ls-files --eol` 判定，别慌。
+14. **`ncu -o /tmp/X` 配脚本里的 `rm -rf /tmp/X.*` 会删掉自己的日志**（glob `X.*` 命中 `X.log`，也就是 stdout 重定向目标）⇒ 文件被 unlink，脚本退出后彻底消失。本会话 `ncu-tgt.log` "从未存在" 就是这个原因。排查 ncu 失败**先 `ls -la /tmp/X*`**，别以为脚本没跑。
+15. **`pkill -f '<pattern>'` 会匹配到承载它的远程 shell 自己**（远程命令行里含该 pattern）⇒ 自杀、后续输出全丢、`LAUNCHED` 之类也不打印。用括号模式：`pkill -f 'foo[ ]bar'`。
+16. **`test-backend-ops` 只在 `build-nccl/bin/`，不在 `build/bin/`**（同 `LLAMA_BUILD_TESTS=ON` 但只有前者产出了它）⇒ 别用 `build/bin` 的路径去调它。
 
 ---
 
@@ -332,24 +335,84 @@ Q8_0 GEMM 探针：128/128 单元填满，误差只在 f16 反量化层（8.2583
 - [x] 大量否定：NCCL 调参 / 加卡 / Q8_0 强推 MMQ / `--spec-draft-device` / 多形状图缓存 / HMMA（天花板 1.36×）
 - [x] 存档 + 提交（本文件）
 - [x] 1cat 自己的实测开关表 + V100-native 清单已抄出来（§7.2/§7.3）
+- [x] **Goal 8dbd30ea 第 1 项（GDN vs attention 占比）已量出**：ncu 路封死，改用 `test-backend-ops`（在 `build-nccl/bin/`）；**两者合计仅占每轮 3-6%**，下一步转向 draft 前向与那 ~21 ms 未归因（详见"待办 1"）
 
-### 待办 1（**立即做**）：读那次已经跑完的 ncu 结果
-`/root/ncu-tgt.log` —— 一次 `ncu --launch-skip 4000 --launch-count 60` 针对**真实 M=8 验证轮**的 profile，脚本 `/root/ncu-tgt.sh`，输出 `/tmp/ncu-tgt`、日志 `/tmp/ncu-tgt.log`（**我发起后结果一直没读**）。
-metrics：`gpu__time_duration.sum`、`sm__throughput.avg.pct_of_peak_sustained_elapsed`、`dram__throughput.avg.pct_of_peak_sustained_elapsed`、`l1tex__data_bank_conflicts_pipe_lsu_mem_shared.sum`、`smsp__inst_executed.sum`。
-**目的**：量化 **M=8 验证轮里 GDN（gated delta net）与 attention 各自的成本占比** —— 这决定下一步往哪走。
-若 ncu 失败（本机对大模型 profile 常 `failed to load model`），**替代方案**：
-- 在 `ggml_backend_cuda_graph_compute` 里加 env-gated 的**按 op name 聚合计时**（需 `GGML_CUDA_DISABLE_GRAPHS=1`，因为 capture 的图里每节点 event 无效）
-- 或用现成 op 微基准：`test-backend-ops perf -o GATED_DELTA_NET` / `-o FLASH_ATTN_EXT`（`tests/test-backend-ops.cpp`：`test_gated_delta_net` 在 4635/10953-10995，含 head_dim 128 与 K=4 变体；`test_flash_attn_ext` 在 7748，hsk/hsv=256 在 10776-10786/11271-11286）
+### 待办 1 — ✅ **已完成**（2026-09-20 交接时）：ncu 此路不通 → 改用 in-tree op 微基准，结论见 ④
 
-### 待办 2：按待办 1 的结论，从下面三个里选**最高价值的一个**落地到 `llama.cpp/`
-| 候选 | 来源 | 预期 |
+**① ncu 在 AC922 上 profile 不了这个负载（已封死）**
+`/root/ncu-tgt.sh` 发起 `ncu --launch-skip 4000 --launch-count 60` 打**真实 M=8 验证轮**。它的日志被脚本自己的 `rm -rf "$OUT".*` 删掉了（见 §9 第 14 条），但 `/tmp/ncu-tgt-server.log` 留下了真相：
+```
+==WARNING== Backing up device memory in system memory. Kernel replay might be slow.
+==ERROR== UnknownError
+==ERROR== Failed to profile "scale_f32" in process 1322774
+==ERROR== No kernels were profiled.
+```
+⇒ **Q8_0 29 GB 权重 + 3 卡，ncu 的 device-memory save/restore 撑不住 ⇒ ncu 这条 profiling 路在本机封死**（nsys 同样拿不到 CUDA kernel 数据）。
+⇒ 要 kernel 级证据，只剩**在 `ggml_backend_cuda_graph_compute` 里加 env-gated 的按 op name 聚合计时**（需 `GGML_CUDA_DISABLE_GRAPHS=1`，因为 capture 的图里每节点 event 无效）。
+
+**② 可用的替代（路径已验证，不是猜的）**
+⚠️ `test-backend-ops` **不在 `build/bin/`，在 `build-nccl/bin/`**（两个 build 的 CMakeCache 都是 `LLAMA_BUILD_TESTS:BOOL=ON`，但只有 `build-nccl` 产出了它）。
+```sh
+cd /root/llm/test/v100-opt/llama.cpp
+LD_LIBRARY_PATH=/root/libdir-nccl CUDA_VISIBLE_DEVICES=0 \
+  ./build-nccl/bin/test-backend-ops perf -o GATED_DELTA_NET -b CUDA0
+```
+脚本 `opbench.sh`（本会话跑过）；原始输出已存档：`opbench-gdn-raw.txt`、`opbench-fa-raw.txt`、`opbench-mm-raw.txt`。
+
+**③ 实测数据（单卡、隔离 op；**不是**真实图，口径必须标注）**
+
+**GDN（gated delta net）**，`head_count=32, head_size=128`（= 本模型的 DeltaNet 形状）：
+
+| n_seq_tokens | us/run | 带宽 |
 |---|---|---|
-| ① `FUSED_GDN_INPUT_FP16` / `FUSED_HC_FP16`（GDN 输入/头融合 + FP16） | 1cat `VLLM_SM70_QWEN38_FUSED_GDN_INPUT_FP16` / `_FUSED_HC_FP16` | 若待办 1 显示 GDN 占比大，这条最值 |
-| ② FP16 GEMV（checkpoint-FP16 GEMV） | 1cat `VLLM_SM70_QWEN38_FP16_GEMV` | 需先搞清它和"FP16 act/KV 原生路径"的差别 |
-| ③ push-based allreduce（`csrc/custom_all_reduce.cuh`，C=1 +7.8% / C=16 +4.3%） | 1cat 自研，**与所有现成通道都不同** | 前提是先把 NCCL 基线守住（见"Must not"） |
+| **1（= decode 形状）** | **5.50** | **721.76 GB/s**（贴近屋顶） |
+| 64 | 99.21 | 78.91 GB/s |
+| 256 | 393.02 | 49.87 GB/s |
+| 512 | 790.70 | 44.66 GB/s |
+| 1024 | 1577.06 | 42.34 GB/s |
+
+⇒ **GDN 边际成本 ≈ 1.53-1.55 us/token**（64/256/512/1024 四点一致）⇒ **M=8 约 5.5 + 7×1.53 ≈ 16 us/层**。
+（注意：GDN 在**大 n（prefill）掉到 42-50 GB/s** —— 那是 prefill 侧的低效点，与本轮 decode 目标不同。）
+
+**FlashAttention（q8_0 K/V）**：
+
+| kv | us/run |
+|---|---|
+| 128 | 35.79 |
+| **512** | **25.68** |
+| **1024** | **25.55** |
+| 2048 | 37.69 |
+| 4096 | 60.70 |
+| 7680（hsk=64,nh=8） | 216.33 |
+| 10000 | 203.11 |
+| 20000 | 392.88 |
+
+**④ ★ 结论（与层数无关 ⇒ 现在就成立）**
+- 我们固定口径是**短上下文**（实际 prompt ~76-590 token）⇒ 单层 FA ≈ **26 us**、单层 GDN ≈ **16 us**。
+- 顺带核实了模型结构：**65 个 block**（0..63 主体 + **blk.64 = MTP/NextN 块**；用外部 DFlash2 draft 时被忽略 —— 证据：加载日志里 `blk.64.nextn.*` 全部 `unused tensor ... ignoring`）；由 `ffn_gate.weight = 94699520 B` 反推 **n_embd = 5120 / ffn = 17408**（Q8_0 下 94699520×32/34 = 17408×5120），**与 1cat 的 `5x17408x5120` 形状完全对上**。
+- **即使把 64 层全算成 FA：64 × 26 us = 1.66 ms；全算 GDN：64 × 16 us = 1.02 ms。** 而 target 的 M=8 前向是 **29.87-32 ms/轮**（`[RT] target decode+sync` 实测 32.4 ms @TP3，某 NCCL TP3 臂日志里 47.56 ms）。
+- ⇒ **GDN + attention 合计只占 ~1-2 ms / ~30 ms（约 3-6%）。它们不是 3× 差距之所在。**
+- ⇒ **Goal 8dbd30ea 的候选 ①（`FUSED_GDN_INPUT_FP16` / `FUSED_HC_FP16`）优先级下调**；attention 只在**长上下文**变大（kv=7680 时 64 层 ≈ 13.8 ms —— 那才是 FA 该优化处，与 §0.13-D3「长上下文 decode 是 FA 计算受限」一致）。
+
+**⑤ ⇒ 钱在另外三处（按头寸排序）**
+1. **draft 前向（最大待定项）**：`draft_decode` ≈ **14.2-15.2 ms/轮**，而 draft 权重只有 **1.14 GB**。
+   - 若**一轮一次**前向 ⇒ 有效带宽仅 **~76-80 GB/s**（dispatch 受限，**头寸 ~8-12×**）
+   - 若**一轮 8 次**前向（8×1.14 GB = 9.1 GB）⇒ ≈607 GB/s（67% 屋顶，头寸只有 ~1.5×）
+   - **这两种解释差 8 倍，必须先定论**。做法：读 `common/speculative.cpp` 的 block-draft 路径一轮做几次 draft 前向；或跑 `--spec-draft-n-max 1/3/7` 看 `draft_decode` 是否随 `n_max` 线性变化（**线性 ⇒ 每 token 一次；不变 ⇒ 一次块前向**）。
+2. **我们每轮还有 ~21 ms 未归因**：修好 selector 后每轮 ≈73 ms = target 29.7 + draft 15.1 + selector 4.4 + walk 0.09 + host 2.4，**尚余 ~21 ms**（`goal-phase1-findings.md` 第 3 条）。**这 21 ms 是当前最大的单一未知量。**
+3. **量化 matmul**：q8_0 n=8 已 555 GB/s（自身 n=1 屋顶 757 GB/s 的 73%）⇒ **上限 1.36×，已封顶**。只在 n≈5-12 这段还有故事（1cat 的 m5/small-N 算子正对此），但那最多 1.36×。
+
+### 待办 2：落地下一步（**顺序已按待办 1 的结论重排**）
+| 序 | 动作 | 理由 / 头寸 |
+|---|---|---|
+| **2a** | **定论 "draft 前向一轮几次"**：读 `common/speculative.cpp` 的 block-draft 路径，或跑 `--spec-draft-n-max 1/3/7` 看 `draft_decode` 是否随 `n_max` 线性 | 头寸 **8-12× vs 1.5×**，当前最大待定项 |
+| **2b** | **攻那 ~21 ms 未归因**（加 per-op 计时或更细分段计时；注意 `GGML_CUDA_DISABLE_GRAPHS=1` 才好在图内埋点） | 最大单一未知量，约占每轮 29% |
+| 2c | 量化 matmul 的 **M≈5-12** 段（1cat 的 m5 / small-N HMMA 算子思路可借鉴） | **上限 1.36×，已封顶** |
+| 2d | `FUSED_GDN_INPUT_FP16` / `FUSED_HC_FP16`（1cat `VLLM_SM70_QWEN38_*`） | **优先级下调**（GDN 只占 3-6%） |
+| 2e | push-based allreduce（1cat `csrc/custom_all_reduce.cuh`；其 C=1 +7.8% / C=16 +4.3%），与所有现成通道都不同 | 先守住 NCCL 基线；**不要**引入 `VLLM_SM70_USE_BREAKABLE_CUDAGRAPH`（−13% ~ −29%） |
+| 2f | 长上下文口径的 FA（kv≥4096 时 64 层 FA ≈ 6-14 ms，才是 FA 该优化处） | **当前短上下文口径不适用**，换口径才做 |
 
 **明确禁止**：`VLLM_SM70_USE_BREAKABLE_CUDAGRAPH`（1cat 实测 −13% ~ −29%）。
-**也别忘了**：draft 前向 15.01 ms 对应的有效带宽只有 76 GB/s（dispatch 受限）—— 这是待办 1 之后**第二个**该查的点。
 
 ### 待办 3：验收（Goal 8dbd30ea 的 Done when，逐条贴证据）
 1. 贴 **GDN vs attention 成本占比**实测证据行
@@ -384,11 +447,18 @@ metrics：`gpu__time_duration.sum`、`sm__throughput.avg.pct_of_peak_sustained_e
 # 0) 看现状
 ssh -o BatchMode=yes root@192.168.50.235 'nvidia-smi --query-gpu=index,memory.used --format=csv; systemctl is-active vllm-1cat llmscope'
 
-# 1) 读那次没读的 ncu 结果（待办 1）
-ssh -o BatchMode=yes root@192.168.50.235 'grep -aE "ncu version|error|Error|Duration|GATED|FLASH|MUL_MAT|===|NCU_TGT_DONE" /tmp/ncu-tgt.log | head -60; echo ===TAIL===; tail -25 /tmp/ncu-tgt.log'
+# 1) ncu 路已确认封死（待办 1）；真要看真相看 server 日志，别看 .log（被脚本自己删了）
+ssh -o BatchMode=yes root@192.168.50.235 'grep -aE "ERROR|Failed to profile|No kernels|Backing up device" /tmp/ncu-tgt-server.log'
 
-# 2) 若 ncu 不可用：op 级微基准（需先确认 build/bin/test-backend-ops 在）
-ssh -o BatchMode=yes root@192.168.50.235 'cd /root/llm/test/v100-opt/llama.cpp && LD_LIBRARY_PATH=build/bin build/bin/test-backend-ops perf -o GATED_DELTA_NET -b CUDA0'
+# 2) op 级微基准（路径已验证：在 build-nccl/bin/，库用 /root/libdir-nccl）
+ssh -o BatchMode=yes root@192.168.50.235 'cd /root/llm/test/v100-opt/llama.cpp && LD_LIBRARY_PATH=/root/libdir-nccl CUDA_VISIBLE_DEVICES=0 ./build-nccl/bin/test-backend-ops perf -o GATED_DELTA_NET -b CUDA0'
+
+# 2b) 全量 opbench（GDN + FLASH_ATTN_EXT + MUL_MAT，约 10 min；脚本已存档 opbench.sh）
+ssh -o BatchMode=yes root@192.168.50.235 'nohup bash /root/opbench.sh > /tmp/opbench.log 2>&1 < /dev/null & echo LAUNCHED'
+
+# 2c) 待办 2a：用 harness 的 NPRED（= --spec-draft-n-max）分别跑 1 / 3 / 7，
+#     看日志里 "draft: spec timing: ... draft_decode=" 是否随 NPRED 线性变化
+#     （线性 ⇒ 每 token 一次前向；不变 ⇒ 一轮一次块前向）
 
 # 3) 基线复现（正式口径，带 drop_caches）
 ssh -o BatchMode=yes root@192.168.50.235 'CARDS=0,1,2 SPLIT=tensor TAG=handoff-base L=/root/libdir-nccl bash /root/p60-ab-harness.sh'

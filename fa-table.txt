@@ -1,0 +1,21 @@
+kv=128    nh=2   hsk=256  hsv=256       35.79 us/run      117.19 GFLOPS
+kv=512    nh=2   hsk=256  hsv=256       25.68 us/run      653.24 GFLOPS
+kv=1024   nh=2   hsk=256  hsv=256       25.55 us/run             GFLOPS
+kv=2048   nh=2   hsk=256  hsv=256       37.69 us/run             GFLOPS
+kv=4096   nh=2   hsk=256  hsv=256       60.70 us/run             GFLOPS
+kv=7680   nh=8   hsk=64   hsv=64       216.33 us/run      581.66 GFLOPS
+kv=7680   nh=8   hsk=64   hsv=64      2249.63 us/run             GFLOPS
+kv=10000  nh=2   hsk=256  hsv=256      203.11 us/run             GFLOPS
+kv=10000  nh=2   hsk=256  hsv=256    17328.33 us/run             GFLOPS
+kv=20000  nh=2   hsk=256  hsv=256             us/run             GFLOPS
+kv=20000  nh=2   hsk=256  hsv=256      392.88 us/run             GFLOPS
+=== total q8_0 rows: 11
+===MMPROC===
+=== which ===
+-rwxr-xr-x 1 root root 1638912 Sep 20 19:34 ./build-nccl/bin/test-backend-ops
+=== GATED_DELTA_NET perf ===
+gdn lines: 34
+=== FLASH_ATTN_EXT perf ===
+fa lines: 356
+=== MUL_MAT q8_0 perf (for the incumbent reference) ===
+DONE 

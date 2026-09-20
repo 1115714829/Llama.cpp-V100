@@ -1,0 +1,8 @@
+===LEFT===
+===TBO===
+NO_TBO
+===NCUVER===
+NVIDIA (R) Nsight Compute Command Line Profiler
+Copyright (c) 2018-2024 NVIDIA Corporation
+Version 2024.1.1.0 (build 33998838) (public-release)
+DONE 

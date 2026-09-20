@@ -1,0 +1,8 @@
+===MARK===
+===KEY===
+grep: /tmp/ncu-tgt.log: No such file or directory
+===TAIL===
+tail: cannot open '/tmp/ncu-tgt.log' for reading: No such file or directory
+===REPFILE===
+-rw-r--r-- 1 root root 2591 Sep 20 20:40 /tmp/ncu-tgt-server.log
+DONE 

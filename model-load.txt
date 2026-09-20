@@ -1,0 +1,57 @@
+3:0.00.357.944 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.000.272 I srv  llama_server: initializing ...
+0.00.346.242 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.357.944 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.358.060 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.108.656 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.108.673 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.108.690 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.108.696 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.108.703 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.108.726 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.108.733 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.108.739 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.108.746 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.108.752 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.108.759 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.108.766 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.108.773 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.108.781 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.108.800 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.03.573.837 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.03.805.108 I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+0.03.805.118 I common_speculative_init_result: loading draft model '/root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf'
+0.04.570.412 W model has unused tensor selector_predecessor.weight (size = 35758080 bytes) -- ignoring
+0.04.570.421 W model has unused tensor selector_successor.weight (size = 35758080 bytes) -- ignoring
+0.04.738.456 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 8192, kv_unified = 'false'
+0.04.990.252 I common_speculative_impl_draft_dflash: adding speculative implementation 'draft-dflash'
+0.04.990.269 I common_speculative_impl_draft_dflash: - n_max=7, n_min=0, p_min=0.00
+0.04.990.270 I common_speculative_impl_draft_dflash: - block_size=8, mask_token_id=248070, n_extract=5, sample_from_anchor=true
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.05.081.335 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoni
+0.05.081.369 I srv  llama_server: model loaded
+0.05.081.378 I srv  llama_server: listening on http://127.0.0.1:8132
+0.14.895.912 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.14.895.996 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+[RT] llama_decode entered: n_tokens=42
+[RT] ctx::decode entered: n_tokens=42
+[RT] process_ubatch entered: n_tokens=42
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 34.870 ms over 64 calls (0.545 ms/call)
+0.16.515.076 I draft: spec timing: n=16 | draft_decode=15.16 selector=4.32 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 69.787 ms over 128 calls (0.545 ms/call)
+[RT] spec checkpoints: 0.023 ms/round over 32 rounds
+[RT] target decode+sync: 47.556 ms/round over 32 rounds (last n_tokens=8)
+0.17.300.080 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=33)
+0.17.353.615 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.28 ms (threads=8, n_tokens=8)
+0.17.353.703 I draft: spec timing: n=32 | draft_decode=14.36 selector=4.28 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 105.032 ms over 192 calls (0.547 ms/call)
+0.18.310.693 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.59 accept=0.00 ms (n_process=49)
+0.18.365.380 I draft: spec timing: n=48 | draft_decode=14.19 selector=4.28 walk=0.09 ms/round
+0.18.504.668 I slot print_timing: id  0 | task 0 | n_gen =    250, tg =  81.96 t/s, tg_3s =  82.29 t/s
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 139.884 ms over 256 calls (0.546 ms/call)
+DONE 

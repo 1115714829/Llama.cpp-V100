@@ -1,0 +1,162 @@
+0.00.000.272 I srv  llama_server: initializing ...
+0.00.346.242 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.357.944 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.358.060 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.108.656 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.108.673 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.108.690 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.108.696 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.108.703 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.108.726 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.108.733 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.108.739 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.108.746 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.108.752 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.108.759 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.108.766 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.108.773 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.108.781 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.108.800 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.03.573.837 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.03.805.108 I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+0.03.805.118 I common_speculative_init_result: loading draft model '/root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf'
+0.04.570.412 W model has unused tensor selector_predecessor.weight (size = 35758080 bytes) -- ignoring
+0.04.570.421 W model has unused tensor selector_successor.weight (size = 35758080 bytes) -- ignoring
+0.04.738.456 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 8192, kv_unified = 'false'
+0.04.990.252 I common_speculative_impl_draft_dflash: adding speculative implementation 'draft-dflash'
+0.04.990.269 I common_speculative_impl_draft_dflash: - n_max=7, n_min=0, p_min=0.00
+0.04.990.270 I common_speculative_impl_draft_dflash: - block_size=8, mask_token_id=248070, n_extract=5, sample_from_anchor=true
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.05.081.335 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.05.081.369 I srv  llama_server: model loaded
+0.05.081.378 I srv  llama_server: listening on http://127.0.0.1:8132
+0.14.895.912 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.14.895.996 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+[RT] llama_decode entered: n_tokens=42
+[RT] ctx::decode entered: n_tokens=42
+[RT] process_ubatch entered: n_tokens=42
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 34.870 ms over 64 calls (0.545 ms/call)
+0.16.515.076 I draft: spec timing: n=16 | draft_decode=15.16 selector=4.32 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 69.787 ms over 128 calls (0.545 ms/call)
+[RT] spec checkpoints: 0.023 ms/round over 32 rounds
+[RT] target decode+sync: 47.556 ms/round over 32 rounds (last n_tokens=8)
+0.17.300.080 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=33)
+0.17.353.615 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.28 ms (threads=8, n_tokens=8)
+0.17.353.703 I draft: spec timing: n=32 | draft_decode=14.36 selector=4.28 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 105.032 ms over 192 calls (0.547 ms/call)
+0.18.310.693 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.59 accept=0.00 ms (n_process=49)
+0.18.365.380 I draft: spec timing: n=48 | draft_decode=14.19 selector=4.28 walk=0.09 ms/round
+0.18.504.668 I slot print_timing: id  0 | task 0 | n_gen =    250, tg =  81.96 t/s, tg_3s =  82.29 t/s
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 139.884 ms over 256 calls (0.546 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 174.763 ms over 320 calls (0.546 ms/call)
+[RT] spec checkpoints: 0.027 ms/round over 64 rounds
+[RT] target decode+sync: 34.280 ms/round over 64 rounds (last n_tokens=8)
+0.19.174.518 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.58 accept=0.00 ms (n_process=65)
+0.19.229.503 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.27 ms (threads=8, n_tokens=8)
+0.19.229.653 I draft: spec timing: n=64 | draft_decode=14.06 selector=4.28 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 210.460 ms over 384 calls (0.548 ms/call)
+0.20.026.985 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=81)
+0.20.081.485 I draft: spec timing: n=80 | draft_decode=13.96 selector=4.28 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 245.495 ms over 448 calls (0.548 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 280.386 ms over 512 calls (0.548 ms/call)
+[RT] perf: rounds=95 reuse=88 rebuild=7 | build_us=12270 alloc_us=197209 setin_us=3539 enqueue_us=2074785
+0.20.892.667 I slot print_timing: id  0 | task 0 | prompt eval time =     570.60 ms /    76 tokens (    7.51 ms per token,   133.19 tokens per second)
+0.20.892.674 I slot print_timing: id  0 | task 0 |        eval time =    5426.02 ms /   512 tokens (   10.62 ms per token,    94.18 tokens per second)
+0.20.892.676 I slot print_timing: id  0 | task 0 |       total time =    5996.62 ms /   588 tokens
+0.20.892.693 I slot print_timing: id  0 | task 0 |    graphs reused =         88
+0.20.892.700 I slot print_timing: id  0 | task 0 | draft acceptance = 0.65265 (  419 accepted /   642 generated), mean len =  5.55
+0.20.892.779 I slot      release: id  0 | task 0 | stop processing: n_tokens = 587, truncated = 0
+0.21.126.079 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.425 (> 0.100 thold), f_keep = 0.077
+[RT] spec checkpoints: 0.026 ms/round over 96 rounds
+0.21.267.909 I slot launch_slot_: id  0 | task 96 | processing task, is_child = 0
+[RT] target decode+sync: 36.462 ms/round over 96 rounds (last n_tokens=42)
+0.21.871.098 I common_speculative_timing_report: spec overhead per round | process=0.09 draft=0.00 accept=0.00 ms (n_process=99)
+0.22.023.464 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.28 ms (threads=8, n_tokens=8)
+0.22.023.584 I draft: spec timing: n=96 | draft_decode=13.94 selector=4.28 walk=0.10 ms/round
+0.22.740.663 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=115)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 34.942 ms over 576 calls (0.061 ms/call)
+0.22.865.044 I draft: spec timing: n=112 | draft_decode=13.89 selector=4.28 walk=0.10 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 69.478 ms over 640 calls (0.109 ms/call)
+[RT] spec checkpoints: 0.025 ms/round over 128 rounds
+[RT] target decode+sync: 38.103 ms/round over 128 rounds (last n_tokens=8)
+0.23.662.750 I common_speculative_timing_report: spec overhead per round | process=0.07 draft=0.00 accept=0.00 ms (n_process=131)
+0.23.818.748 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.25 ms (threads=8, n_tokens=8)
+0.23.818.838 I draft: spec timing: n=128 | draft_decode=13.87 selector=4.27 walk=0.10 ms/round
+0.24.523.397 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=147)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 104.610 ms over 704 calls (0.149 ms/call)
+0.24.646.947 I draft: spec timing: n=144 | draft_decode=13.84 selector=4.27 walk=0.10 ms/round
+0.24.783.882 I slot print_timing: id  0 | task 96 | n_gen =    205, tg =  67.02 t/s, tg_3s =  67.35 t/s
+[RT] spec checkpoints: 0.027 ms/round over 160 rounds
+[RT] target decode+sync: 32.786 ms/round over 160 rounds (last n_tokens=8)
+0.25.353.077 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=163)
+0.25.482.202 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.25 ms (threads=8, n_tokens=8)
+0.25.482.291 I draft: spec timing: n=160 | draft_decode=13.84 selector=4.27 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 140.392 ms over 768 calls (0.183 ms/call)
+0.26.204.227 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=179)
+0.26.327.608 I draft: spec timing: n=176 | draft_decode=13.84 selector=4.27 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 175.070 ms over 832 calls (0.210 ms/call)
+[RT] spec checkpoints: 0.028 ms/round over 192 rounds
+[RT] target decode+sync: 29.731 ms/round over 192 rounds (last n_tokens=8)
+0.27.042.857 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=195)
+0.27.178.312 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.26 ms (threads=8, n_tokens=8)
+0.27.178.422 I draft: spec timing: n=192 | draft_decode=13.83 selector=4.27 walk=0.10 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 210.468 ms over 896 calls (0.235 ms/call)
+0.27.808.197 I slot print_timing: id  0 | task 96 | n_gen =    437, tg =  71.85 t/s, tg_3s =  76.71 t/s
+0.27.967.142 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=211)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 246.396 ms over 960 calls (0.257 ms/call)
+0.28.103.862 I draft: spec timing: n=208 | draft_decode=13.86 selector=4.27 walk=0.10 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 282.102 ms over 1024 calls (0.275 ms/call)
+[RT] perf: rounds=219 reuse=205 rebuild=14 | build_us=24596 alloc_us=397018 setin_us=8209 enqueue_us=4479570
+0.28.502.752 I slot print_timing: id  0 | task 96 | prompt eval time =     472.21 ms /   106 tokens (    4.45 ms per token,   224.48 tokens per second)
+0.28.502.758 I slot print_timing: id  0 | task 96 |        eval time =    6762.56 ms /   512 tokens (   13.23 ms per token,    75.56 tokens per second)
+0.28.502.760 I slot print_timing: id  0 | task 96 |       total time =    7234.77 ms /   618 tokens
+0.28.502.774 I slot print_timing: id  0 | task 96 |    graphs reused =        205
+0.28.502.782 I slot print_timing: id  0 | task 96 | draft acceptance = 0.46263 (  390 accepted /   843 generated), mean len =  4.22
+0.28.502.835 I slot      release: id  0 | task 96 | stop processing: n_tokens = 617, truncated = 0
+0.29.359.401 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.536 (> 0.100 thold), f_keep = 0.073
+0.29.500.258 I slot launch_slot_: id  0 | task 221 | processing task, is_child = 0
+[RT] spec checkpoints: 0.030 ms/round over 224 rounds
+[RT] target decode+sync: 45.036 ms/round over 224 rounds (last n_tokens=8)
+0.30.408.912 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=228)
+0.30.618.529 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.32 ms (threads=8, n_tokens=8)
+0.30.618.643 I draft: spec timing: n=224 | draft_decode=13.89 selector=4.28 walk=0.10 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 35.122 ms over 1088 calls (0.032 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 71.049 ms over 1152 calls (0.062 ms/call)
+0.31.287.734 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=244)
+0.31.504.470 I draft: spec timing: n=240 | draft_decode=13.91 selector=4.28 walk=0.10 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 106.039 ms over 1216 calls (0.087 ms/call)
+[RT] spec checkpoints: 0.033 ms/round over 256 rounds
+[RT] target decode+sync: 32.754 ms/round over 256 rounds (last n_tokens=8)
+0.32.261.534 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=260)
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 141.013 ms over 1280 calls (0.110 ms/call)
+0.32.477.791 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + work 3.29 ms (threads=8, n_tokens=8)
+0.32.477.880 I draft: spec timing: n=256 | draft_decode=13.91 selector=4.28 walk=0.09 ms/round
+[RT] perf: rounds=270 reuse=251 rebuild=19 | build_us=33325 alloc_us=540624 setin_us=10162 enqueue_us=5668995
+0.32.780.891 I slot print_timing: id  0 | task 221 | prompt eval time =     453.19 ms /    84 tokens (    5.40 ms per token,   185.35 tokens per second)
+0.32.780.897 I slot print_timing: id  0 | task 221 |        eval time =    2827.36 ms /   306 tokens (    9.27 ms per token,   107.87 tokens per second)
+0.32.780.899 I slot print_timing: id  0 | task 221 |       total time =    3280.55 ms /   390 tokens
+0.32.780.937 I slot print_timing: id  0 | task 221 |    graphs reused =        251
+0.32.780.945 I slot print_timing: id  0 | task 221 | draft acceptance = 0.76786 (  258 accepted /   336 generated), mean len =  6.38
+0.32.781.009 I slot      release: id  0 | task 221 | stop processing: n_tokens = 390, truncated = 0
+0.33.595.548 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.215
+0.33.723.017 I slot launch_slot_: id  0 | task 273 | processing task, is_child = 0
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 43.883 ms over 1344 calls (0.033 ms/call)
+0.34.648.458 I common_speculative_timing_report: spec overhead per round | process=0.07 draft=0.00 accept=0.00 ms (n_process=278)
+0.35.019.538 I draft: spec timing: n=272 | draft_decode=13.91 selector=4.28 walk=0.09 ms/round
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 274.614 ms over 1408 calls (0.195 ms/call)
+[RT] spec checkpoints: 0.026 ms/round over 288 rounds
+[RT] target decode+sync: 41.027 ms/round over 288 rounds (last n_tokens=8)
+[RT] perf: rounds=294 reuse=270 rebuild=24 | build_us=42142 alloc_us=688044 setin_us=11086 enqueue_us=6402997
+0.35.864.797 I slot print_timing: id  0 | task 273 | prompt eval time =     454.56 ms /    84 tokens (    5.41 ms per token,   184.79 tokens per second)
+0.35.864.804 I slot print_timing: id  0 | task 273 |        eval time =    1687.18 ms /   128 tokens (   13.28 ms per token,    75.27 tokens per second)
+0.35.864.805 I slot print_timing: id  0 | task 273 |       total time =    2141.74 ms /   212 tokens
+0.35.864.846 I slot print_timing: id  0 | task 273 |    graphs reused =        270
+0.35.864.853 I slot print_timing: id  0 | task 273 | draft acceptance = 0.75714 (  106 accepted /   140 generated), mean len =  6.30
+0.35.864.904 I slot      release: id  0 | task 273 | stop processing: n_tokens = 211, truncated = 0
+0.35.968.726 I srv    operator(): operator(): cleaning up before exit...
+0.35.984.963 W ~llama_context:  CUDA_Host compute buffer size of   5.8612 MiB, does not match expectation of   1.5334 MiB

@@ -1,0 +1,28 @@
+===FARAWSHAPES===
+  FLASH_ATTN_EXT(hsk=64,hsv=64,nh=8,nr23=[8,1],kv=7680,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_of_
+  FLASH_ATTN_EXT(hsk=64,hsv=64,nh=8,nr23=[8,1],kv=7680,nb=512,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_o
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=128,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_o
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=512,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_o
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=1024,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=2048,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=4096,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view_
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=10000,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=20000,nb=1,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_view
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=10000,nb=512,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_vi
+  FLASH_ATTN_EXT(hsk=256,hsv=256,nh=2,nr23=[16,1],kv=20000,nb=512,mask=1,sinks=0,max_bias=0.000000,logit_softcap=0.000000,prec=f32,type_K=q8_0,type_V=q8_0,permute=[0,1,2,3],kv_view=1,v_is_vi
+===FARAWNUMS===
+                 4770 runs -   216.33 us/run - 125.83 MFLOP/run - [1;34m581.66 GFLOPS[0m
+                446 runs -  2249.63 us/run -  64.42 GFLOP/run - [1;34m 28.64 TFLOPS[0m
+              32760 runs -    35.79 us/run -   4.19 MFLOP/run - [1;34m117.19 GFLOPS[0m
+              41727 runs -    25.68 us/run -  16.78 MFLOP/run - [1;34m653.24 GFLOPS[0m
+             41734 runs -    25.55 us/run -  33.55 MFLOP/run - [1;34m  1.31 TFLOPS[0m
+             26838 runs -    37.69 us/run -  67.11 MFLOP/run - [1;34m  1.78 TFLOPS[0m
+             17158 runs -    60.70 us/run - 134.22 MFLOP/run - [1;34m  2.21 TFLOPS[0m
+             5202 runs -   203.11 us/run - 327.68 MFLOP/run - [1;34m  1.61 TFLOPS[0m
+             2601 runs -   392.88 us/run - 655.36 MFLOP/run - [1;34m  1.67 TFLOPS[0m
+                     58 runs - 17328.33 us/run - 167.77 GFLOP/run - [1;34m  9.68 TFLOPS[0m
+===MOSTLOGS===
+/tmp/ncu-tgt-server.log
+/tmp/p60-c4-debug-server.log
+/tmp/p60-c6-012345-server.log
+DONE 
