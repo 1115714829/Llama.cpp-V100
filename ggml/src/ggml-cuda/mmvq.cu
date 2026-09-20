@@ -95,6 +95,7 @@ static constexpr __host__ __device__ int get_vdr_mmvq(ggml_type type) {
 
 enum mmvq_parameter_table_id {
     MMVQ_PARAMETERS_GENERIC = 0,
+    MMVQ_PARAMETERS_VOLTA,
     MMVQ_PARAMETERS_TURING,
     MMVQ_PARAMETERS_GCN,
     MMVQ_PARAMETERS_RDNA2,
@@ -114,6 +115,8 @@ static constexpr __device__ mmvq_parameter_table_id get_device_table_id() {
     return MMVQ_PARAMETERS_GCN;
 #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= GGML_CUDA_CC_TURING && __CUDA_ARCH__ < GGML_CUDA_CC_AMPERE
     return MMVQ_PARAMETERS_TURING;
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA && __CUDA_ARCH__ < GGML_CUDA_CC_TURING
+    return MMVQ_PARAMETERS_VOLTA;
 #elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ == GGML_CUDA_CC_DGX_SPARK
     return MMVQ_PARAMETERS_GB10;
 #else
@@ -136,6 +139,9 @@ static __host__ mmvq_parameter_table_id get_device_table_id(int cc) {
     }
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) >= GGML_CUDA_CC_TURING && ggml_cuda_highest_compiled_arch(cc) < GGML_CUDA_CC_AMPERE) {
         return MMVQ_PARAMETERS_TURING;
+    }
+    if (GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) >= GGML_CUDA_CC_VOLTA && ggml_cuda_highest_compiled_arch(cc) < GGML_CUDA_CC_TURING) {
+        return MMVQ_PARAMETERS_VOLTA;
     }
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) == GGML_CUDA_CC_DGX_SPARK) {
         return MMVQ_PARAMETERS_GB10;
@@ -365,6 +371,16 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
                 return ne11 <= MMVQ_MAX_BATCH_SIZE;
         }
     }
+    if (GGML_CUDA_CC_IS_NVIDIA(cc) && cc == GGML_CUDA_CC_VOLTA) {
+        switch (type) { // tuned on Tesla V100
+            case GGML_TYPE_Q2_K:
+            case GGML_TYPE_Q3_K:
+            case GGML_TYPE_Q4_K:
+                return ne11 <= MMVQ_VOLTA_MAX_BATCH_SIZE_K;
+            default:
+                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+        }
+    }
     if (GGML_CUDA_CC_IS_CDNA(cc)) {
         if (GGML_CUDA_CC_IS_CDNA1(cc)) {
             switch (type) {
@@ -437,6 +453,23 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
     if (table_id == MMVQ_PARAMETERS_GENERIC) {
         switch (ncols_dst) {
             case 1:
+            case 2:
+            case 3:
+            case 4:
+                return 4;
+            case 5:
+            case 6:
+            case 7:
+            case 8:
+                return 2;
+            default:
+                return 1;
+        }
+    } else if (table_id == MMVQ_PARAMETERS_VOLTA) {
+        // V100 (CC 700) ncols=1 tuned on AC922 (tg128): nwarps 8=32.05, 4=36.23, 2=37.52 (best), 1=37.24.
+        switch (ncols_dst) {
+            case 1:
+                return 2;
             case 2:
             case 3:
             case 4:
@@ -561,7 +594,7 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
 }
 
 static constexpr __host__ __device__ int calc_rows_per_block(int ncols_dst, int table_id, bool small_k = false, int nwarps = 1) {
-    if (table_id == MMVQ_PARAMETERS_GENERIC || table_id == MMVQ_PARAMETERS_GCN || table_id == MMVQ_PARAMETERS_TURING || table_id == MMVQ_PARAMETERS_GB10) {
+    if (table_id == MMVQ_PARAMETERS_GENERIC || table_id == MMVQ_PARAMETERS_GCN || table_id == MMVQ_PARAMETERS_TURING || table_id == MMVQ_PARAMETERS_GB10 || table_id == MMVQ_PARAMETERS_VOLTA) {
         switch (ncols_dst) {
             case 1:
                 return small_k ? nwarps : 1;

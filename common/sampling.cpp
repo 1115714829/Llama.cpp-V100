@@ -592,7 +592,28 @@ struct llama_sampler * common_sampler_get(const struct common_sampler * gsmpl) {
 }
 
 llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_context * ctx, int idx, bool grammar_first) {
+    // optional: time the synchronization that absorbs the async decode completion (LLAMA_SPEC_TIMING).
+    // This sits *before* the sampler's own timer on purpose (see the note below), so without this
+    // measurement the waiting time is attributed to nothing.
+    static const bool st_sync_enabled = (getenv("LLAMA_SPEC_TIMING") != nullptr);
+    static int64_t st_sync_us = 0;
+    static int32_t st_sync_n  = 0;
+    const int64_t st_sync_t0 = st_sync_enabled ? ggml_time_us() : 0;
+
     llama_synchronize(ctx);
+
+    if (st_sync_enabled) {
+        st_sync_us += ggml_time_us() - st_sync_t0;
+        if (++st_sync_n % 64 == 0) {
+            // also report the sampling body itself: set_logits materializes the full vocabulary,
+            // so this is the candidate for the currently unattributed per-round CPU cost
+            fprintf(stderr, "[RT] common_sampler_sample: llama_synchronize = %.3f ms/call | "
+                    "sampling cumulative = %.3f ms over %d calls (%.3f ms/call)\n",
+                    st_sync_us/1e3/64.0, gsmpl->t_total_us/1e3, st_sync_n,
+                    gsmpl->t_total_us/1e3/(st_sync_n ? st_sync_n : 1));
+            st_sync_us = 0;
+        }
+    }
 
     // start measuring sampling time after the llama_context synchronization in order to not measure any ongoing async operations
     const auto tm = gsmpl->tm();

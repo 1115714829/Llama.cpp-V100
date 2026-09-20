@@ -2,6 +2,10 @@
 
 #define MMVQ_MAX_BATCH_SIZE 8 // Max. batch size for which to use MMVQ kernels.
 
+// Max. batch size for which to use MMVQ kernels for K-quants on Volta.
+// Measured on V100: MMQ beats MMVQ at ne11=8 (+2.6%) and ne11=6 (+1.1%), MMVQ wins at ne11=4 (-1.2%).
+#define MMVQ_VOLTA_MAX_BATCH_SIZE_K 4
+
 bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11);
 
 // Returns the maximum batch size for which MMVQ should be used for MUL_MAT_ID,

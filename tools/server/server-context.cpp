@@ -3048,6 +3048,10 @@ private:
         }
 
         // make checkpoints if needed
+        static const bool st_ckpt_enabled = (getenv("LLAMA_SPEC_TIMING") != nullptr);
+        static int64_t st_ckpt_us = 0;
+        static int32_t st_ckpt_n  = 0;
+        const int64_t st_ckpt_t0 = st_ckpt_enabled ? ggml_time_us() : 0;
         iterate(drafting, [&](server_slot & slot) {
             auto & draft = slot.spec_draft;
             auto & ckpt  = slot.spec_ckpt;
@@ -3094,6 +3098,15 @@ private:
                 }
             }
         });
+
+        if (st_ckpt_enabled) {
+            st_ckpt_us += ggml_time_us() - st_ckpt_t0;
+            if (++st_ckpt_n % 32 == 0) {
+                fprintf(stderr, "[RT] spec checkpoints: %.3f ms/round over %d rounds\n",
+                        st_ckpt_us/1e3/32.0, st_ckpt_n);
+                st_ckpt_us = 0;
+            }
+        }
 
         // update the batch with the sampled/drafted tokens
         iterate(generating, [&](server_slot & slot) {
@@ -3678,12 +3691,26 @@ private:
         // yield to the queue, so we can still handle metrics tasks while decoding
         // note: the sync is done here too, so that the wait is also covered by the yield
         int ret = 0;
+        // optional: time the target's decode *including* the completion wait, so the target's real
+        // GPU cost is attributable instead of hiding in a later call (LLAMA_SPEC_TIMING)
+        static const bool st_tgt_enabled = (getenv("LLAMA_SPEC_TIMING") != nullptr);
+        static int64_t st_tgt_us = 0;
+        static int32_t st_tgt_n  = 0;
+        const int64_t st_tgt_t0 = st_tgt_enabled ? ggml_time_us() : 0;
         queue_tasks.yield_to_queue([&]() {
             ret = llama_decode(ctx_tgt, batch_view);
             if (ret == 0 && has_output) {
                 llama_synchronize(ctx_tgt);
             }
         });
+        if (st_tgt_enabled) {
+            st_tgt_us += ggml_time_us() - st_tgt_t0;
+            if (++st_tgt_n % 32 == 0) {
+                fprintf(stderr, "[RT] target decode+sync: %.3f ms/round over %d rounds (last n_tokens=%d)\n",
+                        st_tgt_us/1e3/32.0, st_tgt_n, batch_view.n_tokens);
+                st_tgt_us = 0;
+            }
+        }
 
         if (ret != 0) {
             {

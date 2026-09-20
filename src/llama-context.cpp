@@ -15,6 +15,8 @@
 
 #include <cinttypes>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -1354,6 +1356,17 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
     // in order to correctly reuse a graph, it's full topology has to be uniquely determined by these parameters
     const auto gparams = graph_params(res, ubatch, mctx, gtype);
 
+    // per-round cost instrumentation, enabled by LLAMA_ROUND_TIMING; zero cost when unset
+    static const bool rt_enabled = (getenv("LLAMA_ROUND_TIMING") != nullptr);
+    if (rt_enabled) {
+        // raw stderr probe: proves the entry point runs and reports whether the env reached libllama
+        static int rt_ub = 0;
+        if (rt_ub < 3) {
+            rt_ub++;
+            fprintf(stderr, "[RT] process_ubatch entered: n_tokens=%u\n", ubatch.n_tokens);
+        }
+    }
+
     if (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
 
@@ -1365,6 +1378,9 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         }
 
         n_reused++;
+        if (rt_enabled) {
+            n_rt_reuse++;
+        }
     } else {
         gf_res_prev_active = nullptr;
         res->reset();
@@ -1374,6 +1390,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
         //const auto t_start_us = ggml_time_us();
 
+        const int64_t rt_tb = rt_enabled ? ggml_time_us() : 0;
         gf = model.build_graph(gparams);
 
         //LLAMA_LOG_INFO("graph build time: %.3f ms\n", (ggml_time_us() - t_start_us)/1000.0);
@@ -1384,14 +1401,23 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
             return nullptr;
         }
 
+        const int64_t rt_ta = rt_enabled ? ggml_time_us() : 0;
         if (!ggml_backend_sched_alloc_graph(sched.get(), gf)) {
             LLAMA_LOG_ERROR("%s: failed to allocate graph\n", __func__);
             ret = GGML_STATUS_ALLOC_FAILED;
             return nullptr;
         }
+        if (rt_enabled) {
+            const int64_t rt_tn = ggml_time_us();
+            t_rt_build_us += rt_ta - rt_tb;
+            t_rt_alloc_us += rt_tn - rt_ta;
+            n_rt_rebuild++;
+        }
 
         gf_res_prev_active = res;
     }
+
+    const int64_t rt_ts = rt_enabled ? ggml_time_us() : 0;
 
     // set the input data for the input tensors
     {
@@ -1402,12 +1428,21 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
         //LLAMA_LOG_INFO("graph set inputs time: %.3f ms\n", (ggml_time_us() - t_start_us)/1000.0);
     }
+    if (rt_enabled) {
+        t_rt_setin_us += ggml_time_us() - rt_ts;
+    }
 
+    const int64_t rt_tc = rt_enabled ? ggml_time_us() : 0;
     const auto status = graph_compute(res->get_gf(), ubatch.n_tokens > 1);
     if (status != GGML_STATUS_SUCCESS) {
         LLAMA_LOG_ERROR("%s: failed to compute graph, compute status: %d\n", __func__, status);
         ret = status;
         return nullptr;
+    }
+
+    if (rt_enabled) {
+        t_rt_compute_us += ggml_time_us() - rt_tc;
+        n_rt_rounds++;
     }
 
     ret = GGML_STATUS_SUCCESS;
@@ -1657,6 +1692,14 @@ int llama_context::decode(const llama_batch & batch_inp) {
     // MTP hook batches carry both token (next-token id) and embd (h_nextn row),
     // so accept either present rather than requiring exactly one.
     GGML_ASSERT(batch_inp.token || batch_inp.embd);
+    {
+        // TEMPORARY diagnostic
+        static int rt_ctx = 0;
+        if (rt_ctx < 3) {
+            rt_ctx++;
+            fprintf(stderr, "[RT] ctx::decode entered: n_tokens=%d\n", batch_inp.n_tokens);
+        }
+    }
 
     if (!memory) {
         LLAMA_LOG_DEBUG("%s: cannot decode batches with this context (calling encode() instead)\n", __func__);
@@ -3374,6 +3417,29 @@ llama_perf_context_data llama_context::perf_get_data() const {
     data.n_eval      = std::max(1, n_eval);
     data.n_reused    = std::max(0, n_reused);
 
+    // per-round cost report: rides on the same path as "graphs reused", which the tools already print
+    if (getenv("LLAMA_ROUND_TIMING") != nullptr) {
+        static int rt_pg = 0;
+        if (rt_pg < 64) {
+            rt_pg++;
+            fprintf(stderr, "[RT] perf: rounds=%d reuse=%d rebuild=%d | build_us=%lld alloc_us=%lld setin_us=%lld enqueue_us=%lld\n",
+                    n_rt_rounds, n_rt_reuse, n_rt_rebuild,
+                    (long long) t_rt_build_us, (long long) t_rt_alloc_us,
+                    (long long) t_rt_setin_us, (long long) t_rt_compute_us);
+        }
+    }
+    if (getenv("LLAMA_ROUND_TIMING") != nullptr && n_rt_rounds > 0) {
+        const double k = 1.0 / n_rt_rounds;
+        LLAMA_LOG_INFO("%s: round timing (LLAMA_ROUND_TIMING): ubatches=%d reuse=%d rebuild=%d | "
+                "build=%.3f alloc=%.3f set_inputs=%.3f compute=%.3f total=%.3f ms/ubatch\n",
+                __func__, n_rt_rounds, n_rt_reuse, n_rt_rebuild,
+                t_rt_build_us   * k / 1e3,
+                t_rt_alloc_us   * k / 1e3,
+                t_rt_setin_us   * k / 1e3,
+                t_rt_compute_us * k / 1e3,
+                (t_rt_build_us + t_rt_alloc_us + t_rt_setin_us + t_rt_compute_us) * k / 1e3);
+    }
+
     return data;
 }
 
@@ -3382,6 +3448,9 @@ void llama_context::perf_reset() {
     t_eval_us   = n_eval = 0;
     t_p_eval_us = n_p_eval = 0;
     n_reused    = 0;
+
+    t_rt_build_us = t_rt_alloc_us = t_rt_setin_us = t_rt_compute_us = 0;
+    n_rt_rounds   = n_rt_reuse = n_rt_rebuild = 0;
 }
 
 llama_memory_breakdown llama_context::memory_breakdown() const {
@@ -4277,6 +4346,14 @@ int32_t llama_encode(
 int32_t llama_decode(
         llama_context * ctx,
           llama_batch   batch) {
+    {
+        // TEMPORARY diagnostic
+        static int rt_ld = 0;
+        if (rt_ld < 3) {
+            rt_ld++;
+            fprintf(stderr, "[RT] llama_decode entered: n_tokens=%d\n", batch.n_tokens);
+        }
+    }
     const int ret = ctx->decode(batch);
     if (ret != 0 && ret != 1) {
         LLAMA_LOG_ERROR("%s: failed to decode, ret = %d\n", __func__, ret);

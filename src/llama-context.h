@@ -397,4 +397,13 @@ private:
     mutable int32_t n_eval   = 0; // number of eval calls
 
     mutable int32_t n_reused = 0; // number of times the previous graph was reused
+
+    // per-round cost instrumentation, enabled by LLAMA_ROUND_TIMING; see process_ubatch()
+    mutable int64_t t_rt_build_us   = 0; // graph construction
+    mutable int64_t t_rt_alloc_us   = 0; // ggml_backend_sched_alloc_graph
+    mutable int64_t t_rt_setin_us   = 0; // set_inputs
+    mutable int64_t t_rt_compute_us = 0; // graph_compute
+    mutable int32_t n_rt_rounds     = 0; // process_ubatch() calls in the current window
+    mutable int32_t n_rt_reuse      = 0; // of those, how many reused the previous graph
+    mutable int32_t n_rt_rebuild    = 0; // of those, how many rebuilt the graph
 };
