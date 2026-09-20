@@ -1,0 +1,25 @@
+=== A) our quant type (q8_0) at n=1 vs n=8, and q4_K for contrast === 
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=1,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 12780 runs -    82.40 us/run - 117.44 MFLOP/run - [1;34m  1.43 TFLOPS[0m
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=8,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                  8988 runs -   112.48 us/run - 939.52 MFLOP/run - [1;34m  8.35 TFLOPS[0m
+--
+  MUL_MAT(type_a=q4_K,type_b=f32,m=14336,n=1,k=4096,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+--
+  MUL_MAT(type_a=q4_K,type_b=f32,m=14336,n=8,k=4096,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0):                  10379 runs -    97.09 us/run - 939.52 MFLOP/run - [1;34m  9.68 TFLOPS[0m
+  Backend CUDA0: [1;32mOK[0m
+=== B) my best HMMA prototype (N=17408 K=5120 8 tokens) === 
+=== pipelined HMMA Q8_0 verify GEMM (v3) ===
+N=17408 K=5120 tokens=8 blocks=136
+weight bytes = 94.7 MB
+1057.3 us/run  ->  89.6 GB/s effective
+targets: dp4a n=8 = 340 GB/s ; n=1 roofline = 729 GB/s
+WMMA_PERF3_DONE
+=== C) WMMA correctness probe === 
+WMMA 16x16x16 probe (K=64): max rel err = 0.000e+00 -> MATCH
+Q8_0 WMMA GEMM (K=64): nonzero=128/128  max rel err = 1.429e+00 -> MISMATCH
+DONE 
+=== D) git status --porcelain (repo root = llama.cpp) === 
+DONE2 

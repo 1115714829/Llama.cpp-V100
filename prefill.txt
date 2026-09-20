@@ -1,0 +1,18 @@
+=== final NCCL arm (drop_caches) === 
+4.35.825.785 I slot print_timing: id  0 | task 0 | prompt eval time =     684.51 ms /    76 tokens (    9.01 ms per token,   111.03 tokens per second)
+4.43.168.157 I slot print_timing: id  0 | task 96 | prompt eval time =     449.08 ms /   106 tokens (    4.24 ms per token,   236.04 tokens per second)
+4.46.513.907 I slot print_timing: id  0 | task 221 | prompt eval time =     420.11 ms /    84 tokens (    5.00 ms per token,   199.95 tokens per second)
+4.49.699.872 I slot print_timing: id  0 | task 273 | prompt eval time =     426.14 ms /    84 tokens (    5.07 ms per token,   197.12 tokens per second)
+=== final butterfly arm === 
+4.36.864.790 I slot print_timing: id  0 | task 0 | prompt eval time =     685.25 ms /    76 tokens (    9.02 ms per token,   110.91 tokens per second)
+4.45.595.122 I slot print_timing: id  0 | task 102 | prompt eval time =     468.32 ms /   106 tokens (    4.42 ms per token,   226.34 tokens per second)
+4.49.359.878 I slot print_timing: id  0 | task 231 | prompt eval time =     457.03 ms /    84 tokens (    5.44 ms per token,   183.79 tokens per second)
+4.52.088.278 I slot print_timing: id  0 | task 283 | prompt eval time =     459.52 ms /    84 tokens (    5.47 ms per token,   182.80 tokens per second)
+=== devd-none (NODROP, latest) === 
+0.20.614.136 I slot print_timing: id  0 | task 0 | prompt eval time =     522.02 ms /    76 tokens (    6.87 ms per token,   145.59 tokens per second)
+0.28.147.728 I slot print_timing: id  0 | task 96 | prompt eval time =     431.86 ms /   106 tokens (    4.07 ms per token,   245.45 tokens per second)
+0.31.419.695 I slot print_timing: id  0 | task 221 | prompt eval time =     408.02 ms /    84 tokens (    4.86 ms per token,   205.87 tokens per second)
+0.34.560.998 I slot print_timing: id  0 | task 273 | prompt eval time =     409.89 ms /    84 tokens (    4.88 ms per token,   204.93 tokens per second)
+=== ctx settings actually used === 
+4.22.300.764 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 8192, kv_unified = 'false'
+DONE 

@@ -1,0 +1,47 @@
+=== /root/llm/systemd/1cat-runtime.env (READ ONLY) === 
+# Environment only; model path, API options and GPU selection belong to the future inference unit.
+PATH="/opt/rh/gcc-toolset-12/root/usr/bin:/usr/local/cuda-12.4/bin:/root/llm/ac922env/1cat-20260907/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+VIRTUAL_ENV="/root/llm/ac922env/1cat-20260907/venv"
+CUDA_HOME="/usr/local/cuda-12.4"
+LD_LIBRARY_PATH="/root/llm/ac922env/1cat-20260907/venv/lib64/python3.11/site-packages/ac922_nccl_runtime/lib:/root/llm/ac922env/1cat-20260907/venv/lib64/python3.11/site-packages/torch/lib:/root/llm/ac922env/1cat-20260907/venv/lib64/python3.11/site-packages/tvm_ffi/lib:/opt/rh/gcc-toolset-12/root/usr/lib64:/usr/local/cuda-12.4/lib64:/usr/local/cuda-12.4/targets/ppc64le-linux/lib"
+VLLM_NCCL_SO_PATH="/root/llm/ac922env/1cat-20260907/venv/lib64/python3.11/site-packages/ac922_nccl_runtime/lib/libnccl.so.2"
+CC="/opt/rh/gcc-toolset-12/root/usr/bin/gcc"
+CXX="/opt/rh/gcc-toolset-12/root/usr/bin/g++"
+CUDAHOSTCXX="/opt/rh/gcc-toolset-12/root/usr/bin/g++"
+PYTHONNOUSERSITE="1"
+PYTHONUNBUFFERED="1"
+HF_HUB_OFFLINE="1"
+TRANSFORMERS_OFFLINE="1"
+HF_HOME="/root/llm/cache/1cat-20260907/huggingface"
+TORCH_HOME="/root/llm/cache/1cat-20260907/torch"
+TRITON_CACHE_DIR="/root/llm/cache/1cat-20260907/triton"
+VLLM_CACHE_ROOT="/root/llm/cache/1cat-20260907/vllm"
+CUDA_CACHE_PATH="/root/llm/cache/1cat-20260907/cuda"
+TILELANG_CACHE_DIR="/root/llm/cache/1cat-20260907/tilelang"
+TILELANG_TMP_DIR="/root/llm/cache/1cat-20260907/tmp/tilelang"
+TORCH_EXTENSIONS_DIR="/root/llm/cache/1cat-20260907/torch-extensions"
+TORCHINDUCTOR_CACHE_DIR="/root/llm/cache/1cat-20260907/torch-inductor"
+XDG_CACHE_HOME="/root/llm/cache/1cat-20260907/xdg"
+NUMBA_CACHE_DIR="/root/llm/cache/1cat-20260907/numba"
+TMPDIR="/root/llm/cache/1cat-20260907/tmp"
+TMP="/root/llm/cache/1cat-20260907/tmp"
+TEMP="/root/llm/cache/1cat-20260907/tmp"
+=== 1cat-gpu-init service (what it sets up) === 
+# /root/llm/systemd/1cat-gpu-init.service
+[Unit]
+Description=Prepare NVIDIA compute for AC922 1Cat after NFS root boot
+Requires=nvidia-persistenced.service
+After=remote-fs.target nvidia-persistenced.service
+RequiresMountsFor=/root/llm/ac922env/1cat-20260907 /usr/local/cuda-12.4
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/modprobe nvidia
+ExecStart=/usr/sbin/modprobe nvidia_uvm
+ExecStart=/usr/bin/nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+DONE 

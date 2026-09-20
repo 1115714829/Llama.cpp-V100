@@ -1,0 +1,70 @@
+=== llama.cpp repo === 
+79504e72b llama : V100 (SM 70) decode tuning, DFlash2 tensor crash fix, round timing probes
+1af554f8f server : improve startup log messages (#29125)
+(empty above = clean) 
+=== study archive repo === 
+8a18a5b archive : add the directory listing and commit logs
+218055b archive : llama.cpp V100/SM70 study — 1cat-vLLM comparison, NCCL finding, measurement tooling
+ M archive-commit2.txt
+ M goal-phase1-findings.md
+?? 1cat-runtime-env.txt
+?? cards2.sh
+?? cards2.txt
+?? final-evidence.bat
+?? final-evidence.txt
+?? final2.bat
+?? gdn-sm70.bat
+?? get-cards2.bat
+?? get-mb.bat
+?? get-ncu.bat
+?? hm_dbg.cu
+?? hm_q8_bench.cu
+?? hmbench.txt
+?? hmdbg.txt
+?? hmma_layout.cu
+?? hmma_map.cu
+?? hmma_probe.cu
+?? launch-cards2.bat
+?? launch-ncu.bat
+?? layout1.txt
+?? layout2.bat
+?? layout2.txt
+?? map.txt
+?? mb-out.txt
+?? mb-raw.bat
+?? mb-raw.txt
+?? microbench.bat
+?? microbench.sh
+?? ncu-out.txt
+?? ncu-tgt.sh
+?? prefill.bat
+?? prefill.txt
+?? probe.txt
+?? q80rows.txt
+?? q8rows.bat
+?? read-runtime-env.bat
+?? run-hm-bench.sh
+?? run-hmbench.bat
+?? run-hmdbg.bat
+?? run-hmma-layout.sh
+?? run-hmma-probe.sh
+?? run-layout.bat
+?? run-map.bat
+?? run-probe.bat
+?? run-wmma.bat
+?? run-wmmaperf.bat
+?? run-wmmaperf2.bat
+?? run-wmmaperf3.bat
+?? state-before-handoff.bat
+?? state-before-handoff.txt
+?? vllm1cat-env.bat
+?? vllm1cat-env.txt
+?? wmma.txt
+?? wmma_perf.cu
+?? wmma_perf2.cu
+?? wmma_perf3.cu
+?? wmma_q8_bench.cu
+?? wmmaperf.txt
+?? wmmaperf2.txt
+?? wmmaperf3.txt
+DONE 

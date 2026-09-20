@@ -3,3 +3,15 @@
  M dirlist.txt
 ?? archive-commit2.bat
 ?? archive-commit2.txt
+warning: in the working copy of 'archive-commit.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'archive-commit2.txt', LF will be replaced by CRLF the next time Git touches it
+[master 8a18a5b] archive : add the directory listing and commit logs
+ 4 files changed, 1183 insertions(+), 20 deletions(-)
+ create mode 100644 archive-commit2.bat
+ create mode 100644 archive-commit2.txt
+=== log === 
+8a18a5b archive : add the directory listing and commit logs
+218055b archive : llama.cpp V100/SM70 study — 1cat-vLLM comparison, NCCL finding, measurement tooling
+=== status after === 
+ M archive-commit2.txt
+DONE 

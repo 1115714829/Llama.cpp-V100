@@ -1,0 +1,17 @@
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, 17408 bytes smem, 384 bytes cmem[0], 16 bytes cmem[2]
+---
+=== smem-staged HMMA Q8_0 verify GEMM ===
+N=17408 K=5120 tokens=8  blocks=136
+weight bytes = 94.7 MB
+1296.5 us/run  ->  73.0 GB/s effective  (1.10 TFLOPS on 8 tokens)
+targets: current dp4a n=8 = 340 GB/s ; n=1 roofline = 729 GB/s
+WMMA_PERF2_DONE
+---
+=== smem-staged HMMA Q8_0 verify GEMM ===
+N=17408 K=5120 tokens=8  blocks=136
+weight bytes = 94.7 MB
+1295.8 us/run  ->  73.1 GB/s effective  (1.10 TFLOPS on 8 tokens)
+targets: current dp4a n=8 = 340 GB/s ; n=1 roofline = 729 GB/s
+WMMA_PERF2_DONE
+DONE 

@@ -1,0 +1,24 @@
+---
+WMMA 16x16x16 probe (K=64): max rel err = 0.000e+00 -> MATCH
+  t=0 n=0 got 3.03557 ref 3.03521
+  t=0 n=1 got -0.72625 ref -0.72631
+  t=0 n=2 got 1.12450 ref 1.12504
+  t=0 n=3 got -1.68631 ref -1.68672
+  t=1 n=0 got -2.89959 ref -2.89913
+  t=1 n=1 got 0.09123 ref 0.09126
+  t=1 n=2 got 1.10570 ref 1.10490
+  t=1 n=3 got -4.39334 ref -4.39314
+Q8_0 WMMA GEMM (K=64): nonzero=128/128  max rel err = 1.429e+00 -> MISMATCH
+WMMA_BENCH_DONE
+WMMA 16x16x16 probe (K=5120): max rel err = 0.000e+00 -> MATCH
+  t=0 n=0 got 8.25834 ref 8.25975
+  t=0 n=1 got -16.88293 ref -16.88864
+  t=0 n=2 got 2.73748 ref 2.73954
+  t=0 n=3 got -27.39261 ref -27.39209
+  t=1 n=0 got -22.31767 ref -22.31600
+  t=1 n=1 got -8.91228 ref -8.91794
+  t=1 n=2 got 2.79386 ref 2.79492
+  t=1 n=3 got 17.15010 ref 17.14979
+Q8_0 WMMA GEMM (K=5120): nonzero=128/128  max rel err = 5.925e-03 -> MISMATCH
+WMMA_BENCH_DONE
+DONE 

@@ -1,0 +1,91 @@
+GPU3	SYS	SYS	SYS	 X 	NV2	NV2	88-175	8		252
+GPU4	SYS	SYS	SYS	NV2	 X 	NV2	88-175	8		251
+GPU5	SYS	SYS	SYS	NV2	NV2	 X 	88-175	8		250
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+##### CARDS ARM c3-012 cards=0,1,2
+prompt2: tg=78.19 tok/s  AL=4.22
+prompt3: tg=111.78 tok/s  AL=6.38
+MEDIAN_TG=96.60
+--- target decode+sync per round ---
+[RT] target decode+sync: 43.605 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 32.392 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 40.046 ms/round over 288 rounds (last n_tokens=8)
+##### CARDS ARM c4-0123 cards=0,1,2,3
+prompt2: tg=65.62 tok/s  AL=3.93
+prompt3: tg=95.34 tok/s  AL=6.08
+MEDIAN_TG=67.54
+--- target decode+sync per round ---
+[RT] target decode+sync: 30.579 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 48.628 ms/round over 288 rounds (last n_tokens=8)
+[RT] target decode+sync: 48.567 ms/round over 320 rounds (last n_tokens=8)
+##### CARDS ARM c4-0134 cards=0,1,3,4
+prompt2: tg=72.11 tok/s  AL=4.66
+prompt3: tg=94.01 tok/s  AL=6.35
+MEDIAN_TG=72.11
+--- target decode+sync per round ---
+[RT] target decode+sync: 47.688 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 36.371 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 45.925 ms/round over 288 rounds (last n_tokens=8)
+##### CARDS ARM c5-01234 cards=0,1,2,3,4
+prompt2: tg=73.09 tok/s  AL=5.03
+prompt3: tg=81.28 tok/s  AL=6.08
+MEDIAN_TG=73.09
+--- target decode+sync per round ---
+[RT] target decode+sync: 31.614 ms/round over 192 rounds (last n_tokens=8)
+[RT] target decode+sync: 53.112 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 42.195 ms/round over 256 rounds (last n_tokens=42)
+##### CARDS ARM c6-012345 cards=0,1,2,3,4,5
+prompt2: tg=47.51 tok/s  AL=3.98
+prompt3: tg=76.14 tok/s  AL=6.29
+MEDIAN_TG=58.26
+--- target decode+sync per round ---
+[RT] target decode+sync: 44.622 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 73.028 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 59.719 ms/round over 288 rounds (last n_tokens=8)
+##### CARDS ARM c4-debug cards=0,1,2,3
+prompt2: tg=65.39 tok/s  AL=3.93
+prompt3: tg=96.49 tok/s  AL=6.08
+MEDIAN_TG=67.21
+--- target decode+sync per round ---
+[RT] target decode+sync: 30.625 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 48.848 ms/round over 288 rounds (last n_tokens=8)
+[RT] target decode+sync: 47.237 ms/round over 320 rounds (last n_tokens=8)
+=== NCCL transport lines at TP4 (NVLink vs SYS/host) ===
+ac922-netboot:1314815:1315052 [0] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315053 [1] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315054 [2] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315055 [3] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315053 [1] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315055 [3] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315054 [2] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315052 [0] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315082 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/direct pointer
+ac922-netboot:1314815:1315082 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/direct pointer
+ac922-netboot:1314815:1315083 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[1] via P2P/direct pointer
+ac922-netboot:1314815:1315083 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[1] via P2P/direct pointer
+ac922-netboot:1314815:1315082 [1] NCCL INFO Connected all rings, use ring PXN 0 GDR 1
+ac922-netboot:1314815:1315083 [0] NCCL INFO Connected all rings, use ring PXN 0 GDR 1
+ac922-netboot:1314815:1315081 [2] NCCL INFO Connected all rings, use ring PXN 0 GDR 1
+ac922-netboot:1314815:1315080 [3] NCCL INFO Connected all rings, use ring PXN 0 GDR 1
+ac922-netboot:1314815:1315096 [1] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315098 [3] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315097 [2] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315095 [0] NCCL INFO Using network Socket
+ac922-netboot:1314815:1315095 [0] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+1314815:1315097 [2] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315096 [1] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315098 [3] NCCL INFO Check P2P Type isAllDirectP2p 0 directMode 1 isAllCudaP2p 1
+ac922-netboot:1314815:1315109 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/direct pointer
+ac922-netboot:1314815:1315109 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/direct pointer
+[RT] target decode+sync: 32.392 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 40.046 ms/round over 288 rounds (last n_tokens=8)
+[RT] target decode+sync: 48.628 ms/round over 288 rounds (last n_tokens=8)
+[RT] target decode+sync: 48.567 ms/round over 320 rounds (last n_tokens=8)
+[RT] target decode+sync: 36.371 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 45.925 ms/round over 288 rounds (last n_tokens=8)
+[RT] target decode+sync: 53.112 ms/round over 224 rounds (last n_tokens=8)
+[RT] target decode+sync: 42.195 ms/round over 256 rounds (last n_tokens=42)
+[RT] target decode+sync: 73.028 ms/round over 256 rounds (last n_tokens=8)
+[RT] target decode+sync: 59.719 ms/round over 288 rounds (last n_tokens=8)
+CARDS2_DONE
+DONE 

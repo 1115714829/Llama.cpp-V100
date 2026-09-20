@@ -1,0 +1,43 @@
+=== q8_0 MUL_MAT rows (lowercase in the log) === 
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=1,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 12780 runs -    82.40 us/run - 117.44 MFLOP/run - [1;34m  1.43 TFLOPS[0m
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=2,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=3,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=4,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 11076 runs -    91.39 us/run - 469.76 MFLOP/run - [1;34m  5.14 TFLOPS[0m
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=5,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 10773 runs -    94.23 us/run - 587.20 MFLOP/run - [1;34m  6.23 TFLOPS[0m
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=8,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                  8988 runs -   112.48 us/run - 939.52 MFLOP/run - [1;34m  8.35 TFLOPS[0m
+--
+  MUL_MAT(type_a=q8_0,type_b=f32,m=4096,n=512,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+=== q4_0 (also dp4a legacy, MMVQ path) === 
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=1,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 22152 runs -    45.34 us/run - 117.44 MFLOP/run - [1;34m  2.59 TFLOPS[0m
+--
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=2,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+--
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=3,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+--
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=4,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 17679 runs -    56.78 us/run - 469.76 MFLOP/run - [1;34m  8.27 TFLOPS[0m
+--
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=5,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 15390 runs -    65.47 us/run - 587.20 MFLOP/run - [1;34m  8.97 TFLOPS[0m
+--
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=8,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+                 10914 runs -    91.96 us/run - 939.52 MFLOP/run - [1;34m 10.22 TFLOPS[0m
+--
+  MUL_MAT(type_a=q4_0,type_b=f32,m=4096,n=512,k=14336,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0): ggml_backend_cuda_graph_compute: CUDA graph warmup reset
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+DONE 

@@ -1,0 +1,15 @@
+---
+=== WMMA Q8_0 verify-shape GEMM ===
+N=17408 K=5120 tokens=8  warps=1088 blocks=136
+weight bytes = 94.7 MB
+10770.7 us/run   ->   8.8 GB/s effective   (0.1 TFLOPS)
+reference: current dp4a path measured 340 GB/s at n=8 (n=1 roofline 729 GB/s)
+WMMA_PERF_DONE
+---
+=== WMMA Q8_0 verify-shape GEMM ===
+N=17408 K=5120 tokens=8  warps=1088 blocks=136
+weight bytes = 94.7 MB
+10160.8 us/run   ->   9.3 GB/s effective   (0.1 TFLOPS)
+reference: current dp4a path measured 340 GB/s at n=8 (n=1 roofline 729 GB/s)
+WMMA_PERF_DONE
+DONE 
