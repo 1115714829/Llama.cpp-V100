@@ -2444,12 +2444,26 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     };
 
 
+    // Prints the first node pointer of the leading subgraphs for a few rounds.
+    // The CUDA graph cache is keyed on nodes[0], so an alternating pointer means two graph objects per split.
+    static const bool dbg_key = getenv("GGML_META_KEY_DEBUG") != nullptr;
+    static int dbg_key_round = 0;
+
     const int64_t mt_loop0 = mt_enabled ? ggml_time_us() : 0;
     for (size_t i = 0; i < backend_ctx->n_subgraphs; i++) {
         const int64_t mt_d0 = mt_enabled ? ggml_time_us() : 0;
         for (size_t j = 0; j < n_backends; j++) {
             auto & bcj = backend_ctx->backend_configs[j];
+            if (dbg_key && dbg_key_round < 12 && i < 4) {
+                fprintf(stderr, "[MKEY] r=%d i=%zu j=%zu n0=%p uid=%llu n=%zu\n", dbg_key_round, i, j,
+                        (void *) bcj.cgraphs[i].cgraph_main->nodes[0],
+                        (unsigned long long) bcj.cgraphs[i].cgraph_main->uid,
+                        (size_t) bcj.cgraphs[i].cgraph_main->n_nodes);
+            }
             const ggml_status status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+            if (dbg_key && i + 1 == backend_ctx->n_subgraphs && j + 1 == n_backends) {
+                dbg_key_round++;
+            }
             if (status != GGML_STATUS_SUCCESS) {
                 return status;
             }
