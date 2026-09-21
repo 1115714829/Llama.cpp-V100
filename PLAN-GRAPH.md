@@ -27,7 +27,7 @@ flowchart TD
     HOST --> ARX
     HOST --> PRO
   end
-  ADD["可加性: 轮时 ~= 主机 + GPU串行<br/>(4 臂实测 55.1=20.6+34.5)"]:::fact
+  ADD["可加性: 轮时 ~= 主机 + GPU串行<br/>(4 臂实测 55.1=20.6+34.5)<br/>R142 被强制同步实验独立支持"]:::fact
   HOST --> ADD
   GPUQ --> ADD
   ADD --> G
@@ -45,7 +45,7 @@ flowchart TD
   subgraph REFUTED["已证伪 / 已排除（不删，只改灰）"]
     X1["layer split<br/>77.0 vs 55.1 ms/轮（慢40%）"]:::no
     X2["KV 压缩<br/>KV 仅占每轮流量~1%<br/>V100 上代价 -6~-22%"]:::no
-    X3["R1 设备侧 push AR<br/>省4.8ms主机但轮时不动<br/>在役 61.5us vs NCCL 53.0us"]:::warn
+    X3["R1 设备侧 push AR<br/>省4.8ms主机但轮时不动<br/>在役 61.5us vs NCCL 53.0us<br/>R142 解释: 代价搬到GPU(非重叠)<br/>且 sglang 报 3.35us => 口径仍待查"]:::warn
     X4["A4 更深 FA KV 切分<br/>26.85->22.43 单调变差"]:::warn
     X5["TP2/TP4/TP6<br/>83.5 / 更差 / 95 ms/轮"]:::cond
     X6["MoE 方向（模型稠密）"]:::no
@@ -100,7 +100,7 @@ flowchart TD
   K5 --> LOWBIT
   LOWBIT["低比特权重(4-5bpw) 路线<br/>同卡权重吞吐 1.70-2.11x<br/>但端到端仅 +10~13%(权重占22%)<br/>=> 非主线, 但排除理由须换"]:::cond
   subgraph TODO["待办节点"]
-    N0["N0 解决 R1 矛盾<br/>LLAMA_ROUND_TIMING_SYNC A/B"]:::run
+    N0["N0 定论(R142): 强制同步仅 +0.4~0.8 ms/轮(0.65-1.5%)<br/>两臂 draft_n/draft_acc 逐位相同<br/>=> target 步本就同步, 无整轮重叠"]:::ok
     N2["N2 只读诊断: 打印 D==256&&Q>1 的 FA kernel<br/>成本极小"]:::next
     N13["N13 KV dtype A/B (f16 vs q8_0)<br/>零代码, 1cat 自测长上下文 f16 胜"]:::next
     N1["N1 ★P0-1 q8_0 KV 张量核注意力<br/>前置项!"]:::next
@@ -115,8 +115,9 @@ flowchart TD
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
     N12["N12 MMVQ x4 权重解码外提（jusko）"]:::todo
   end
-  N0 -->|决定是否重审| X3
-  N0 -->|决定是否重审| X4
+  N0 -->|实测支撑| ADD
+  N0 -->|裁决: 非重叠, 而是代价从主机搬到 GPU| X3
+  N0 -->|据此重审 A4 是否同类| X4
   N2 -->|为 N1 提供动机| N1
   N1 -->|解锁| K1
   N1 -->|解锁| K2
@@ -505,6 +506,9 @@ flowchart LR
       ② 1cat 的 FP16 vs FP8 KV 验收表指向一个零代码实验，我们却只有条件结论 K1、没有实验节点 -> 新增 N13；
       ③ N8 的实现路线（fattn-vec ncols2=3 打包 +44.9%）没写在节点上，只躺在 PORT-BACKLOG 里 -> 写进 N8 与 §3.3；
       ④ SG4（满 8K chunk 不切分）本可以解释 X4 的负结果，但 X4 与 sglang 之间没有边 -> 补 SG4 --> X4。
+   —— Round 142（N0 出结果）：
+      ⑤ ADD（可加性）此前只有"4 臂实测"一个来源，N0 是它的独立验证，但图上没有 N0 -> ADD 这条边 -> 补上；
+      ⑥ X3 的旧表述只写了"轮时不动"，没说为什么 -> 就地写进 R142 的解释，避免以后重复猜。
 ```
 
 ## 5. 作业纪律（血泪）
