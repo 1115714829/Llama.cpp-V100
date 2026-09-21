@@ -1,0 +1,146 @@
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index fd4290cf0..2fcf603a4 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -340,6 +340,16 @@ void llm_graph_input_rs::set_input(const llama_ubatch * ubatch) {
+             data[i] = mctx->s_copy(i);
+         }
+     }
++
++    if (s_write) {
++        GGML_ASSERT(ggml_backend_buffer_is_host(s_write->buffer));
++        int32_t * data = (int32_t *) s_write->data;
++
++        const uint32_t head = mctx->get_head();
++        for (int64_t i = 0; i < s_write->ne[0]; ++i) {
++            data[i] = (int32_t) (head + i);
++        }
++    }
+ }
+ 
+ bool llm_graph_input_rs::can_reuse(const llm_graph_params & params) {
+@@ -354,7 +364,11 @@ bool llm_graph_input_rs::can_reuse(const llm_graph_params & params) {
+     res &= s_copy_main->ne[0]  == params.ubatch.n_seqs;
+     res &= s_copy_extra->ne[0] == mctx->get_n_rs() - params.ubatch.n_seqs;
+ 
+-    res &= head == mctx->get_head();
++    // s_write carries the write rows per call, so the moving cache head no longer
++    // has to match for the graph to be reusable
++    if (s_write == nullptr) {
++        res &= head == mctx->get_head();
++    }
+     res &= rs_z == mctx->get_rs_z();
+ 
+     return res;
+@@ -3515,6 +3529,13 @@ static std::unique_ptr<llm_graph_input_rs> build_rs_inp_impl(
+     inp->s_copy_main  = ggml_view_1d(ctx0, inp->s_copy, n_seqs, 0);
+     inp->s_copy_extra = ggml_view_1d(ctx0, inp->s_copy, n_rs - n_seqs, n_seqs * inp->s_copy->nb[0]);
+ 
++    // Opt-in for the A/B: with GGML_RS_INDEX_WRITE set, recurrent state writes go through
++    // s_write row indices instead of views that embed the moving cache head.
++    if (mctx_cur->get_n_rs_seq() == 0 && getenv("GGML_RS_INDEX_WRITE") != nullptr) {
++        inp->s_write = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_seqs);
++        ggml_set_input(inp->s_write);
++    }
++
+     inp->head = mctx_cur->get_head();
+     inp->rs_z = mctx_cur->get_rs_z();
+ 
+diff --git a/src/llama-graph.h b/src/llama-graph.h
+index cc4110639..c3ba98b7a 100644
+--- a/src/llama-graph.h
++++ b/src/llama-graph.h
+@@ -275,6 +275,10 @@ public:
+     ggml_tensor * s_copy_main;   // I32 [n_seqs]
+     ggml_tensor * s_copy_extra;  // I32 [n_rs - n_seqs]
+ 
++    // Write destination rows of the recurrent state cache, filled per call by set_input.
++    // Keeping them out of the graph views lets the graph be reused while the cache head moves.
++    ggml_tensor * s_write = nullptr;  // I32 [n_seqs]
++
+     const llama_memory_recurrent_context * mctx;
+ 
+     // used in view offsets, need to match for valid graph reuse
+diff --git a/src/llama-memory-recurrent.cpp b/src/llama-memory-recurrent.cpp
+index 57919accf..5d553bbcd 100644
+--- a/src/llama-memory-recurrent.cpp
++++ b/src/llama-memory-recurrent.cpp
+@@ -1279,6 +1279,10 @@ uint32_t llama_memory_recurrent_context::get_n_rs() const {
+     return is_full ? mem->size : mem->n;
+ }
+ 
++uint32_t llama_memory_recurrent_context::get_n_rs_seq() const {
++    return mem->n_rs_seq;
++}
++
+ uint32_t llama_memory_recurrent_context::get_head() const {
+     return is_full ? 0 : mem->head;
+ }
+diff --git a/src/llama-memory-recurrent.h b/src/llama-memory-recurrent.h
+index 4abb3f5cf..ca3948e7e 100644
+--- a/src/llama-memory-recurrent.h
++++ b/src/llama-memory-recurrent.h
+@@ -167,6 +167,7 @@ public:
+     //
+ 
+     uint32_t get_n_rs() const;
++    uint32_t get_n_rs_seq() const;
+     uint32_t get_head() const;
+     int32_t  get_rs_z() const;
+     uint32_t get_size() const;
+diff --git a/src/models/delta-net-base.cpp b/src/models/delta-net-base.cpp
+index ad6612647..580e619c3 100644
+--- a/src/models/delta-net-base.cpp
++++ b/src/models/delta-net-base.cpp
+@@ -487,13 +487,21 @@ ggml_tensor * llm_build_delta_net_base::build_conv_state(
+                     ggml_row_size(conv_input->type, s_idx));
+         cb(conv_state_last, "conv_state_last", il);
+ 
+-        ggml_tensor * conv_state_update =
+-            ggml_view_2d(ctx0, conv_states_all,
+-                    row_count, n_seqs, conv_states_all->nb[1],
+-                    (s_slot * mem_size + kv_head) * row_size);
+-        cb(conv_state_update, "conv_state_update", il);
++        if (inp->s_write) {
++            // rows selected by index, so the rolling cache head stays out of the graph
++            ggml_tensor * conv_rows = ggml_reshape_2d(ctx0, conv_states_all,
++                    row_count, ggml_nelements(conv_states_all)/row_count);
++            ggml_tensor * cur_rows = ggml_reshape_2d(ctx0, conv_state_last, row_count, n_seqs);
++            ggml_build_forward_expand(gf, ggml_set_rows(ctx0, conv_rows, cur_rows, inp->s_write));
++        } else {
++            ggml_tensor * conv_state_update =
++                ggml_view_2d(ctx0, conv_states_all,
++                        row_count, n_seqs, conv_states_all->nb[1],
++                        (s_slot * mem_size + kv_head) * row_size);
++            cb(conv_state_update, "conv_state_update", il);
+ 
+-        ggml_build_forward_expand(gf, ggml_cpy(ctx0, conv_state_last, conv_state_update));
++            ggml_build_forward_expand(gf, ggml_cpy(ctx0, conv_state_last, conv_state_update));
++        }
+     } else {
+         // [TAG_RECURRENT_ROLLBACK_SPLITS]
+         // this logic assumes that the last (n_rs_seq + 1) tokens of a sequence in a batch are inside
+@@ -552,10 +560,19 @@ ggml_tensor * llm_build_delta_net_base::build_recurrent_attn(
+         cb(output, "attn_output", il);
+         cb(new_state, "new_state", il);
+ 
+-        ggml_build_forward_expand(gf,
+-                ggml_cpy(ctx0, new_state,
+-                    ggml_view_2d(ctx0, ssm_states_all, hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
+-                        kv_head * hparams.n_embd_s() * ggml_element_size(ssm_states_all))));
++        if (inp->s_write) {
++            // same index-based write as the conv state above
++            const int64_t n_embd_s = hparams.n_embd_s();
++            ggml_tensor * ssm_rows = ggml_reshape_2d(ctx0, ssm_states_all,
++                    n_embd_s, ggml_nelements(ssm_states_all)/n_embd_s);
++            ggml_tensor * cur_rows = ggml_reshape_2d(ctx0, new_state, n_embd_s, n_seqs);
++            ggml_build_forward_expand(gf, ggml_set_rows(ctx0, ssm_rows, cur_rows, inp->s_write));
++        } else {
++            ggml_build_forward_expand(gf,
++                    ggml_cpy(ctx0, new_state,
++                        ggml_view_2d(ctx0, ssm_states_all, hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
++                            kv_head * hparams.n_embd_s() * ggml_element_size(ssm_states_all))));
++        }
+ 
+         return output;
+     }

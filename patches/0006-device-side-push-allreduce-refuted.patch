@@ -1,0 +1,392 @@
+diff --git a/ggml/src/ggml-cuda/allreduce.cu b/ggml/src/ggml-cuda/allreduce.cu
+index 39b23bed7..fc715178f 100644
+--- a/ggml/src/ggml-cuda/allreduce.cu
++++ b/ggml/src/ggml-cuda/allreduce.cu
+@@ -957,6 +957,267 @@ bool ggml_cuda_ar_allreduce(
+     return ok;
+ }
+ 
++// ---------------------------------------------------------------------------
++// Device-side push AllReduce (opt-in via GGML_CUDA_AR_DEVICE=1).
++//
++// Publishes each rank's shard straight into the peers' device buffers over
++// peer access (NVLink), flags it per block, then sums locally.  The host only
++// launches one kernel per rank per call: no polling, no NCCL enqueue.  Small
++// token-generation reductions are dominated by that host cost, which is what
++// this path targets.  Calls that do not fit the allocated capacity return
++// false so the dispatcher can fall back to the regular implementation.
++// ---------------------------------------------------------------------------
++
++#define GGML_CUDA_AR_DEV_SLOTS    4
++#define GGML_CUDA_AR_DEV_GRID     4
++#define GGML_CUDA_AR_DEV_NTHR     256
++#define GGML_CUDA_AR_DEV_SPIN_CAP (1u << 22)
++
++// Block k publishes its own chunk to every peer, flags it, waits for block k of
++// the peers and sums.  No grid-wide barrier: the dependency stays per block,
++// which keeps the latency chain short.  err counts spin timeouts so a broken
++// peer cannot hang the caller forever.
++// VEC4 selects float4 copies; the summation order is unchanged, so both
++// instantiations produce identical results.
++template <bool VEC4>
++static __global__ void ggml_cuda_ar_dev_push_kernel(
++        const float * __restrict__ src, float * __restrict__ dst,
++        float ** peer_buf, unsigned ** peer_flag, unsigned * err,
++        const int has_compute, const int nranks, const int n,
++        const int rank, const int slot, const unsigned epoch) {
++    const int nb  = gridDim.x;
++    const int bid = blockIdx.x;
++    const int tid = threadIdx.x;
++
++    const size_t base = (size_t) slot * nranks * n;
++    // keep the per-block chunk a multiple of 4 so the vector path covers it fully
++    const int chunk = VEC4 ? ((n + 4*nb - 1) / (4*nb)) * 4 : (n + nb - 1) / nb;
++    const int i0    = bid * chunk;
++    const int i1    = min(n, i0 + chunk);
++
++    if (VEC4) {
++        const float4 * s4 = (const float4 *) src;
++        const int      n4 = n / 4;
++        for (int j = i0/4 + tid; j < i1/4; j += blockDim.x) {
++            const float4 v = has_compute ? s4[j] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
++            for (int w = 0; w < nranks; ++w) {
++                ((float4 *) peer_buf[w])[base/4 + (size_t) rank * n4 + j] = v;
++            }
++        }
++    } else {
++        for (int i = i0 + tid; i < i1; i += blockDim.x) {
++            const float v = has_compute ? src[i] : 0.0f;
++            for (int w = 0; w < nranks; ++w) {
++                peer_buf[w][base + (size_t) rank * n + i] = v;
++            }
++        }
++    }
++    __threadfence_system();
++    __syncthreads();
++
++    if (tid == 0) {
++        const size_t fi = ((size_t) slot * nranks + rank) * nb + bid;
++        for (int w = 0; w < nranks; ++w) {
++            atomicExch(&peer_flag[w][fi], epoch);
++        }
++        const size_t fi0 = (size_t) slot * nranks * nb + bid;
++        for (int p = 0; p < nranks; ++p) {
++            if (p == rank) { continue; }
++            unsigned spin = 0;
++            while (*(volatile unsigned *) &peer_flag[rank][fi0 + (size_t) p * nb] < epoch) {
++                if (++spin > GGML_CUDA_AR_DEV_SPIN_CAP) { atomicAdd(err, 1u); break; }
++            }
++        }
++    }
++    __syncthreads();
++    __threadfence_system();
++
++    if (VEC4) {
++        const int      n4  = n / 4;
++        const float4 * my4 = (const float4 *) (peer_buf[rank] + base);
++        float4 *       d4  = (float4 *) dst;
++        for (int j = i0/4 + tid; j < i1/4; j += blockDim.x) {
++            float4 s = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
++            for (int w = 0; w < nranks; ++w) {
++                const float4 t = my4[(size_t) w * n4 + j];
++                s.x += t.x; s.y += t.y; s.z += t.z; s.w += t.w;
++            }
++            d4[j] = s;
++        }
++    } else {
++        const float * my = peer_buf[rank] + base;
++        for (int i = i0 + tid; i < i1; i += blockDim.x) {
++            float s = 0.0f;
++            for (int w = 0; w < nranks; ++w) {
++                s += my[(size_t) w * n + i];
++            }
++            dst[i] = s;
++        }
++    }
++}
++
++struct ggml_cuda_ar_device {
++    int      nranks = 0;
++    size_t   cap    = 0; // floats per rank shard
++    unsigned epoch  = 0;
++    struct dev {
++        float *     buf       = nullptr;
++        unsigned *  flag      = nullptr;
++        unsigned *  err       = nullptr;
++        float **    peer_buf  = nullptr;
++        unsigned ** peer_flag = nullptr;
++    } devs[GGML_CUDA_MAX_DEVICES];
++};
++
++ggml_cuda_ar_device * ggml_cuda_ar_device_init(const int * devices, size_t n_devices, size_t cap) {
++    if (n_devices < 2 || n_devices > GGML_CUDA_MAX_DEVICES || cap == 0) {
++        return nullptr;
++    }
++    for (size_t i = 0; i < n_devices; ++i) {
++        for (size_t j = i + 1; j < n_devices; ++j) {
++            int can = 0;
++            if (cudaDeviceCanAccessPeer(&can, devices[i], devices[j]) != cudaSuccess || !can) {
++                (void) cudaGetLastError();
++                return nullptr;
++            }
++            if (cudaDeviceCanAccessPeer(&can, devices[j], devices[i]) != cudaSuccess || !can) {
++                (void) cudaGetLastError();
++                return nullptr;
++            }
++        }
++    }
++
++    ggml_cuda_ar_device * ret = new ggml_cuda_ar_device();
++    ret->nranks = (int) n_devices;
++    ret->cap    = cap;
++
++    const size_t nbuf = (size_t) GGML_CUDA_AR_DEV_SLOTS * n_devices * cap;
++    const size_t nflg = (size_t) GGML_CUDA_AR_DEV_SLOTS * n_devices * GGML_CUDA_AR_DEV_GRID;
++
++    bool ok = true;
++    for (size_t i = 0; i < n_devices && ok; ++i) {
++        if (cudaSetDevice(devices[i]) != cudaSuccess) { ok = false; break; }
++        auto & d = ret->devs[i];
++        ok = ok && cudaMalloc(&d.buf,  sizeof(float)    * nbuf) == cudaSuccess;
++        ok = ok && cudaMalloc(&d.flag, sizeof(unsigned) * nflg) == cudaSuccess;
++        ok = ok && cudaMalloc(&d.err,  sizeof(unsigned))        == cudaSuccess;
++        if (!ok) { break; }
++        ok = ok && cudaMemset(d.buf,  0, sizeof(float)    * nbuf) == cudaSuccess;
++        ok = ok && cudaMemset(d.flag, 0, sizeof(unsigned) * nflg) == cudaSuccess;
++        ok = ok && cudaMemset(d.err,  0, sizeof(unsigned))        == cudaSuccess;
++    }
++    for (size_t i = 0; i < n_devices && ok; ++i) {
++        for (size_t j = 0; j < n_devices && ok; ++j) {
++            if (i == j) { continue; }
++            if (cudaSetDevice(devices[i]) != cudaSuccess) { ok = false; break; }
++            cudaError_t e = cudaDeviceEnablePeerAccess(devices[j], 0);
++            if (e == cudaErrorPeerAccessAlreadyEnabled) { (void) cudaGetLastError(); }
++            else if (e != cudaSuccess) { (void) cudaGetLastError(); ok = false; }
++        }
++    }
++    for (size_t i = 0; i < n_devices && ok; ++i) {
++        float **    hb = (float **)    malloc(sizeof(float *)    * n_devices);
++        unsigned ** hf = (unsigned **) malloc(sizeof(unsigned *) * n_devices);
++        for (size_t w = 0; w < n_devices; ++w) {
++            hb[w] = ret->devs[w].buf;
++            hf[w] = ret->devs[w].flag;
++        }
++        if (cudaSetDevice(devices[i]) != cudaSuccess) { ok = false; }
++        ok = ok && cudaMalloc(&ret->devs[i].peer_buf,  sizeof(float *)    * n_devices) == cudaSuccess;
++        ok = ok && cudaMalloc(&ret->devs[i].peer_flag, sizeof(unsigned *) * n_devices) == cudaSuccess;
++        if (ok) {
++            ok = ok && cudaMemcpy(ret->devs[i].peer_buf,  hb, sizeof(float *)    * n_devices, cudaMemcpyHostToDevice) == cudaSuccess;
++            ok = ok && cudaMemcpy(ret->devs[i].peer_flag, hf, sizeof(unsigned *) * n_devices, cudaMemcpyHostToDevice) == cudaSuccess;
++        }
++        free(hb); free(hf);
++    }
++
++    if (!ok) {
++        (void) cudaGetLastError();
++        ggml_cuda_ar_device_free(ret);
++        return nullptr;
++    }
++    return ret;
++}
++
++void ggml_cuda_ar_device_free(ggml_cuda_ar_device * dev) {
++    if (dev == nullptr) {
++        return;
++    }
++    for (int i = 0; i < dev->nranks; ++i) {
++        auto & d = dev->devs[i];
++        if (d.buf)       { cudaFree(d.buf);       d.buf       = nullptr; }
++        if (d.flag)      { cudaFree(d.flag);      d.flag      = nullptr; }
++        if (d.err)       { cudaFree(d.err);       d.err       = nullptr; }
++        if (d.peer_buf)  { cudaFree(d.peer_buf);  d.peer_buf  = nullptr; }
++        if (d.peer_flag) { cudaFree(d.peer_flag); d.peer_flag = nullptr; }
++    }
++    delete dev;
++}
++
++bool ggml_cuda_ar_device_allreduce(
++        ggml_cuda_ar_device * dev, ggml_backend_t * backends, ggml_tensor ** tensors) {
++    // Optional counters: how often this path serves a call and how often it
++    // declines one (declined calls fall back to the regular implementation).
++    static bool     counting = getenv("GGML_CUDA_AR_TIMING") != nullptr;
++    static int64_t  n_ok     = 0;
++    static int64_t  n_decl   = 0;
++
++    auto declined = [](void) {
++        if (counting && ++n_decl % 256 == 0) {
++            GGML_LOG_INFO("device AllReduce: served %ld, declined %ld\n", (long) n_ok, (long) n_decl);
++        }
++        return false;
++    };
++
++    if (dev == nullptr) {
++        return declined();
++    }
++    const int     nranks = dev->nranks;
++    const int64_t ne     = ggml_nelements(tensors[0]);
++    if (ne <= 0 || (size_t) ne > dev->cap) {
++        return declined();
++    }
++    for (int i = 0; i < nranks; ++i) {
++        if (tensors[i] == nullptr || ggml_nelements(tensors[i]) != ne) { return declined(); }
++        if (tensors[i]->type != GGML_TYPE_F32)                       { return declined(); }
++        if (!ggml_is_contiguously_allocated(tensors[i]))             { return declined(); }
++    }
++    bool vec4 = ((ne % 4) == 0);
++    for (int i = 0; i < nranks && vec4; ++i) {
++        if (((uintptr_t) tensors[i]->data % 16) != 0) { vec4 = false; }
++    }
++    if (dev->epoch == 0xffffffffu) {
++        return declined();
++    }
++    dev->epoch += 1;
++    const unsigned epoch = dev->epoch;
++    const int      slot  = (int) ((epoch - 1u) % GGML_CUDA_AR_DEV_SLOTS);
++
++    for (int i = 0; i < nranks; ++i) {
++        ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backends[i]->context;
++        ggml_cuda_set_device(cuda_ctx->device);
++        auto & d = dev->devs[i];
++        const int has_compute = (tensors[i]->flags & GGML_TENSOR_FLAG_COMPUTE) ? 1 : 0;
++        if (vec4) {
++            ggml_cuda_ar_dev_push_kernel<true><<<GGML_CUDA_AR_DEV_GRID, GGML_CUDA_AR_DEV_NTHR, 0, cuda_ctx->stream()>>>(
++                (const float *) tensors[i]->data, (float *) tensors[i]->data,
++                d.peer_buf, d.peer_flag, d.err, has_compute, nranks, (int) ne, i, slot, epoch);
++        } else {
++            ggml_cuda_ar_dev_push_kernel<false><<<GGML_CUDA_AR_DEV_GRID, GGML_CUDA_AR_DEV_NTHR, 0, cuda_ctx->stream()>>>(
++                (const float *) tensors[i]->data, (float *) tensors[i]->data,
++                d.peer_buf, d.peer_flag, d.err, has_compute, nranks, (int) ne, i, slot, epoch);
++        }
++        if (cudaGetLastError() != cudaSuccess) {
++            (void) cudaGetLastError();
++            return declined();
++        }
++    }
++    if (counting) {
++        ++n_ok;
++    }
++    return true;
++}
+ #else // defined(GGML_USE_MUSA)
+ 
+ // MUSA lacks the host-mapped pinned-memory APIs (cudaHostAllocPortable
+@@ -973,5 +1234,13 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline *) {
+ bool ggml_cuda_ar_allreduce(ggml_cuda_ar_pipeline *, ggml_backend_t *, ggml_tensor **) {
+     return false;
+ }
++ggml_cuda_ar_device * ggml_cuda_ar_device_init(const int *, size_t, size_t) {
++    return nullptr;
++}
++void ggml_cuda_ar_device_free(ggml_cuda_ar_device *) {
++}
++bool ggml_cuda_ar_device_allreduce(ggml_cuda_ar_device *, ggml_backend_t *, ggml_tensor **) {
++    return false;
++}
+ 
+ #endif // !defined(GGML_USE_MUSA)
+diff --git a/ggml/src/ggml-cuda/allreduce.cuh b/ggml/src/ggml-cuda/allreduce.cuh
+index 76205d323..db05698b4 100644
+--- a/ggml/src/ggml-cuda/allreduce.cuh
++++ b/ggml/src/ggml-cuda/allreduce.cuh
+@@ -8,6 +8,36 @@
+ // Opaque pipeline context -- owns all pinned buffers, streams, and events.
+ struct ggml_cuda_ar_pipeline;
+ 
++// Opaque device-side push context (peer-access buffers, flags, epochs).
++struct ggml_cuda_ar_device;
++// ---------------------------------------------------------------------------
++// Device-side push AllReduce (opt-in via GGML_CUDA_AR_DEVICE=1).
++//
++// Publishes each rank's shard straight into the peers' device buffers over
++// NVLink (peer access), flags it per block, then sums locally.  The host only
++// launches one kernel per rank per call: no host polling, no NCCL enqueue.
++// Targets small token-generation reductions where host-side collective cost
++// dominates.  Calls that do not fit the capacity return false and the caller
++// falls back to the regular path.
++// ---------------------------------------------------------------------------
++
++// Allocate a device-side push pipeline for n_devices GPUs in rank order.
++// cap is the maximum number of floats per rank shard that can be reduced.
++// Returns nullptr on allocation failure (caller falls back).
++ggml_cuda_ar_device * ggml_cuda_ar_device_init(
++    const int * devices, size_t n_devices, size_t cap);
++
++// Release all resources owned by the pipeline.
++void ggml_cuda_ar_device_free(ggml_cuda_ar_device * dev);
++
++// Execute an in-place sum across tensors[0..n_devices-1] (contiguous F32).
++// Returns false when the call is not supported by this path.
++bool ggml_cuda_ar_device_allreduce(
++    ggml_cuda_ar_device * dev,
++    ggml_backend_t      * backends,
++    ggml_tensor        ** tensors);
++
++
+ // Allocate a pipeline for n_devices GPUs.
+ // devices[] holds the GPU device IDs in rank order.
+ // Returns nullptr on allocation failure.
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 129a5cc37..79bc50934 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -979,6 +979,7 @@ struct ggml_backend_cuda_comm_context {
+     try_allreduce_fn            try_allreduce = nullptr;
+ 
+     ggml_cuda_ar_pipeline *     ar_pipeline = nullptr;
++    ggml_cuda_ar_device *       ar_device   = nullptr;
+ 
+ #ifdef GGML_USE_NCCL
+     std::vector<ncclComm_t>     comms;
+@@ -991,6 +992,7 @@ struct ggml_backend_cuda_comm_context {
+         }
+ #endif // GGML_USE_NCCL
+         ggml_cuda_ar_pipeline_free(ar_pipeline);
++        ggml_cuda_ar_device_free(ar_device);
+     }
+ };
+ 
+@@ -1131,6 +1133,11 @@ static bool ggml_backend_cuda_comm_try_allreduce_nccl(
+         ggml_backend_cuda_comm_context * comm_ctx, struct ggml_tensor ** tensors) {
+     return ggml_backend_cuda_comm_allreduce_nccl(comm_ctx, tensors);
+ }
++
++static bool ggml_backend_cuda_comm_try_allreduce_device(
++        ggml_backend_cuda_comm_context * comm_ctx, struct ggml_tensor ** tensors) {
++    return ggml_cuda_ar_device_allreduce(comm_ctx->ar_device, comm_ctx->backends.data(), tensors);
++}
+ #endif // GGML_USE_NCCL
+ 
+ static bool ggml_backend_cuda_comm_try_allreduce_internal(
+@@ -1172,7 +1179,32 @@ static void ggml_backend_cuda_comm_init_internal(ggml_backend_cuda_comm_context
+     ggml_backend_cuda_comm_init_none(ret);
+ }
+ 
++// Device-side push path, opt-in with GGML_CUDA_AR_DEVICE=1.  Serves small
++// reductions only: a call larger than the capacity is left to the regular
++// implementation, which keeps the large prefill reductions on NCCL.
++static bool ggml_backend_cuda_comm_init_device(ggml_backend_cuda_comm_context * ret) {
++    if (getenv("GGML_CUDA_AR_DEVICE") == nullptr) {
++        return false;
++    }
++
++    const size_t cap = 262144; // floats per rank shard (1 MiB)
++
++    ret->ar_device = ggml_cuda_ar_device_init(ret->dev_ids.data(), ret->dev_ids.size(), cap);
++    if (ret->ar_device == nullptr) {
++        (void) cudaGetLastError();
++        GGML_LOG_WARN("device-side AllReduce init failed; using the regular path\n");
++        return false;
++    }
++
++    ret->try_allreduce = ggml_backend_cuda_comm_try_allreduce_device;
++    GGML_LOG_INFO("device-side push AllReduce enabled (cap %zu floats)\n", cap);
++    return true;
++}
++
+ static void ggml_backend_cuda_comm_init_nccl(ggml_backend_cuda_comm_context * ret) {
++    if (ggml_backend_cuda_comm_init_device(ret)) {
++        return;
++    }
+ #ifdef GGML_USE_NCCL
+     // Disabling NCCL path when CUDA virtual devices are in use since NCCL requires one distinct physical GPU per rank.
+     const ggml_cuda_device_info & info = ggml_cuda_info();
