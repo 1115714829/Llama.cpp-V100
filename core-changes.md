@@ -66,9 +66,14 @@ if (volta_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
   - `full_attn_interval=4`，`is_recr_impl[i]=(i+1)%4!=0` → **64 层中 48 层是线性/递归注意力（GDN gated delta net，类 Mamba），仅 16 层是全注意力（FA / fattn.cu）**。
   - **fattn.cu 只覆盖 1/4 层**；GDN 占 3/4（1cat 对应 `flash_qla/.../sm70/` GDN kernel，更大的块，留 Phase 3+）。
   - 首个优化（FA-V100→fattn.cu）只触及那 1/4 全注意力层。
-- 全注意力层 config（Qwen3.5 标准，head_dim 为关键事实）：
-  - n_embd=5120，**head_dim=128**（=n_embd_head，k==v，L137 断言；∉{40,72} → **不被 line 644 排除，TC 可用**）。
-  - n_head=40，n_kv_head=8 → **gqa_ratio=5**（奇数 → `gqa_ratio_eff=1`）。
+- 全注意力层 config（⚠️ **2026-09-20 DSH 审计：以下几行已更正，原值错误**）：
+  > 🛑 原文写 **head_dim=128 / n_head=40 / n_kv_head=8（GQA=5）**。**直接读 GGUF 元数据**（`Qwen3.8-27B-Q8_0.gguf`）实测：
+  > `head_count = 24`、`head_count_kv = 4`、`key_length = value_length = **256**`、`embedding_length = 5120`、`full_attention_interval = 4`。
+  > ⇒ **head_dim=256 / 24 Q 头 / 4 KV 头（GQA=6）**。§8 里"反推"的 40/4 同样错误。
+  > ⇒ 本文档基于 D=128 的选核判断（例如"∉{40,72} 所以不被 line 644 排除"）**需要按 D=256 重做**；
+  >    这也解释了 1cat 的 `csrc/attention/sm70_v37` 为何是 **D=256 重写**。
+  - n_embd=5120，~~**head_dim=128**~~ **head_dim=256**（key_length=value_length=256；∉{40,72} → 仍不被 line 644 排除，但 **tile 尺寸按 D=256 计算**）。
+  - ~~n_head=40，n_kv_head=8 → gqa_ratio=5~~ ⇒ **n_head=24，n_kv_head=4 → gqa_ratio=6**（非奇数）。
   - **decode**（Q->ne[1]=1, eff=1）：`1*1<=2` → **VEC kernel**（SIMT，非 TC）。
   - **prefill**（Q->ne[1]=512）：`512*1>16` → **MMA_F16**（TC）。
   - （注：GGUF 用非标准 key `qwen35.attention.head_count`/`head_count_kv`，原始字节值不完全自洽；head_dim=128 由 Qwen3.5 标准 + n_embd=5120 推得，n_head/n_kv_head 40/8 待更严谨解析确认——但不影响 head_dim=128 这一 TC 可用结论。）

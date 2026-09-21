@@ -1,5 +1,33 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
 
+> ## ★ 2026-09-20 晚：DSH 接手后的进展（新增，优先于下文 Qwen 期内容）
+> **权威顺序**：本段 > `AUDIT-2026-09-20-dsh.md`（E1–E16 纠正 + F1–F8 事实）> `1CAT-PORT-BACKLOG.md`（§4.5–§4.13 全部实测与方案）> 下文。
+>
+> **已落袋（实机实测）**
+> - **KV dtype**：`f16` 胜 `q8_0` —— 32K prefill +3.2% / decode +4.0%；**64K prefill +9.1% / decode +5.3%**（llama-bench，3 卡 tensor + P2P + f16，`-r 2`）
+> - **零代码**：**TP4 + `-ub 2048`** 在 32K prefill **1520 → 2190 t/s（+44%）**；decode 侧仍以 **TP3 最优（98.84 t/s）** ⇒ **分场景选卡**
+> - **量具**：`splits=2`、`enqueue` 17.5 ms/轮、**`sync_us` 33.9 ms/轮**（target 是 GPU-bound）；**`[AR]` 138 次集合/轮 × 123 µs**
+>   ⇒ 已装 ccache、`build-instr` 增量编译；`GGML_CUDA_OP_TIMING` 的 per-op event 表**不可用**（多设备给负数）
+>
+> **已证伪（勿重做）**
+> - **P5 前提**：llama.cpp 的 `internal` allreduce 管道在 2 卡下比 NCCL/butterfly **慢 2.5×**（37.8 vs 14.8/14.4 ms enqueue）⇒ 「把 internal 推广到 N 卡」必然更慢；要做得做**设备 IPC 版**
+> - **M5 候选 #1**：Volta 风格 staging（nbatch_fa 64 / combine 64 / nstages 1）在 D=256 上 **−6.7%**（2044 vs 2190）⇒ 已回退；改这张表 **~15 分钟/候选**（几十个模板实例重编）
+> - 旧的「每轮 ~21 ms 未归因」「1cat 4-bit/2.9× 字节」「head_dim=128/40Q/8KV」**均已作废**（见 AUDIT）
+>
+> **下一步（按序）**：① M5 继续扫（只动 ncols/nthreads/occupancy，保持 K2=V2=128/combine=128/nstages=2；候选已列在 §4.13）
+> ② P2 draft（13.8 ms vs 1cat 3.32 ms）③ P1 GQA 打包（需 f16 KV，已具备）④ P5 仅在有设备 IPC 证据后
+>
+> ## ★ 2026-09-20 深夜（DSH 第二轮实测，覆盖上面若干条）
+> **新权威文件**：`1cat-vllm-v100-study/SESSION-2026-09-20-measurements.md`（本轮全部实测 + 路线图 + 复现命令）；在它覆盖的范围内优先于本段与下文。
+>
+> - **AR 已实测（取代上面的「123 µs 推算」）**：**138.0 次/轮、94.9 µs/次（无偏，关图 arm 采样不丢）=> 13.1 ms/轮**。NCCL 走 P2P/direct pointer（8 通道 ring）；`LL128` / `MAX_NCHANNELS=1` / `Tree` 三个旋钮**全部更差**（101/110/109 vs 默认 74-84）。NV2 链路裸 copy 164 KB = 5.1 µs（边际 47 GB/s）。
+> - **CUDA graph 是刚需**：关图 target 步 39.9 -> **62.2 ms**、enqueue 20.4 -> **57.8 ms/轮**、tg 89 -> 63。
+> - **target M=8 孤立前向 = 30.8 ms**（llama-bench pp8，TP3+f16KV+ub2048）；pp1 = 24.3 ms => **读权重固定成本约 24 ms（391 GB/s/卡 = 峰值 43%）**，边际仅 0.93 ms/token。
+> - **draft = 每轮 2 次图计算**（注入 `common/speculative.cpp:1383` + 块前向 `:1440`，同一批流串行），**13.12 ms 且几乎不随块大小变化**（n_max=1 时 12.73 ms）=> **权重/固定开销受限**，理想 2-3 ms，**头寸约 10 ms/轮**。1cat 的注入是「一次投影」，我们的是「一次完整 draft 前向」。
+> - **已落地并验证（保留）**：D=256 FA 表 `Q_in_reg=false` -> **32K prefill +11.1%**（1952.7 -> 2169.9 t/s）、8K +2.9%、解码不变、**greedy sha256 逐位一致**（`f3edac19…`）。
+> - **M5 候选 #1 的量法更正**：M5 第一轮微基准**全部无效**（FA 设备实例在 `template-instances/fattn-mma-f16-instance-*.cu.o`，只重编 `fattn.cu.o` 时配置怎么改都一样）；主线那次端到端 −6.7%（2044 vs 2190，走完整 cmake 构建）**仍然有效**，与本次 `Q_in_reg=false` 是不同维度（后者 +53% 微基准 / +11.1% 端到端）。
+> - **下一步**：① draft 侧（先确认 draft 图是否被 CUDA graph 捕获）② 自写 push 式 allreduce（微基准已达 59 µs，固定开销 57 µs 疑为 `__threadfence_system`）③ target M=8 前向本体效率 ④ FA 第二/三批（occupancy 3/4、nbatch_fa 64/128）
+
 日期：2026-09-20（周日）
 交接原因：用户要把执行体从 Qwen Code 迁移到 DeepSeek 专用 dsh。
 本文件是**唯一的权威交接文档**；开始工作前先读本文件，再读 `FINAL-REPORT.md`。
@@ -14,7 +42,10 @@
 - **我们现在**：固定口径单流 decode 中位数 **95.20 tok/s**（正式、带 drop_caches），**NODROP 最好 96.60**（TP3 0,1,2）。起点基线 **55.95** ⇒ **+70%**。
 - **三项已落地且已验证正确性的提速**：① 并行化 CPU selector（+26.8%）；② `GGML_CUDA_P2P=1`（+10.6%）；③ **把 NCCL 编进来**（+18.4%）。
 - **已排除的头号假设**：把 MMQ 的 dp4a 换成 Volta FP16 HMMA。实测**这条路的天花板只有 ~1.36×**，够不到 110（详见 §6）。**不要再从零重做这条**。
-- **第一步已做完**：实测 **GDN + attention 合计只占每轮 3-6%**（ncu 在本机封死，改用 `test-backend-ops`；数据见 §10 待办 1）⇒ **它们不是 3× 差距之所在**。下一步转向 **draft 前向（头寸 8-12×，需先定论一轮几次）** 与 **每轮 ~21 ms 未归因**。
+- **第一步已做完**：实测 **GDN + attention 合计只占每轮 3-6%**（ncu 在本机封死，改用 `test-backend-ops`；数据见 §10 待办 1）。
+  ⚠️ **2026-09-20 DSH 审计更正**：该 3–6% 是用 `test-backend-ops` 的**形状不匹配**微基准得出的（hsk=256/512/64、nh=1/2、kv≤49152），
+  而本模型实际是 **`head_dim=256` / 24 Q 头 / 4 KV 头 / 16 层全注意力（`full_attention_interval=4`）** ⇒ **短上下文结论或仍成立，但不能外推到 256K**。
+  另：**"每轮 ~21 ms 未归因"是 NCCL 之前的旧数**，当前最好构建只剩 **~6–8 ms**（见 §6.2 新账本）。
 - **当前服务状态**：`vllm-1cat` 与 `llmscope` 已 **stop**（我操作腾卡的）。恢复：`systemctl start vllm-1cat llmscope`。
 
 ---
@@ -76,8 +107,13 @@ cmake --build build --config Release -j82     # 空载时从 -j82 起步
 （`vllm-1cat.service` / `llmscope.service` 恢复命令 = `systemctl start vllm-1cat llmscope`；`new-api.service` 不占显存，一直在跑。）
 
 **拓扑（`nvidia-smi topo -m`）**：GPU 0/1/2 在 NUMA0，两两 **NV2**；GPU 3/4/5 在 NUMA8；**跨组是 `SYS`**（走主机内存）。
-⇒ **只有 3 张卡能全直连 P2P**。NCCL 实测确认：TP3 `isAllDirectP2p 1`，TP4 `isAllDirectP2p 0`。
-（用户明确说卡号分配是随手填的，0,1,2,3 与 0,1,3,4 **没有区别** —— 别把卡号当变量，把**同组/跨组**当变量。）
+只有 3 张卡能全直连 P2P；NCCL 实测：TP3 `isAllDirectP2p 1`，TP4 `isAllDirectP2p 0`。卡号分配是随手填的，0,1,2,3 与 0,1,3,4 本身没有区别。
+
+> ⚠️ **2026-09-20 DSH 审计更正（用户明确指示）**：**卡数 1–6 自由；跨岛不是瓶颈，直接排除这条可能性。**
+> 用户原话："（我怀疑之前的代码中会引导你往3卡上引导）实际上我们的虽然是跨岛显卡，但这不是瓶颈问题，这个你可以直接排除可能性。"
+> §5 表里"TP3 最优 / TP4+ 变慢"是 **butterfly+NCCL 早期、固定短上下文标尺**下的实测，**只作历史记录，不作选卡依据**；
+> 反证：用户的 1cat 生产服务就是**跨岛 TP4（0,1,3,4）**且跑到 221.6–263.2 tok/s。
+> ⇒ 选卡按实验目的与实测决定；**4 卡时我们 Q8_0 = 7.25 GB/卡，优于 1cat 的 8.68 GB/卡**（字节口径见 §7.1 更正）。
 
 ---
 
@@ -151,7 +187,7 @@ cmake --build build --config Release -j82     # 空载时从 -j82 起步
 | # | 尝试 | 结果 | 结论 |
 |---|---|---|---|
 | 1 | NCCL 调参（buffer / channel / algo） | Ring **93.40**、LL **93.44**、1ch **77.67**、TP2 **80.38**，默认 **94.18** | **默认最好**，别再扫 NCCL 旋钮 |
-| 2 | 加卡（NCCL，TP tensor，NODROP） | TP3 0,1,2 **96.60**；TP4 0,1,2,3 **67.54**；TP4 0,1,3,4 **72.11**；TP5 **73.09**；TP6 **58.26** | **TP3 最优**。`[RT] target decode+sync` 随卡数恶化：32.4 → 48.6 → 73.0 ms（只有 3 卡全直连 P2P） |
+| 2 | 加卡（NCCL，TP tensor，NODROP） | TP3 0,1,2 **96.60**；TP4 0,1,2,3 **67.54**；TP4 0,1,3,4 **72.11**；TP5 **73.09**；TP6 **58.26** | 当时结论"TP3 最优"。⚠️ **已被审计降级为"历史实测"**：那是 butterfly/NCCL 早期 + 固定短上下文标尺下的结果，**用户已明确卡数 1–6 自由、跨岛不是瓶颈** ⇒ **需要重扫**（Phase B4），不要据此把方案限死在 3 卡 |
 | 3 | Volta 上把 Q8_0 MMVQ 强推 MMQ | **−31%** | 已回退。`mmvq.cu:655` 区域判断在 V100 上 **MMVQ 是对的** |
 | 4 | `--spec-draft-device CUDA0\|CUDA1`（配 tensor） | **两臂都 abort** | 根因**非 bug**：`src/models/dflash.cpp:172-175` —— 我们的 DFlash2 draft 是**全词表、借用 target 的 head**（GGUF 里没有 `output.weight`），所以它**必须**跑在 target 用的设备上 |
 | 5 | 多形状 decode graph 缓存 | 主机侧合计 **2.10 ms/轮 = 2%**，复用率已 93%（reuse=94 / rebuild=7） | **收益上限 ~2%，放弃**。（外部 fork 说的 "TP alloc 38 ms" 是他们的配置，我们这里是 1.94 ms） |
@@ -176,11 +212,33 @@ cmake --build build --config Release -j82     # 空载时从 -j82 起步
 
 ⇒ **我们的 AL 不输甚至更好**；**我们只是每轮多花 3 倍时间**。抓手 = 每轮前向+验证的效率。
 
-### 6.2 每轮成本分解（92.6 ms/轮那次实测，AL 5.21，55.49 tok/s）
+### 6.2 每轮成本分解（⚠️ **下表是 NCCL 修复之前的旧账本**，92.6 ms/轮那次实测，AL 5.21，55.49 tok/s）
+
+> ⚠️ **2026-09-20 DSH 审计更正（重要）**：下表及"~22 ms 其余"都来自 **NCCL 之前**的 92.6 ms/轮构建；
+> 当前最好构建（NCCL + P2P，见 §4.1）是 **58.9 ms/轮**，请用下面的新账本。
+> 另外三处量具/口径更正：① `enqueue_us` **不是 GPU 时间**——`llama-context.cpp:1436` 的第二个参数是 `batched`，
+> 同步在 `:1376` 且条件是 `cparams.pipeline_parallel`（本 harness 永远传 `--tensor-split` ⇒ 恒为假），
+> 所以它是**异步提交窗口**；② 因此"**M>1 时同步、可信**""layer 模式数字是假的"**均不成立**；
+> ③ 字节口径见 §7.1 更正（1cat 是 FP8，8.68 GB/卡，不是 4-bit 3.4 GB/卡）。
+
+**新账本（当前最好：NCCL TP3 + P2P，Q8_0 + DFlash2 n=7，58.9 ms/轮 = AL 5.55 ÷ 94.18 t/s，NODROP）**
 
 | 成分 | ms/轮 | 占比 | 量具 |
 |---|---|---|---|
-| target verify（M=8） | **29.87** | 32% | `LLAMA_ROUND_TIMING` 的 `enqueue_us`（M>1 时同步，可信） |
+| target 整步（`decode+sync`） | **32.3–34.3** | 55–58% | `[RT] target decode+sync`（`server-context.cpp:3709`） |
+| ↳ 其中 `enqueue`（**异步提交窗口**，非 GPU 时间） | 21.8 | 37% | `[RT] perf: enqueue_us`（`llama-context.cpp`，来自 `ctx_tgt`） |
+| ↳ 其中主机侧图工作（build+alloc+setin） | 2.3 | 4% | 同上 |
+| ↳ 其余（同步等待/尾部） | ~9 | 15% | 差减 |
+| draft 前向 | **13.8–14.4** | 24% | `LLAMA_SPEC_TIMING` 的 `draft_decode=` |
+| CPU selector | 4.3 | 7% | `LLAMA_SPEC_TIMING` 的 `selector=` |
+| walk | 0.1 | 0% | 同上 |
+| **未归因余量** | **~6–8** | 11% | 差减（**不是旧文里的 ~21 ms**） |
+
+**旧表（仅作历史，勿据以排优先级）**
+
+| 成分 | ms/轮 | 占比 | 量具 |
+|---|---|---|---|
+| target verify（M=8） | **29.87** | 32% | `LLAMA_ROUND_TIMING` 的 `enqueue_us`（~~M>1 时同步，可信~~ 见上更正） |
 | **CPU selector**（现已优化到 4.4） | 23.44 → 4.4 | 25% → 5% | `LLAMA_SPEC_TIMING` 的 `selector=` |
 | draft 前向 | **15.01** | 16% | `LLAMA_SPEC_TIMING` 的 `draft_decode=` |
 | target 主机侧图工作（build+alloc+setin） | 2.10 | 2% | build 0.13 + alloc 1.94 + setin 0.03 |
@@ -236,7 +294,13 @@ Q8_0 GEMM 探针：128/128 单元填满，误差只在 f16 反量化层（8.2583
 
 `vllm-1cat.service`：`CUDA_VISIBLE_DEVICES=0,1,3,4`（**跨 NUMA 组**）、`--tensor-parallel-size 4`、`--dtype half`、`--kv-cache-dtype fp8_e5m2`、`--gpu-memory-utilization 0.905`、`--max-model-len 262144`、`--max-num-seqs 1`、`--attention-backend FLASH_ATTN_V100`、speculative-config dflash。
 ⇒ `1cat-runtime.env` **没有任何 NCCL 调参**（只有 PATH / 缓存 / `VLLM_NCCL_SO_PATH` 指向同一个 libnccl.so.2）。
-⇒ **它 4 卡能跑，不是因为卡数或 NCCL 调参**（我们实测 TP4 反而慢）。**多半是容量驱动**（FP8 权重 27 GB / 4 卡 ≈ 6.75 GB/卡）。
+⇒ **它 4 卡能跑，不是因为卡数或 NCCL 调参**。**是硬约束逼出来的**（2026-09-20 DSH 审计更正）：
+- 实测该 FP8 目录 **30,866,866,928 B**（66 个 safetensors）+ draft **3,848,817,896 B** = **34.72 GB** ⇒ **8.68 GB/卡**（4 卡）；
+- `config.json`：`head_dim 256`、`num_attention_heads 24`、`num_key_value_heads 4` ⇒ vLLM 要求 TP 整除头数 ⇒ **TP ∈ {1,2,4}**；
+- TP2 需要 17.4 GB/卡 > 16 GB ⇒ **只剩 TP4**。
+⇒ 原文"FP8 权重 27 GB / 4 卡 ≈ 6.75 GB/卡"**数字偏低**（把 30.87 GB 写成了 27 GB，且漏了 draft）。
+⇒ **对我们不构成约束**：llama.cpp 允许任意切分；**4 卡时我们 Q8_0 是 7.25 GB/卡，已优于他们的 8.68**。
+⇒ 并且 1cat 的 TP4 是**跨岛**（0,1,3,4）——再次说明**跨岛不是瓶颈**。
 
 ### 7.2 它自己实测过的开关（`docs/design/sm70_qwen38_default_fastpath.md`，可直接借鉴）
 
@@ -399,14 +463,16 @@ LD_LIBRARY_PATH=/root/libdir-nccl CUDA_VISIBLE_DEVICES=0 \
    - 若**一轮一次**前向 ⇒ 有效带宽仅 **~76-80 GB/s**（dispatch 受限，**头寸 ~8-12×**）
    - 若**一轮 8 次**前向（8×1.14 GB = 9.1 GB）⇒ ≈607 GB/s（67% 屋顶，头寸只有 ~1.5×）
    - **这两种解释差 8 倍，必须先定论**。做法：读 `common/speculative.cpp` 的 block-draft 路径一轮做几次 draft 前向；或跑 `--spec-draft-n-max 1/3/7` 看 `draft_decode` 是否随 `n_max` 线性变化（**线性 ⇒ 每 token 一次；不变 ⇒ 一次块前向**）。
-2. **我们每轮还有 ~21 ms 未归因**：修好 selector 后每轮 ≈73 ms = target 29.7 + draft 15.1 + selector 4.4 + walk 0.09 + host 2.4，**尚余 ~21 ms**（`goal-phase1-findings.md` 第 3 条）。**这 21 ms 是当前最大的单一未知量。**
+2. ~~**我们每轮还有 ~21 ms 未归因**~~：**该数字已过期**（2026-09-20 DSH 审计）。它是 NCCL 之前 73 ms/轮的残差；
+   当前最好构建（NCCL+P2P，58.9 ms/轮）的新账本是：target 整步 32.3–34.3 + draft 13.8–14.4 + selector 4.3 + walk 0.1 ⇒ **余量仅 ~6–8 ms**（§6.2）。
+   **当前最大单一未知量已变成"target 整步里的 21.8 ms 异步提交窗口 + ~9 ms 同步/尾部"从何而来。**
 3. **量化 matmul**：q8_0 n=8 已 555 GB/s（自身 n=1 屋顶 757 GB/s 的 73%）⇒ **上限 1.36×，已封顶**。只在 n≈5-12 这段还有故事（1cat 的 m5/small-N 算子正对此），但那最多 1.36×。
 
 ### 待办 2：落地下一步（**顺序已按待办 1 的结论重排**）
 | 序 | 动作 | 理由 / 头寸 |
 |---|---|---|
 | **2a** | **定论 "draft 前向一轮几次"**：读 `common/speculative.cpp` 的 block-draft 路径，或跑 `--spec-draft-n-max 1/3/7` 看 `draft_decode` 是否随 `n_max` 线性 | 头寸 **8-12× vs 1.5×**，当前最大待定项 |
-| **2b** | **攻那 ~21 ms 未归因**（加 per-op 计时或更细分段计时；注意 `GGML_CUDA_DISABLE_GRAPHS=1` 才好在图内埋点） | 最大单一未知量，约占每轮 29% |
+| **2b** | **攻 target 整步的 21.8 ms 提交窗口 + ~9 ms 尾部**（加 per-op 聚合计时或更细分段计时；注意 `GGML_CUDA_DISABLE_GRAPHS=1` 才好在图内埋点）。⚠️ 旧文案的"~21 ms 未归因"已过期，见 §6.2 新账本 | 约每轮 52%，是当前最大未知量 |
 | 2c | 量化 matmul 的 **M≈5-12** 段（1cat 的 m5 / small-N HMMA 算子思路可借鉴） | **上限 1.36×，已封顶** |
 | 2d | `FUSED_GDN_INPUT_FP16` / `FUSED_HC_FP16`（1cat `VLLM_SM70_QWEN38_*`） | **优先级下调**（GDN 只占 3-6%） |
 | 2e | push-based allreduce（1cat `csrc/custom_all_reduce.cuh`；其 C=1 +7.8% / C=16 +4.3%），与所有现成通道都不同 | 先守住 NCCL 基线；**不要**引入 `VLLM_SM70_USE_BREAKABLE_CUDAGRAPH`（−13% ~ −29%） |
@@ -461,7 +527,10 @@ ssh -o BatchMode=yes root@192.168.50.235 'nohup bash /root/opbench.sh > /tmp/opb
 #     （线性 ⇒ 每 token 一次前向；不变 ⇒ 一轮一次块前向）
 
 # 3) 基线复现（正式口径，带 drop_caches）
-ssh -o BatchMode=yes root@192.168.50.235 'CARDS=0,1,2 SPLIT=tensor TAG=handoff-base L=/root/libdir-nccl bash /root/p60-ab-harness.sh'
+# ⚠️ 审计更正：必须带 P2P=1（记录里的 94.18/95.20 都是带 P2P 跑的；harness 默认不开 P2P，也不默认用 nccl 库）
+ssh -o BatchMode=yes root@192.168.50.235 'CARDS=0,1,2 SPLIT=tensor TAG=handoff-base L=/root/libdir-nccl P2P=1 bash /root/p60-ab-harness.sh'
+# 卡数不设限（用户 2026-09-20 明确：1–6 卡自由，跨岛不是瓶颈），例如 4 卡：
+#   CARDS=0,1,2,3 ... （4 卡时我们 Q8_0 为 7.25 GB/卡，优于 1cat 的 8.68 GB/卡）
 ```
 
 **本地仓库位置**：`F:\vllm+llama.cpp\llama.cpp`（fork，HEAD `79504e72b`）、`F:\vllm+llama.cpp\1cat-vllm-v100-study`（档案）

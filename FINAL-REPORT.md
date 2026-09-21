@@ -168,6 +168,13 @@ pp512 在噪声内，tg128 的 +2.6% 来自 C4。
 
 ## 7. 与 1cat-vLLM 的差距：现在能说清的话
 
+> 🛑 **2026-09-20 DSH 审计：本节结论已被取代（勿沿用）。**
+> 本节说「差距的主因是投机解码的 draft 质量/开销」，但后续实测推翻了它：
+> ① 我们的 AL 不输 1cat（证据见 `AUDIT-2026-09-20-dsh.md` §0.3 F4）；
+> ② 真因是**每轮延迟**（`premise-check-1cat-vs-llamacpp.md` §3、`HANDOFF.md` §6）；
+> ③ 本节「所有 kernel 改动只有几个百分点」仍成立，但据此推出的「必须做 draft 工程」不成立 ——
+>    审计后的优先级是 **长上下文 attention > DFlash2 编排 > prefill > allreduce > HMMA GEMM**。
+
 1cat 参考：**27B / 256K decode = 50.376 t/s**（DFlash2 投机解码）。
 我们同模型同上下文（Q4_K_M，3 卡）**带 MTP** 的区间是 **33.7~56.6 t/s**，随接受率摆动。
 

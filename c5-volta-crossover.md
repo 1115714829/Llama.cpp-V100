@@ -115,6 +115,7 @@ C5 是同一哲学在 llama.cpp 里**最轻量**的落法：不写新 kernel、�
 这台按架构调好 —— 而 llama.cpp 自己已经有 5 个这样的先例。
 
 ## 6. 待办
-- [ ] 在 **Q4_K_M（生产模型）** 上复测交叉点（2 卡即可，用 `libdir-volta2` vs `libdir-pristine`）。
-- [ ] 用 `ncu` 确认 ne11=8 时确实从 `mul_mat_vec_q` 切到了 MMQ kernel（机制确认，而非只看时间）。
+- [x] ~~在 **Q4_K_M（生产模型）** 上复测交叉点~~ —— **已完成，见 §3.5**（ne11=8 **+15.0%**，控制组 ne11=4 −0.07%）。
+- [x] ~~用 `ncu` 确认 ne11=8 切换到 MMQ kernel~~ —— **已完成，见 §3.6**（改用 `nsys`：`mul_mat_q` × 3 + `stream_k_fixup` × 3 出现）。
+- [ ] （仍未做）
 - [ ] 评估 `MMVQ_VOLTA_MAX_BATCH_SIZE_K` 对**非 K-quant**（Q4_0/Q8_0 等）是否也该调（本次只动 K-quant，最保守）。
