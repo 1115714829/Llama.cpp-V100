@@ -86,6 +86,7 @@ flowchart TD
   end
   P4 --> C1
   P7 --> C1
+  P7 -.->|R149 疑点(子代理自己标注未验证): 计数器按 graph_key=nodes[0] 分桶<br/>若 nodes[0] 在旋转容器间交替, 则 13.97% 是交错统计| D2S
   P6 --> METATAX
   P5 --> C1
   P8 -.-> X14
@@ -115,7 +116,8 @@ flowchart TD
     N3["N3 D256 FA 常量 A/B: 已判决<br/>jusko 常量 pp32768 慢 1.19% => 不采用<br/>（decode 走 TILE 未测, N1 后须重测）"]:::ok
     N4["N4 P1-4 GDN x4 预填充 +2~2.3% PP"]:::todo
     N5["N5 P2-6 RMS_NORM+SCALE 融合<br/>去~480次launch"]:::todo
-    N6["N6 主机侧 metadata 缓存+状态指纹失效<br/>直接打 53%"]:::todo
+    N6["N6a metadata 缓存本身<br/>R149: 只值 -2~-3 ms (仅省 prologue)"]:::todo
+    N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%"]:::todo
     N8["N8 GQA read-once<br/>路线: fattn-vec ncols2=3 打包"]:::todo
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
@@ -170,6 +172,9 @@ flowchart TD
   E5 ==>|D256 常量才在 decode 生效| N3
   E6 ==>|决定 K1 怎么改写| K1
   E7 ==>|先验证解码外提收益| LOWBIT
+  N6B ==>|缓存必须配它才有收益| N6
+  N6 -->|其实只值这么多| METATAX2["★ R149 更正: N6 单独不够<br/>prologue 3.3 只省 2-3; ar 6.1 不可去"]:::warn
+  METATAX2 --> K4
   E8 ==>|meta 税不灭则加卡不买带宽| K4
   N1 -.-> N13
   SK6 -.-> N14
