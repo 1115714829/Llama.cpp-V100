@@ -74,6 +74,44 @@
 => **这正对着我们 53% 的 meta 后端主机循环**（每轮 29.4 ms），也印证了我们已闭合的那条链
 （图重建 -> uid 重发 -> 属性抖动 -> direct）。**外部先例表明这条路是对的，而且有人已经走到位了。**
 
+## 5. ★★ attention 与服务层线（中期，证据级）
+
+### 5.1 最可能直接解决我们长上下文问题的一条：**GQA read-once**
+`sglang-V100` fork 内 `python/sglang/srt/layers/attention/tilelang_fa_v100/`：
+- **一个 CTA 吃掉一个 KV 头的全部 6 个 Q 头 => K/V 只读一次**
+- K 轴 split-KV：decode 目标 **160 个 CTA**；prefill 尾块 64/32/16/8/4/2 路
+- 1 字节 E5M2 KV + 移位转换
+- 作者自测：把 **128K decode 从 30.04 tok/s 救回 200K 49.58 tok/s**
+
+**为什么这条对我们特别关键**：我们的模型 **24 Q 头 / 4 KV 头（GQA=6）**，而我们的长上下文实测是
+**有效 KV 带宽约 105 GB/s、roofline 800 GB/s**（256K decode 34 t/s）。
+若我们的 FA 内核是「每个 Q 头各读一遍同一份 K/V」（llama.cpp 常见组织方式），则 KV 读流量是最小值的 **6 倍**。
+**105 x 6 = 630 GB/s，正好接近 roofline** —— 这条线索可以解释我们长上下文的大部分差距。
+对照：`flash-attention-v100` 自己**没有**做 GQA read-once（`template.h:58,73` 用 `kv_head_idx = head_idx/(H_Q/H_K)`，6 个 Q 头各读一遍），
+而且它的 decode **明确不支持 split-KV**（`fused_mha_forward_kvcache.cu:462` 有硬 `TORCH_CHECK`：`num_splits > 1 not supported now`）。
+=> **两个仓库正好形成对照：谁做了 GQA read-once 谁就把长上下文救回来了。**
+
+### 5.2 与我们主机侧问题直接对应的配置纪律：**只捕获单形状 CUDA 图**
+`sglang-V100` 的服务参数：`--max-running-requests 1` + **`--cuda-graph-bs 1 --cuda-graph-max-bs 1`**（只捕获单形状图）
++ `SGLANG_ENABLE_OVERLAP_PLAN_STREAM=1`（规划流与计算流重叠）；KV 量化用 `--kv-cache-dtype fp8_e5m2`。
+=> 这正是我们缺的**静态形状纪律**，也解释了为什么他们的图不会像我们这样每轮属性抖动 17,000 次。
+
+### 5.3 D=256 在 Volta 上的两个硬约束（与我们已做的 FA 工作对照）
+- `flashinfer-sm70.patch` 新增了 D=256 的 kernel spec：`head_size=256`、`warps_m=1`/`warps_n=2`、**`share_smem_k_v=True`**、`loop_step=16`；
+  原文注释：*share_smem=True required - D=256 overflows Volta's 96KB SMEM without sharing*。
+- 同 patch 把继承自 Turing 的 **`warps_n=8` 全部改成 `warps_n=2`**（针对 sm70 的 hmma884 重新调参）。
+- `flash-attention-v100` 侧同样的结论：D=256 时 smem 合计约 **88.1 KB => V100 上只能 1 CTA/SM**，
+  K/V 共用一块 smem 是能放下的**唯一原因**（`include/forward.h:42-61` 的 union 布局）。
+=> **我们应核对自己的 FA 在 D=256 下的 `warps_n` 与 `share_smem_k_v` 是否为 sm70 调优值。**
+
+### 5.4 其他可借的点
+- `marlin-v100-*.patch`：外部仓库 `zhinianqin/marlin_v100` 的 MoE **W4A16** 内核；并新增 `csrc/sm70_bf16_compat.h`
+  给 sm70 补 `__bfloat1622float2` / `__hfma2` 等在 CUDA 12.x 下对 sm_80 以下屏蔽的向量 intrinsic。
+  （对我们意义有限：我们的模型是**稠密**的，不是 MoE。）
+- `flash-attention-v100` 的一个重要否定性结论（`utils/docs/volta.md:139,143`）：
+  **sm_70 上 `nvcuda::wmma` 只有 m16n16k16，且 `ldmatrix` 要 sm_75 => 拿 wmma 直接写 Volta attention 走不通**，必须手写 PTX。
+  这与我们早前「自写 WMMA 原型只有 90 GB/s」的实测一致。
+
 ## 4. 待深挖（子代理正在做）
 - `v100-skinny fork_patches/gdn_attn.py`：**GDN 投机状态的快速元数据构建**，作者自测 **-1.4 ms/step**，
   消掉 **21 次 device sync + 约 70 次 copy** —— 我们的 direct 抖动源正是 **GDN 递归状态视图**，这条高度相关。
