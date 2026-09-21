@@ -897,6 +897,42 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
        ㉖ 与 harness 无投机臂 45.31 t/s（n_kv~300，22.07 ms）交叉验证：它落在 d256(21.35) 与 d8192(22.18) 之间，
           差 3% 以内 => **跨工具在稳态口径下是一致的**（R168 的结论再次成立）。
        ㉗ 方法论：**一次加载 + 逗号列表 + 升序 + r=8** 是深度测量的正确形态（4 分钟出 11 个点，含离散度），比逐深度分臂快 10 倍。
+    —— Round 173（**本项目至今最重要的一次实测：探针把「每轮走 direct」的因果链钉死了**）：
+       ㉘ 四个探针一次跑通（一支臂，NODROP，`/root/fpd-chain.log`）：
+          - **`[FPD]`**：`calls=192 same=152 diff=39 hit8=160 dist1=20 dist2=25 dist3=23 ...` => **相邻大图 79% 逐位相同**；
+            细节行显示大图只有两种：**4951 节点（target）与 649 节点（draft）交替**，**dist2 最大** => 每个 key 的图内容跨轮不变。
+          - **`[SCHED]`**：`BIG calls=132 splits=132 cached=0 split=257.8 us/call alloc=5437.3 us/call`；
+            **开了 `GGML_SCHED_SPLIT_CACHE=1` 仍然 `cached=0`** => 切图缓存一次都没命中；**alloc 是 split 的 21 倍**。
+          - **`[MKEY]`**：每个子图的 `nodes[0]`（= CUDA 图 key）**每轮都是新地址**（4 轮 12 个互不相同的值）。
+          - **`[FAK]`**：verify = `TILE` + `need_f16_K/V=1`（D=256 n_q=8 kv_type=8）；prefill = `MMA_F16`；无投机 = `VEC`。
+       ㉙ **因果链（实测，不再是推断）**：`sched_reset` 清 `last_graph_fp` -> 切图缓存永不命中 -> split 重铸 uid
+          -> meta `needs_rebuild` -> 旋转容器 + 重建 `bcj.nodes`（simple tensor 地址全变）
+          -> `ggml_cuda_graph_get_key()=nodes[0]` 每轮新地址 -> **每次都是全新 CUDA 图对象**（warmup=false、node_props 空）
+          -> `update_required` 必然 true -> **逐节点 direct**。这解释了 dev 19.7 里那 11.6 ms（59%）。
+       ㉚ **反直觉点（要记住）**：UID 快路径（`:3042`）**不是必需的** —— 属性 memcmp 才是判据；但**key 变了就一切归零**。
+       ㉛ 由此定下 N6a 的**最小实现**：只动 `ggml-backend-meta.cpp` 两处 early-out（init_tensor 幂等 + rebuild 整块跳过），
+          env 门控 `GGML_META_REBUILD_CACHE`，默认关。spec 已持久化为 `SPEC-N6a-rebuild-skip.md`（含三个跳过点、验证门、风险）。
+       ㉜ 预期收益 **-10 ~ -15 ms/轮**（prologue 3.3 + direct 11.6）=> 55.5 -> 40-45 ms/轮（tg 100 -> 123-139）；
+          **正确性门必须仍是 `f3edac19...`**。
+       ㉝ 附带纪律（本轮真踩到）：**替换共享库会杀死正在跑的测量**（Z1 的臂 SIGSEGV 139，6 s 就死，连 `ggml_cuda_init` 都没打出来）
+          => 已写进 AGENTS §4.37（双向锁：构建方持 `/tmp/LLAMA_BUILD_LOCK`，测量方查 `cmake` 与锁文件）。
+    —— Round 174（chain 2 的四探针 + MTP 对照：**账本被改写**）：
+       ㉞ **`[META]` 的真实口径（改写「meta 29.4 ms = 53%」）**：`calls=576 sub/call=48.0 ar/call=47.0 | total=21.283 loop=19.743 dev=17.435
+          ar=2.304 ms/call | prologue=1.540 (7.2%)`。**576 calls x 21.28 ms = 12.25 s ≈ 该臂全部生成时间（12.4 s）**
+          => **meta 主机循环几乎就是整轮时间本身**（每轮约 **3.6 次** meta 调用），而不是占 53%。
+          => 每 call：**dev 17.4 ms（主机侧逐节点启动）** > ar 2.3 > prologue 1.5；后两者合计只占 18%。
+       ㉟ **`[GRAPH]` 改写了「13.97% direct 吃掉 59%」**：`calls=82688 capture=2742 replay=64875 direct=15071 per_call=5.9us avg_nodes=40`
+          => **replay 占 78.5%，direct 只占 18.2%**；但 direct 约 15071 次 x 40 节点 x ~9 us ≈ **5.4 s（12.4 s 的 43%）**。
+          capture=2742 = **约 1.4 次/轮** => 图 key 大约每轮换一次（与 `[MKEY]` 的 n0 每轮变一致）。
+       ㊱ **`[DIRECT_PROBE]`**：top5 = `attn_norm-0` / `cache_r_l0 (reshaped)(view)` / `... (view)(view)` / `cache_r_l0 (reshaped)`
+          => 抖动确实集中在 **GDN 递归状态的视图**（旧假设成立）；但 `nodes_updated_without_memcmp=280862/331776 = **85%**`
+          => 绝大多数「属性差异」是首个差异之后的**连带计数**，不能当独立证据用。
+       ㊲ **`[OP]` 探针坏了**：总量出现负数（`RESHAPE total=-23519862 ms`）—— 事件在 replay 路径上不成对 => **该探针作废，不得引用**。
+       ㊳ **MTP 对比暂不成立**：`mtp4 = 83.55 t/s` vs `attr（DFlash2+四探针）= 63.98` —— 两臂探针数不同，**不可比**；
+          chain 3 的 C0（干净 DFlash2）与 MTP 臂才是同口径对照。注意两者的 greedy sha256 本来就不同（不同投机方法 => 不同 token 流）。
+       ㊴ chain 3 已排队：装 N6a（commit `92a1566c9`，语法检查 RC=0）-> 构建三查 + `MARK_RCACHE` -> C0 干净基线 / C1
+          `GGML_META_REBUILD_CACHE=1`+三探针 / MTP 对照，判据是 `[MKEY]` 的 n0 是否**不再每轮变**、C1 的 direct 是否掉下来、
+          以及 sha256 是否仍为 `f3edac19...`。
 ```
 
 ## 5. 作业纪律（血泪）
