@@ -116,15 +116,15 @@ flowchart TD
     N0["N0 定论(R142): 强制同步仅 +0.4~0.8 ms/轮(0.65-1.5%)<br/>两臂 draft_n/draft_acc 逐位相同<br/>=> target 步本就同步, 无整轮重叠"]:::ok
     N2["N2 只读诊断: 打印 D==256&&Q>1 的 FA kernel<br/>成本极小"]:::next
     N13["N13 KV dtype A/B (f16 vs q8_0)<br/>零代码, 1cat 自测长上下文 f16 胜"]:::next
-    N1["N1 q8_0 KV 张量核注意力<br/>R146: 8K 只值 -0.6 ms(占流量 4.5%)<br/>是长上下文项, 不是 8K 目标的贡献项"]:::next
+    N1["N1 q8_0 KV 张量核注意力<br/>R165 收敛: 只剩「省掉 f16 转换」<br/>8K 每轮约 0.537 GB 写 + 0.537 GB 读<br/>/3 卡 /438 GB/s => **约 0.8 ms/轮**<br/>（N8/N8T 的 read-once 已被否定）"]:::todo
     N3["N3 D256 FA 常量 A/B: 已判决<br/>jusko 常量 pp32768 慢 1.19% => 不采用<br/>（decode 走 TILE 未测, N1 后须重测）"]:::ok
     N4["N4 P1-4 GDN x4 预填充 +2~2.3% PP"]:::todo
     N5["N5 P2-6 RMS_NORM+SCALE 融合<br/>去~480次launch"]:::todo
     N6["N6a metadata 缓存本身<br/>R149: 只值 -2~-3 ms (仅省 prologue)"]:::todo
     N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%<br/>⚠️ R159: ninfer 那个 op **不是 drop-in** ——<br/>它的契约是「路径选择」(predecessor/successor<br/>codebook 的 K 步链, candidate_ids+unary_scores<br/>+projected_hidden, 16 候选), 与我们的<br/>CPU selector 语义不同 => 需要先做语义映射"]:::todo
-    N8["N8-vec GQA read-once (n_q=1 路径)<br/>今天 6 遍冗余, 可到 1 遍<br/>qwen38 补丁做的是这条路"]:::todo
-    N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R151 查明机制: fattn-tile.cuh:1291-1317 依次试<br/>gqa%8->8, gqa%4->4, gqa%2->2, 否则 1<br/>gqa=6 只命中 %2 => ncols2=2 => 3 遍<br/>ncols2=3 => 2 遍, ncols2=6 => 1 遍<br/>代价: 需新增 config + 实例化<br/>R152 约束(issue #28761): ncols>32 是空 stub => 只能做 ncols2=3/ncols1=8=ncols24"]:::next
+    N8["N8-vec GQA read-once —— **R165 同源斜率否定**<br/>6 遍冗余同样没有变成 DRAM 流量<br/>（与 N8T 同因：L2 吸收）"]:::no
+    N8T["N8T TILE ncols2 2->3/6 —— **R165 实测否定**<br/>同源斜率 0.070/0.094 us/ctx-token<br/>= 等价于 KV 只读 1 遍 @435 GB/s<br/>=> 指令级的 3 遍/6 遍**没有落到 DRAM**<br/>（L2 吸收了冗余）=> 做它收益约 0<br/>配方仍留档于 §3.6（issue #28761 约束 ncols<=32）"]:::no
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
     N10["[RT] 7 处 fprintf 探针规整为 env 门控"]:::todo
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
