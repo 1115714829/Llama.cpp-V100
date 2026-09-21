@@ -1,4 +1,39 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
+> ## ★★ 2026-09-21 DSH 会话实况（优先于本文件其余内容）
+>
+> **权威顺序**：本节 > `AUDIT-2026-09-20-dsh.md` > `SESSION-2026-09-20-measurements.md`（本轮逐条实测与纠正，§0-§11）> 其余。
+>
+> **验收对账（同日实测，带 drop_caches）**
+> | 项 | 项目最初 | 现在 |
+> |---|---|---|
+> | 主口径 tg（Q8_0 + DFlash2 n=7, ctx 8192, 3 prompt） | 55.95（起点基线）/ 95.20（上次正式） | **96.43 / 99.37**（两臂，AL 5.55，离散 3.0%，greedy 逐位一致） |
+> | 每轮 ms | 58.9 | **57.6 / 55.9** |
+> | 32K / 128K prefill | 1952 / 999 | **2170 / 1356**（+11.1% / +28.6%） |
+> | **256K prefill / TTFT** | 370 / 672 s | **895.93 t/s / 293 s**（+142% / -56%） |
+> | 256K decode | 33.97 | **34.13**（未改善） |
+> | 相对最初 | - | **+72% ~ +78%** |
+>
+> **已落地并提交（llama.cpp，7 个 commit，未 push）**
+> - FA 表 Q_in_reg=false（Volta D=256 全 ncols）：prefill 32K/128K/256K = +11.1%/+28.6%/+41.8%，解码不变，greedy 逐位一致
+> - DFlash2 CPU selector：gate 2.78 -> 1.00 ms（4 路部分和），selector 4.42 -> 2.63 ms，tg +3.3%
+> - 4 个 env-gated 诊断量具：GGML_CUDA_AR_TIMING / GGML_CUDA_GRAPH_DEBUG / LLAMA_SPEC_TIMING 扩展 / GGML_SCHED_SPLIT_TIMING
+>
+> **已实测证伪并回退（附补丁，勿重做）**
+> - push 式 allreduce：跑得起来但结果错（**根因已确证**：NCCL 路径归约前会清零非 COMPUTE 分片，push 内核漏了 —— 上游 #23480 同类）+ 慢 2.4x（flags 同缓存行）。已补修复待验；存档 patches/0002
+> - 按批大小分槽的图 arena：无效果（单 scheduler + 连续 arena 守卫），存档 patches/0003
+> - 形状感知 CUDA graph 缓存键：tg 无变化、capture +14%，已回退
+> - NCCL 调参（LL128 / 单通道 / Tree）全部更差；TILE->MMA 分发改动（Volta nb<=8 本就该走 TILE）
+>
+> **方向纠正（重要）**：draft 侧 13 ms 的主因**不是**主机侧图管理（实测 reuse=0/rebuild=269，但主机侧只占 7.7 ms 且与 GPU 重叠）
+> ⇒ **draft 瓶颈在 GPU 侧**（约 1 GB 权重读取 + MoE + GDN 顺序算子，有效带宽仅约 70-100 GB/s）=> 下一步做**算子融合**。
+>
+> **下一步（按证据排序）**：① push AR 修复验证（补清零已做，判据 [AR] ar_us_avg < 68.4 µs 且 greedy 不变）
+> ② draft GPU 侧算子融合（MoE/GDN，老清单 P6）③ target 侧 AR（在生产路径实测 NCCL 68.4 µs/次 x 138 次/轮 = 9.4 ms）
+> ④ 256K decode（KV 带宽受限，q8_0 下每 token 每卡约 5.7 GB ≈ 6.3 ms）
+>
+> **纪律新增（AGENTS.md §4 第 18-21 条）**：A/B 的 md5 必须覆盖四个库 + 二进制标记校验；上传与编译不可并发；
+> 单 scheduler + 形状交替是结构性限制；长等待跑测交子代理（用后台作业/哨兵，不 sleep 轮询）。
+
 
 > ## ★ 2026-09-20 晚：DSH 接手后的进展（新增，优先于下文 Qwen 期内容）
 > **权威顺序**：本段 > `AUDIT-2026-09-20-dsh.md`（E1–E16 纠正 + F1–F8 事实）> `1CAT-PORT-BACKLOG.md`（§4.5–§4.13 全部实测与方案）> 下文。
