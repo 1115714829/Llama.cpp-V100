@@ -1369,6 +1369,21 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         }
     }
 
+    // graph slot probe, enabled by LLAMA_GRAPH_SLOT_DEBUG; zero cost when unset
+    static const bool slot_debug = (getenv("LLAMA_GRAPH_SLOT_DEBUG") != nullptr);
+    if (slot_debug) {
+        // per-context call counter, at most 24 lines per llama_context
+        static std::map<const llama_context *, int> slot_calls;
+        int & slot_n = slot_calls[this];
+        if (slot_n < 24) {
+            slot_n++;
+            const int slot = n_outputs > 0 ? 1 : 0;
+            const int hit  = (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) ? 1 : 0;
+            fprintf(stderr, "[SLOT] ctx=%s call=%d n_outputs=%u gtype=%d slot=%d res=%p prev_active=%p hit=%d\n",
+                    model.name.c_str(), slot_n, n_outputs, (int) gtype, slot, (const void *) res, (const void *) gf_res_prev_active, hit);
+        }
+    }
+
     if (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
 

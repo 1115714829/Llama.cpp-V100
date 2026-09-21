@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -1966,6 +1968,17 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     const size_t n_backends = ggml_backend_meta_n_backends(backend);
     ggml_backend_meta_context * backend_ctx = (ggml_backend_meta_context *) backend->context;
 
+    // optional host-side attribution of this call (GGML_META_HOST_TIMING); zero cost when unset
+    static const bool mt_enabled = (getenv("GGML_META_HOST_TIMING") != nullptr);
+    static int64_t t_mt_total_us = 0;
+    static int64_t t_mt_loop_us  = 0;
+    static int64_t t_mt_dev_us   = 0;
+    static int64_t t_mt_ar_us    = 0;
+    static int64_t n_mt_calls    = 0;
+    static int64_t n_mt_sub      = 0;
+    static int64_t n_mt_ar       = 0;
+    const int64_t mt_fn0 = mt_enabled ? ggml_time_us() : 0;
+
     // If the previous cgraph had a defined UID it can be used to skip rebuilding the subgraphs per simple backend.
     const bool needs_rebuild = (cgraph->uid == 0) || (cgraph->uid != backend_ctx->uid);
 
@@ -2431,7 +2444,9 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     };
 
 
+    const int64_t mt_loop0 = mt_enabled ? ggml_time_us() : 0;
     for (size_t i = 0; i < backend_ctx->n_subgraphs; i++) {
+        const int64_t mt_d0 = mt_enabled ? ggml_time_us() : 0;
         for (size_t j = 0; j < n_backends; j++) {
             auto & bcj = backend_ctx->backend_configs[j];
             const ggml_status status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
@@ -2439,9 +2454,13 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                 return status;
             }
         }
+        if (mt_enabled) {
+            t_mt_dev_us += ggml_time_us() - mt_d0;
+        }
 
         if (n_backends > 1 && i < backend_ctx->n_subgraphs - 1) {
             bool backend_allreduce_success = false;
+            const int64_t mt_a0 = mt_enabled ? ggml_time_us() : 0;
             if (backend_ctx->comm_ctx) {
                 std::vector<ggml_tensor *> nodes;
                 nodes.reserve(n_backends);
@@ -2459,6 +2478,32 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                     return status;
                 }
             }
+            if (mt_enabled) {
+                t_mt_ar_us += ggml_time_us() - mt_a0;
+                n_mt_ar++;
+            }
+        }
+        if (mt_enabled) {
+            n_mt_sub++;
+        }
+    }
+
+    if (mt_enabled) {
+        t_mt_total_us += ggml_time_us() - mt_fn0;
+        t_mt_loop_us  += ggml_time_us() - mt_loop0;
+        n_mt_calls++;
+        if (n_mt_calls % 64 == 0) {
+            const double k = 1e3 * (double) n_mt_calls;
+            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f ar=%.3f ms/call | prologue=%.3f (%.1f%%)%c",
+                    (long long) n_mt_calls,
+                    (double) n_mt_sub / (double) n_mt_calls,
+                    (double) n_mt_ar / (double) n_mt_calls,
+                    (double) t_mt_total_us / k,
+                    (double) t_mt_loop_us / k,
+                    (double) t_mt_dev_us / k,
+                    (double) t_mt_ar_us / k,
+                    (double) (t_mt_total_us - t_mt_loop_us) / k,
+                    100.0 * (double) (t_mt_total_us - t_mt_loop_us) / (double) (t_mt_total_us ? t_mt_total_us : 1), 10);
         }
     }
     return GGML_STATUS_SUCCESS;

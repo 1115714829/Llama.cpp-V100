@@ -167,6 +167,7 @@ public:
     //
 
     uint32_t get_n_rs() const;
+    uint32_t get_n_rs_seq() const;
     uint32_t get_head() const;
     int32_t  get_rs_z() const;
     uint32_t get_size() const;

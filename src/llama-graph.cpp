@@ -340,6 +340,16 @@ void llm_graph_input_rs::set_input(const llama_ubatch * ubatch) {
             data[i] = mctx->s_copy(i);
         }
     }
+
+    if (s_write) {
+        GGML_ASSERT(ggml_backend_buffer_is_host(s_write->buffer));
+        int32_t * data = (int32_t *) s_write->data;
+
+        const uint32_t head = mctx->get_head();
+        for (int64_t i = 0; i < s_write->ne[0]; ++i) {
+            data[i] = (int32_t) (head + i);
+        }
+    }
 }
 
 bool llm_graph_input_rs::can_reuse(const llm_graph_params & params) {
@@ -354,7 +364,11 @@ bool llm_graph_input_rs::can_reuse(const llm_graph_params & params) {
     res &= s_copy_main->ne[0]  == params.ubatch.n_seqs;
     res &= s_copy_extra->ne[0] == mctx->get_n_rs() - params.ubatch.n_seqs;
 
-    res &= head == mctx->get_head();
+    // s_write carries the write rows per call, so the moving cache head no longer
+    // has to match for the graph to be reusable
+    if (s_write == nullptr) {
+        res &= head == mctx->get_head();
+    }
     res &= rs_z == mctx->get_rs_z();
 
     return res;
@@ -3514,6 +3528,13 @@ static std::unique_ptr<llm_graph_input_rs> build_rs_inp_impl(
 
     inp->s_copy_main  = ggml_view_1d(ctx0, inp->s_copy, n_seqs, 0);
     inp->s_copy_extra = ggml_view_1d(ctx0, inp->s_copy, n_rs - n_seqs, n_seqs * inp->s_copy->nb[0]);
+
+    // Opt-in for the A/B: with GGML_RS_INDEX_WRITE set, recurrent state writes go through
+    // s_write row indices instead of views that embed the moving cache head.
+    if (mctx_cur->get_n_rs_seq() == 0 && getenv("GGML_RS_INDEX_WRITE") != nullptr) {
+        inp->s_write = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_seqs);
+        ggml_set_input(inp->s_write);
+    }
 
     inp->head = mctx_cur->get_head();
     inp->rs_z = mctx_cur->get_rs_z();

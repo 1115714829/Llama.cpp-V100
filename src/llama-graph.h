@@ -275,6 +275,10 @@ public:
     ggml_tensor * s_copy_main;   // I32 [n_seqs]
     ggml_tensor * s_copy_extra;  // I32 [n_rs - n_seqs]
 
+    // Write destination rows of the recurrent state cache, filled per call by set_input.
+    // Keeping them out of the graph views lets the graph be reused while the cache head moves.
+    ggml_tensor * s_write = nullptr;  // I32 [n_seqs]
+
     const llama_memory_recurrent_context * mctx;
 
     // used in view offsets, need to match for valid graph reuse

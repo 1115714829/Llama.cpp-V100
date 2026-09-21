@@ -2740,6 +2740,299 @@ static const void * ggml_cuda_graph_get_key(ggml_cgraph * cgraph) {
     return cgraph->nodes[0];
 }
 
+// [DIRECT_DEBUG] env-gated probe for GGML_CUDA_DIRECT_DEBUG=1: classify which field of
+// node_properties changed. statistics only, no decision depends on it.
+enum {
+    GGML_CUDA_DP_DATA = 0,
+    GGML_CUDA_DP_SRC_DATA,
+    GGML_CUDA_DP_SRC_PTR,
+    GGML_CUDA_DP_NE,
+    GGML_CUDA_DP_NB,
+    GGML_CUDA_DP_OP,
+    GGML_CUDA_DP_TYPE,
+    GGML_CUDA_DP_VIEW,
+    GGML_CUDA_DP_OP_PARAMS,
+    GGML_CUDA_DP_FLAGS,
+    GGML_CUDA_DP_SRC_NE,
+    GGML_CUDA_DP_SRC_NB,
+    GGML_CUDA_DP_BUFFER,
+    GGML_CUDA_DP_NAME,
+    GGML_CUDA_DP_EXTRA,
+    GGML_CUDA_DP_OTHER,
+    GGML_CUDA_DP_COUNT
+};
+
+static const char * ggml_cuda_dp_field_name(const int f) {
+    switch (f) {
+        case GGML_CUDA_DP_DATA:      return "data";
+        case GGML_CUDA_DP_SRC_DATA:  return "src_data";
+        case GGML_CUDA_DP_SRC_PTR:   return "src_ptr";
+        case GGML_CUDA_DP_NE:        return "ne";
+        case GGML_CUDA_DP_NB:        return "nb";
+        case GGML_CUDA_DP_OP:        return "op";
+        case GGML_CUDA_DP_TYPE:      return "type";
+        case GGML_CUDA_DP_VIEW:      return "view";
+        case GGML_CUDA_DP_OP_PARAMS: return "op_params";
+        case GGML_CUDA_DP_FLAGS:     return "flags";
+        case GGML_CUDA_DP_SRC_NE:    return "src_ne";
+        case GGML_CUDA_DP_SRC_NB:    return "src_nb";
+        case GGML_CUDA_DP_BUFFER:    return "buffer";
+        case GGML_CUDA_DP_NAME:      return "name";
+        case GGML_CUDA_DP_EXTRA:     return "extra";
+        default:                     return "other";
+    }
+}
+
+static void ggml_cuda_dp_probe(const ggml_cuda_graph::node_properties & old_prop,
+                               const ggml_cuda_graph::node_properties & new_prop,
+                               const ggml_tensor * node, const int node_idx, const bool differs) {
+    static long long n_diff  = 0;
+    static long long n_forced = 0;
+    static long long hits[GGML_CUDA_DP_COUNT] = {};
+    static long long hits_src_data[GGML_MAX_SRC] = {};
+    static long long hits_src_ne[GGML_MAX_SRC] = {};
+    static long long hits_src_nb[GGML_MAX_SRC] = {};
+    static char      top_name[5][GGML_MAX_NAME] = {};
+    static long long top_hits[5] = {};
+
+    if (!differs) {
+        // node was re-copied because res was already true; the original memcmp was skipped
+        n_forced++;
+        return;
+    }
+
+    n_diff++;
+
+    bool hit[GGML_CUDA_DP_COUNT] = {};
+
+    if (old_prop.node.data   != new_prop.node.data)   hit[GGML_CUDA_DP_DATA]   = true;
+    if (old_prop.node.op     != new_prop.node.op)     hit[GGML_CUDA_DP_OP]     = true;
+    if (old_prop.node.type   != new_prop.node.type)   hit[GGML_CUDA_DP_TYPE]   = true;
+    if (old_prop.node.flags  != new_prop.node.flags)  hit[GGML_CUDA_DP_FLAGS]  = true;
+    if (old_prop.node.buffer != new_prop.node.buffer) hit[GGML_CUDA_DP_BUFFER] = true;
+    if (old_prop.node.extra  != new_prop.node.extra)  hit[GGML_CUDA_DP_EXTRA]  = true;
+    if (old_prop.node.view_src != new_prop.node.view_src || old_prop.node.view_offs != new_prop.node.view_offs) {
+        hit[GGML_CUDA_DP_VIEW] = true;
+    }
+    if (memcmp(old_prop.node.ne,        new_prop.node.ne,        sizeof(new_prop.node.ne))        != 0) hit[GGML_CUDA_DP_NE]        = true;
+    if (memcmp(old_prop.node.nb,        new_prop.node.nb,        sizeof(new_prop.node.nb))        != 0) hit[GGML_CUDA_DP_NB]        = true;
+    if (memcmp(old_prop.node.op_params, new_prop.node.op_params, sizeof(new_prop.node.op_params)) != 0) hit[GGML_CUDA_DP_OP_PARAMS] = true;
+    if (memcmp(old_prop.node.name,      new_prop.node.name,      sizeof(new_prop.node.name))      != 0) hit[GGML_CUDA_DP_NAME]      = true;
+    if (memcmp(old_prop.node.src,       new_prop.node.src,       sizeof(new_prop.node.src))       != 0) hit[GGML_CUDA_DP_SRC_PTR]   = true;
+
+    for (int j = 0; j < GGML_MAX_SRC; j++) {
+        if (old_prop.node_src_data_ptrs[j] != new_prop.node_src_data_ptrs[j]) {
+            hit[GGML_CUDA_DP_SRC_DATA] = true;
+            hits_src_data[j]++;
+        }
+        if (memcmp(old_prop.node_src_ne[j], new_prop.node_src_ne[j], sizeof(new_prop.node_src_ne[j])) != 0) {
+            hit[GGML_CUDA_DP_SRC_NE] = true;
+            hits_src_ne[j]++;
+        }
+        if (memcmp(old_prop.node_src_nb[j], new_prop.node_src_nb[j], sizeof(new_prop.node_src_nb[j])) != 0) {
+            hit[GGML_CUDA_DP_SRC_NB] = true;
+            hits_src_nb[j]++;
+        }
+    }
+
+    bool any = false;
+    for (int f = 0; f < GGML_CUDA_DP_COUNT; f++) {
+        if (hit[f]) {
+            hits[f]++;
+            any = true;
+        }
+    }
+    if (!any) {
+        hit[GGML_CUDA_DP_OTHER] = true;
+        hits[GGML_CUDA_DP_OTHER]++;
+    }
+
+    // coarse top-5 by node name
+    {
+        int slot = -1;
+        for (int k = 0; k < 5; k++) {
+            if (top_hits[k] > 0 && strcmp(top_name[k], node->name) == 0) {
+                slot = k;
+                break;
+            }
+        }
+        if (slot < 0) {
+            for (int k = 0; k < 5; k++) {
+                if (top_hits[k] == 0) {
+                    slot = k;
+                    break;
+                }
+            }
+        }
+        if (slot < 0) {
+            int mn = 0;
+            for (int k = 1; k < 5; k++) {
+                if (top_hits[k] < top_hits[mn]) {
+                    mn = k;
+                }
+            }
+            slot = mn;
+            top_hits[slot] = 0;
+        }
+        if (top_hits[slot] == 0) {
+            memset(top_name[slot], 0, sizeof(top_name[slot]));
+            strncpy(top_name[slot], node->name, sizeof(top_name[slot]) - 1);
+        }
+        top_hits[slot]++;
+    }
+
+    if (n_diff <= 3) {
+        fprintf(stderr, "[DIRECT_PROBE-DETAIL] #%lld node_idx=%d node=%s op=%s changed:", n_diff, node_idx, node->name, ggml_op_name(node->op));
+        if (hit[GGML_CUDA_DP_DATA]) {
+            fprintf(stderr, " data=%p->%p", old_prop.node.data, new_prop.node.data);
+        }
+        if (hit[GGML_CUDA_DP_SRC_DATA]) {
+            for (int j = 0; j < GGML_MAX_SRC; j++) {
+                if (old_prop.node_src_data_ptrs[j] != new_prop.node_src_data_ptrs[j]) {
+                    fprintf(stderr, " src_data[%d]=%p->%p", j, old_prop.node_src_data_ptrs[j], new_prop.node_src_data_ptrs[j]);
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_SRC_PTR]) {
+            for (int j = 0; j < GGML_MAX_SRC; j++) {
+                if (old_prop.node.src[j] != new_prop.node.src[j]) {
+                    fprintf(stderr, " src_ptr[%d]=%p->%p", j, (const void *) old_prop.node.src[j], (const void *) new_prop.node.src[j]);
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_NE]) {
+            for (int k = 0; k < GGML_MAX_DIMS; k++) {
+                if (old_prop.node.ne[k] != new_prop.node.ne[k]) {
+                    fprintf(stderr, " ne[%d]=%lld->%lld", k, (long long) old_prop.node.ne[k], (long long) new_prop.node.ne[k]);
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_NB]) {
+            for (int k = 0; k < GGML_MAX_DIMS; k++) {
+                if (old_prop.node.nb[k] != new_prop.node.nb[k]) {
+                    fprintf(stderr, " nb[%d]=%zu->%zu", k, old_prop.node.nb[k], new_prop.node.nb[k]);
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_OP]) {
+            fprintf(stderr, " op=%d->%d", (int) old_prop.node.op, (int) new_prop.node.op);
+        }
+        if (hit[GGML_CUDA_DP_TYPE]) {
+            fprintf(stderr, " type=%d->%d", (int) old_prop.node.type, (int) new_prop.node.type);
+        }
+        if (hit[GGML_CUDA_DP_VIEW]) {
+            fprintf(stderr, " view_src=%p->%p view_offs=%zu->%zu",
+                    (const void *) old_prop.node.view_src, (const void *) new_prop.node.view_src,
+                    old_prop.node.view_offs, new_prop.node.view_offs);
+        }
+        if (hit[GGML_CUDA_DP_OP_PARAMS]) {
+            const unsigned char * pa = (const unsigned char *) old_prop.node.op_params;
+            const unsigned char * pb = (const unsigned char *) new_prop.node.op_params;
+            int shown = 0;
+            for (size_t k = 0; k < sizeof(old_prop.node.op_params) && shown < 4; k++) {
+                if (pa[k] != pb[k]) {
+                    fprintf(stderr, " op_params[%zu]=%02x->%02x", k, (unsigned) pa[k], (unsigned) pb[k]);
+                    shown++;
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_FLAGS]) {
+            fprintf(stderr, " flags=%d->%d", (int) old_prop.node.flags, (int) new_prop.node.flags);
+        }
+        if (hit[GGML_CUDA_DP_SRC_NE]) {
+            int shown = 0;
+            for (int j = 0; j < GGML_MAX_SRC && shown < 4; j++) {
+                for (int k = 0; k < GGML_MAX_DIMS && shown < 4; k++) {
+                    if (old_prop.node_src_ne[j][k] != new_prop.node_src_ne[j][k]) {
+                        fprintf(stderr, " src_ne[%d][%d]=%lld->%lld", j, k,
+                                (long long) old_prop.node_src_ne[j][k], (long long) new_prop.node_src_ne[j][k]);
+                        shown++;
+                    }
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_SRC_NB]) {
+            int shown = 0;
+            for (int j = 0; j < GGML_MAX_SRC && shown < 4; j++) {
+                for (int k = 0; k < GGML_MAX_DIMS && shown < 4; k++) {
+                    if (old_prop.node_src_nb[j][k] != new_prop.node_src_nb[j][k]) {
+                        fprintf(stderr, " src_nb[%d][%d]=%zu->%zu", j, k,
+                                old_prop.node_src_nb[j][k], new_prop.node_src_nb[j][k]);
+                        shown++;
+                    }
+                }
+            }
+        }
+        if (hit[GGML_CUDA_DP_BUFFER]) {
+            fprintf(stderr, " buffer=%p->%p", (const void *) old_prop.node.buffer, (const void *) new_prop.node.buffer);
+        }
+        if (hit[GGML_CUDA_DP_NAME]) {
+            fprintf(stderr, " name=%s->%s", old_prop.node.name, new_prop.node.name);
+        }
+        if (hit[GGML_CUDA_DP_EXTRA]) {
+            fprintf(stderr, " extra=%p->%p", (const void *) old_prop.node.extra, (const void *) new_prop.node.extra);
+        }
+        if (hit[GGML_CUDA_DP_OTHER]) {
+            fprintf(stderr, " other=true");
+        }
+        // raw differing byte offsets, to catch anything the checks above miss
+        {
+            const unsigned char * pa = (const unsigned char *) &old_prop;
+            const unsigned char * pb = (const unsigned char *) &new_prop;
+            int shown = 0;
+            int total = 0;
+            for (size_t k = 0; k < sizeof(old_prop); k++) {
+                if (pa[k] != pb[k]) {
+                    total++;
+                    if (shown < 12) {
+                        fprintf(stderr, " raw[%zu]", k);
+                        shown++;
+                    }
+                }
+            }
+            fprintf(stderr, " raw_diff_bytes=%d", total);
+        }
+        fprintf(stderr, "\n");
+    }
+
+    if (n_diff % 2048 == 0) {
+        int ord[5] = { 0, 1, 2, 3, 4 };
+        for (int a = 0; a < 5; a++) {
+            for (int b = a + 1; b < 5; b++) {
+                if (top_hits[ord[b]] > top_hits[ord[a]]) {
+                    const int t = ord[a];
+                    ord[a] = ord[b];
+                    ord[b] = t;
+                }
+            }
+        }
+        fprintf(stderr, "[DIRECT_PROBE] changes=%lld nodes_updated_without_memcmp=%lld fields:", n_diff, n_forced);
+        for (int f = 0; f < GGML_CUDA_DP_COUNT; f++) {
+            fprintf(stderr, " %s=%lld", ggml_cuda_dp_field_name(f), hits[f]);
+        }
+        fprintf(stderr, " src_data_j=[");
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            fprintf(stderr, "%s%lld", j == 0 ? "" : ",", hits_src_data[j]);
+        }
+        fprintf(stderr, "] src_ne_j=[");
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            fprintf(stderr, "%s%lld", j == 0 ? "" : ",", hits_src_ne[j]);
+        }
+        fprintf(stderr, "] src_nb_j=[");
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            fprintf(stderr, "%s%lld", j == 0 ? "" : ",", hits_src_nb[j]);
+        }
+        fprintf(stderr, "] top5=[");
+        for (int k = 0; k < 5; k++) {
+            const int s = ord[k];
+            if (top_hits[s] > 0) {
+                fprintf(stderr, "%s%s=%lld", k == 0 ? "" : " ", top_name[s], top_hits[s]);
+            }
+        }
+        fprintf(stderr, "]\n");
+    }
+}
+
 static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph * cgraph) {
     bool res = false;
 
@@ -2774,6 +3067,12 @@ static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx
         }
 
         if (res || memcmp(&graph->node_props[i], &prop, sizeof(prop)) != 0) {
+            if (getenv("GGML_CUDA_DIRECT_DEBUG") != nullptr) {
+                // probe only: the memcmp is re-run here because the short-circuit above skips
+                // it once res is true. no decision depends on this block.
+                ggml_cuda_dp_probe(graph->node_props[i], prop, cgraph->nodes[i], i,
+                        memcmp(&graph->node_props[i], &prop, sizeof(prop)) != 0);
+            }
             if (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr) {
                 static int n_dbg = 0;
                 if (n_dbg < 3 || n_dbg % 2000 == 0) {

@@ -487,13 +487,21 @@ ggml_tensor * llm_build_delta_net_base::build_conv_state(
                     ggml_row_size(conv_input->type, s_idx));
         cb(conv_state_last, "conv_state_last", il);
 
-        ggml_tensor * conv_state_update =
-            ggml_view_2d(ctx0, conv_states_all,
-                    row_count, n_seqs, conv_states_all->nb[1],
-                    (s_slot * mem_size + kv_head) * row_size);
-        cb(conv_state_update, "conv_state_update", il);
+        if (inp->s_write) {
+            // rows selected by index, so the rolling cache head stays out of the graph
+            ggml_tensor * conv_rows = ggml_reshape_2d(ctx0, conv_states_all,
+                    row_count, ggml_nelements(conv_states_all)/row_count);
+            ggml_tensor * cur_rows = ggml_reshape_2d(ctx0, conv_state_last, row_count, n_seqs);
+            ggml_build_forward_expand(gf, ggml_set_rows(ctx0, conv_rows, cur_rows, inp->s_write));
+        } else {
+            ggml_tensor * conv_state_update =
+                ggml_view_2d(ctx0, conv_states_all,
+                        row_count, n_seqs, conv_states_all->nb[1],
+                        (s_slot * mem_size + kv_head) * row_size);
+            cb(conv_state_update, "conv_state_update", il);
 
-        ggml_build_forward_expand(gf, ggml_cpy(ctx0, conv_state_last, conv_state_update));
+            ggml_build_forward_expand(gf, ggml_cpy(ctx0, conv_state_last, conv_state_update));
+        }
     } else {
         // [TAG_RECURRENT_ROLLBACK_SPLITS]
         // this logic assumes that the last (n_rs_seq + 1) tokens of a sequence in a batch are inside
@@ -552,10 +560,19 @@ ggml_tensor * llm_build_delta_net_base::build_recurrent_attn(
         cb(output, "attn_output", il);
         cb(new_state, "new_state", il);
 
-        ggml_build_forward_expand(gf,
-                ggml_cpy(ctx0, new_state,
-                    ggml_view_2d(ctx0, ssm_states_all, hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
-                        kv_head * hparams.n_embd_s() * ggml_element_size(ssm_states_all))));
+        if (inp->s_write) {
+            // same index-based write as the conv state above
+            const int64_t n_embd_s = hparams.n_embd_s();
+            ggml_tensor * ssm_rows = ggml_reshape_2d(ctx0, ssm_states_all,
+                    n_embd_s, ggml_nelements(ssm_states_all)/n_embd_s);
+            ggml_tensor * cur_rows = ggml_reshape_2d(ctx0, new_state, n_embd_s, n_seqs);
+            ggml_build_forward_expand(gf, ggml_set_rows(ctx0, ssm_rows, cur_rows, inp->s_write));
+        } else {
+            ggml_build_forward_expand(gf,
+                    ggml_cpy(ctx0, new_state,
+                        ggml_view_2d(ctx0, ssm_states_all, hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
+                            kv_head * hparams.n_embd_s() * ggml_element_size(ssm_states_all))));
+        }
 
         return output;
     }

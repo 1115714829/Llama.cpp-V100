@@ -1279,6 +1279,10 @@ uint32_t llama_memory_recurrent_context::get_n_rs() const {
     return is_full ? mem->size : mem->n;
 }
 
+uint32_t llama_memory_recurrent_context::get_n_rs_seq() const {
+    return mem->n_rs_seq;
+}
+
 uint32_t llama_memory_recurrent_context::get_head() const {
     return is_full ? 0 : mem->head;
 }
