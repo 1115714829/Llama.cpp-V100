@@ -402,8 +402,10 @@ private:
     mutable int64_t t_rt_build_us   = 0; // graph construction
     mutable int64_t t_rt_alloc_us   = 0; // ggml_backend_sched_alloc_graph
     mutable int64_t t_rt_setin_us   = 0; // set_inputs
-    mutable int64_t t_rt_compute_us = 0; // graph_compute
+    mutable int64_t t_rt_compute_us = 0; // graph_compute (async enqueue window)
+    mutable int64_t t_rt_sync_us    = 0; // graph_compute including the device wait (LLAMA_ROUND_TIMING_SYNC)
     mutable int32_t n_rt_rounds     = 0; // process_ubatch() calls in the current window
     mutable int32_t n_rt_reuse      = 0; // of those, how many reused the previous graph
     mutable int32_t n_rt_rebuild    = 0; // of those, how many rebuilt the graph
+    mutable int32_t n_rt_splits     = 0; // scheduler splits of the last graph (tensor split makes this large)
 };

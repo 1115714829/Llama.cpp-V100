@@ -1337,6 +1337,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
         const int32_t n_ubatch = (int32_t) llama_n_ubatch(ctx_dft);
 
+        static const bool inj_enabled = (getenv("LLAMA_SPEC_TIMING") != nullptr);
+        static int64_t inj_us = 0;
+        static int32_t inj_n  = 0;
+
         for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
             if (i_batch_beg[seq_id] < 0) {
                 continue;
@@ -1380,7 +1384,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                     batch_inject.seq_id[i][0] = seq_id;
                     batch_inject.logits[i]    = false;
                 }
+                const int64_t inj_t0 = inj_enabled ? ggml_time_us() : 0;
                 const int32_t rc = llama_decode(ctx_dft, batch_inject);
+                if (inj_enabled) {
+                    inj_us += ggml_time_us() - inj_t0;
+                    if (++inj_n % 16 == 0) {
+                        LOG_INF("%s: inject timing: n=%d | inject_decode=%.2f ms/call\n",
+                                __func__, inj_n, inj_us/1e3/inj_n);
+                    }
+                }
                 if (rc != 0) {
                     LOG_ERR("%s: llama_decode(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n",
                             __func__, rc, (int) n_chunk, (int) offset);
@@ -1606,6 +1618,9 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             if (st_n % 16 == 0) {
                 LOG_INF("%s: spec timing: n=%d | draft_decode=%.2f selector=%.2f walk=%.2f ms/round\n",
                         __func__, st_n, st_dec/1e3/st_n, st_sel/1e3/st_n, st_walk/1e3/st_n);
+                const llama_perf_context_data pcd = llama_perf_context(ctx_dft);
+                LOG_INF("%s: draft ctx: n_eval=%d n_reused=%d t_eval=%.1f ms\n",
+                        __func__, (int) pcd.n_eval, (int) pcd.n_reused, pcd.t_eval_ms);
             }
         }
     }

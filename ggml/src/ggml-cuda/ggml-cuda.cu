@@ -1247,6 +1247,119 @@ static void * ggml_backend_cuda_comm_init(ggml_backend_t * backends, size_t n_ba
     return ret;
 }
 
+// Counts the meta-backend allreduce traffic. Enable with GGML_CUDA_OP_TIMING.
+// Combine with the round count from LLAMA_ROUND_TIMING to get collectives per step.
+// GGML_CUDA_AR_TIMING additionally times each call with events on the first
+// device's stream. The end event of a pair is read later, so the pipeline is
+// not synchronized by the measurement.
+struct ggml_cuda_ar_count {
+    static const int n_ev = 16;
+
+    bool enabled = false;
+    bool timing  = false;
+
+    int64_t calls   = 0;
+    int64_t tensors = 0;
+    int64_t bytes   = 0;
+
+    int64_t n_timed = 0;
+    int64_t n_skip  = 0;
+    double  us_sum  = 0.0;
+
+    int          dev  = -1;
+    cudaStream_t str  = nullptr;
+    cudaEvent_t  ev0[n_ev] = {};
+    cudaEvent_t  ev1[n_ev] = {};
+    int          i_ev   = 0;
+    int          n_pend = 0;
+
+    ggml_cuda_ar_count() {
+        enabled = getenv("GGML_CUDA_OP_TIMING") != nullptr;
+        timing  = getenv("GGML_CUDA_AR_TIMING") != nullptr;
+    }
+
+    void flush_ready() {
+        while (n_pend > 0) {
+            const int k = (i_ev - n_pend + n_ev) % n_ev;
+            if (cudaEventQuery(ev1[k]) != cudaSuccess) {
+                break;
+            }
+            float ms = 0.0f;
+            CUDA_CHECK(cudaEventElapsedTime(&ms, ev0[k], ev1[k]));
+            us_sum += 1000.0 * ms;
+            n_timed++;
+            n_pend--;
+        }
+    }
+
+    void start(int device, cudaStream_t stream) {
+        if (!timing) {
+            return;
+        }
+        // try_allreduce leaves the last backend's device current, so set it again here.
+        ggml_cuda_set_device(device);
+        if (dev != device || str != stream) {
+            if (dev >= 0) {
+                ggml_cuda_set_device(dev);
+                for (int i = 0; i < n_ev; ++i) {
+                    CUDA_CHECK(cudaEventDestroy(ev0[i]));
+                    CUDA_CHECK(cudaEventDestroy(ev1[i]));
+                }
+                n_pend = 0;
+            }
+            dev = device;
+            str = stream;
+            ggml_cuda_set_device(dev);
+            for (int i = 0; i < n_ev; ++i) {
+                CUDA_CHECK(cudaEventCreate(&ev0[i]));
+                CUDA_CHECK(cudaEventCreate(&ev1[i]));
+            }
+        }
+        if (n_pend == n_ev) {
+            flush_ready();
+            if (n_pend == n_ev) {
+                n_skip++;
+                return;
+            }
+        }
+        CUDA_CHECK(cudaEventRecord(ev0[i_ev], str));
+    }
+
+    void stop() {
+        if (!timing || dev < 0 || n_pend == n_ev) {
+            return;
+        }
+        ggml_cuda_set_device(dev);
+        CUDA_CHECK(cudaEventRecord(ev1[i_ev], str));
+        i_ev = (i_ev + 1) % n_ev;
+        n_pend++;
+        flush_ready();
+    }
+
+    void report() {
+        if (calls == 0 || (!enabled && !timing)) {
+            return;
+        }
+        fprintf(stderr, "[AR] calls=%lld tensors=%lld bytes=%lld avg_tensors=%.1f avg_bytes=%.0f\n",
+                (long long) calls, (long long) tensors, (long long) bytes,
+                (double) tensors / calls, (double) bytes / calls);
+        if (timing) {
+            fprintf(stderr, "[AR] timed=%lld skip=%lld ar_us_sum=%.0f ar_us_avg=%.1f\n",
+                    (long long) n_timed, (long long) n_skip, us_sum,
+                    n_timed > 0 ? us_sum / (double) n_timed : 0.0);
+        }
+    }
+
+    ~ggml_cuda_ar_count() {
+        report();
+    }
+};
+
+static ggml_cuda_ar_count & ggml_cuda_ar_count_get() {
+    static ggml_cuda_ar_count inst;
+    return inst;
+}
+
 // Top-level dispatch -- calls the function pointer chosen by comm_init.
 // Returns false to let the meta-backend's butterfly run.
 static bool ggml_backend_cuda_comm_allreduce_tensor(void * comm_ctx_v, struct ggml_tensor ** tensors) {
@@ -1254,7 +1367,32 @@ static bool ggml_backend_cuda_comm_allreduce_tensor(void * comm_ctx_v, struct gg
         return false;
     }
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
-    return comm_ctx->try_allreduce(comm_ctx, tensors);
+
+    ggml_cuda_ar_count & arc = ggml_cuda_ar_count_get();
+    if (arc.enabled || arc.timing) {
+        // one tensor per backend, all with the same element count (see the N assertions above)
+        const int64_t n = (int64_t) comm_ctx->backends.size();
+        arc.tensors += n;
+        arc.bytes   += n * (int64_t) ggml_nbytes(tensors[0]);
+        arc.calls++;
+        if (arc.calls % 256 == 0) {
+            arc.report();
+        }
+    }
+
+    if (arc.timing && !comm_ctx->backends.empty()) {
+        auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(comm_ctx->backends[0]->context);
+        ggml_cuda_set_device(cuda_ctx->device);
+        arc.start(cuda_ctx->device, cuda_ctx->stream());
+    }
+
+    const bool ok = comm_ctx->try_allreduce(comm_ctx, tensors);
+
+    if (arc.timing) {
+        arc.stop();
+    }
+
+    return ok;
 }
 
 // host buffer type
@@ -2570,7 +2708,17 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
         // [TAG_MUL_MAT_ID_CUDA_GRAPHS]
         if (node->op == GGML_OP_MUL_MAT_ID) {
             const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
-            if (ggml_cuda_mul_mat_id_needs_sync(node, cc)) {
+            const bool mmid_needs_sync = ggml_cuda_mul_mat_id_needs_sync(node, cc);
+            if (mmid_needs_sync) {
+                static int n_mmid_sync = 0;
+                if (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr && (n_mmid_sync < 4 || n_mmid_sync % 2000 == 0)) {
+                    fprintf(stderr, "[GRAPH] mul_mat_id needs sync #%d: src0_type=%d dst_ne2=%lld src0_ne2=%lld src1_ne2=%lld cc=%d\n",
+                            n_mmid_sync, (int) node->src[0]->type, (long long) node->ne[2],
+                            (long long) node->src[0]->ne[2], (long long) node->src[1]->ne[2], cc);
+                }
+                n_mmid_sync++;
+            }
+            if (mmid_needs_sync) {
                 // the mul_mat_id fallback path synchronizes the stream, so we cannot use CUDA graphs
                 // ref: https://github.com/ggml-org/llama.cpp/pull/18958
                 use_cuda_graph = false;
@@ -2626,6 +2774,17 @@ static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx
         }
 
         if (res || memcmp(&graph->node_props[i], &prop, sizeof(prop)) != 0) {
+            if (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr) {
+                static int n_dbg = 0;
+                if (n_dbg < 10) {
+                    fprintf(stderr, "[GRAPH] prop diff #%d node=%s op=%s new_ne=[%lld,%lld] old_ne=[%lld,%lld] new_data=%p old_data=%p\n",
+                            n_dbg, cgraph->nodes[i]->name, ggml_op_name(cgraph->nodes[i]->op),
+                            (long long) cgraph->nodes[i]->ne[0], (long long) cgraph->nodes[i]->ne[1],
+                            (long long) graph->node_props[i].node.ne[0], (long long) graph->node_props[i].node.ne[1],
+                            cgraph->nodes[i]->data, graph->node_props[i].node.data);
+                }
+                n_dbg++;
+            }
             graph->node_props[i] = prop;
             res = true;
         }
@@ -4182,6 +4341,79 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
     return 0;
 }
 
+// Per-op GPU timing for SM70 bring-up. Enable with GGML_CUDA_OP_TIMING.
+// Per-node events are only valid when the graph is not captured, so combine
+// with GGML_CUDA_DISABLE_GRAPHS=1. Prints one aggregate table at exit.
+struct ggml_cuda_op_timing {
+    bool enabled = false;
+
+    // per device: one event pool per CUDA device (TP calls this once per device)
+    std::vector<std::vector<cudaEvent_t>> ev_start;
+    std::vector<std::vector<cudaEvent_t>> ev_stop;
+    std::vector<int> n_rec; // nodes actually recorded per device
+
+    double  ms[GGML_OP_COUNT]    = {};
+    int64_t calls[GGML_OP_COUNT] = {};
+    int64_t graphs = 0;
+    int64_t nodes  = 0;
+    bool    ev_bad = false; // set when the driver rejects the event query
+
+    ggml_cuda_op_timing() {
+        enabled = getenv("GGML_CUDA_OP_TIMING") != nullptr;
+    }
+
+    void ensure(int device, size_t n) {
+        if ((size_t) device >= ev_start.size()) {
+            ev_start.resize(device + 1);
+            ev_stop.resize(device + 1);
+            n_rec.resize(device + 1, 0);
+        }
+        if (ev_start[device].size() >= n) {
+            return;
+        }
+        // events are bound to the device that is current when they are created
+        ggml_cuda_set_device(device);
+        while (ev_start[device].size() < n) {
+            cudaEvent_t a = nullptr;
+            cudaEvent_t b = nullptr;
+            CUDA_CHECK(cudaEventCreate(&a));
+            CUDA_CHECK(cudaEventCreate(&b));
+            ev_start[device].push_back(a);
+            ev_stop[device].push_back(b);
+        }
+    }
+
+    void report() {
+        if (!enabled || graphs == 0) {
+            return;
+        }
+        double total = 0.0;
+        for (int i = 0; i < GGML_OP_COUNT; i++) {
+            total += ms[i];
+        }
+        fprintf(stderr, "[OP] graphs=%lld nodes=%lld gpu_total=%.3f ms/ubatch\n",
+                (long long) graphs, (long long) nodes, total / graphs);
+        for (int i = 0; i < GGML_OP_COUNT; i++) {
+            if (calls[i] == 0) {
+                continue;
+            }
+            fprintf(stderr, "[OP] %-22s calls=%-7lld total=%9.3f ms %5.1f%% avg=%7.3f ms\n",
+                    ggml_op_name((ggml_op) i), (long long) calls[i], ms[i],
+                    100.0 * ms[i] / total, ms[i] / calls[i]);
+        }
+    }
+
+    // the server is killed with SIGTERM by the harness, so also report periodically
+    ~ggml_cuda_op_timing() {
+        report();
+    }
+};
+
+static ggml_cuda_op_timing & ggml_cuda_op_timing_get() {
+    static ggml_cuda_op_timing inst;
+    return inst;
+}
+
 static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph * cgraph, const bool use_cuda_graph, const bool cuda_graph_update_required, const void * graph_key) {
     bool graph_evaluated_or_captured = false;
 
@@ -4280,8 +4512,17 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                 stream_ctx.concurrent_events.clear();
             }
 
+            ggml_cuda_op_timing & opt = ggml_cuda_op_timing_get();
+            const bool opt_on = opt.enabled && !use_cuda_graph;
+            if (opt_on) {
+                opt.ensure(cuda_ctx->device, (size_t) cgraph->n_nodes);
+            }
+
             for (int i = 0; i < cgraph->n_nodes; i++) {
                 ggml_tensor * node = cgraph->nodes[i];
+                if (opt_on) {
+                    CUDA_CHECK(cudaEventRecord(opt.ev_start[cuda_ctx->device][i], cuda_ctx->stream()));
+                }
                 if (is_concurrent_event_active) {
                     GGML_ASSERT(concurrent_event);
 
@@ -4352,6 +4593,10 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
 #endif  // NDEBUG
 
                 bool ok = ggml_cuda_compute_forward(*cuda_ctx, node);
+                if (opt_on) {
+                    CUDA_CHECK(cudaEventRecord(opt.ev_stop[cuda_ctx->device][i], cuda_ctx->stream()));
+                    opt.n_rec[cuda_ctx->device] = i + 1; // only recorded nodes may be elapsed-time queried
+                }
                 if (!ok) {
                     GGML_LOG_ERROR("%s: op not supported %s (%s)\n", __func__, node->name, ggml_op_name(node->op));
                 }
@@ -4422,6 +4667,8 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
 
     ggml_cuda_set_device(cuda_ctx->device);
 
+    const int64_t gdbg_t0 = (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr) ? ggml_time_us() : 0;
+
     bool use_cuda_graph             = false;
     bool cuda_graph_update_required = false;
     const void * graph_key = nullptr;
@@ -4436,6 +4683,14 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
         const bool graph_compatible = ggml_cuda_graph_check_compability(cgraph);
         if (graph_compatible) {
             const bool properties_changed = ggml_cuda_graph_update_required(cuda_ctx, cgraph);
+            if (properties_changed && getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr) {
+                static int n_prop = 0;
+                if (n_prop < 6 || n_prop % 1000 == 0) {
+                    fprintf(stderr, "[GRAPH] props changed #%d: device=%d nodes=%d uid=%zu warmup=%d\n",
+                            n_prop, cuda_ctx->device, cgraph->n_nodes, cgraph->uid, (int) graph->warmup_complete);
+                }
+                n_prop++;
+            }
 
             if (!graph->warmup_complete) {
                 // Warmup: need at least 2 calls with no property change on the 2nd call
@@ -4457,9 +4712,38 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
                     cuda_graph_update_required = graph->instance == nullptr;
                 }
             }
+        } else {
+            static int n_incompat = 0;
+            if (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr && (n_incompat < 4 || n_incompat % 2000 == 0)) {
+                fprintf(stderr, "[GRAPH] incompatible graph: device=%d nodes=%d n_incompat=%d\n",
+                        cuda_ctx->device, cgraph->n_nodes, n_incompat);
+            }
+            n_incompat++;
         }
     }
 #endif // USE_CUDA_GRAPH
+
+    {
+        static int64_t g_calls = 0, g_cap = 0, g_replay = 0, g_direct = 0, g_dec_us = 0, g_nodes = 0;
+        g_calls++;
+        if (gdbg_t0 != 0) {
+            g_dec_us += ggml_time_us() - gdbg_t0;
+            g_nodes  += cgraph->n_nodes;
+        }
+        if (use_cuda_graph && cuda_graph_update_required) {
+            g_cap++;
+        } else if (use_cuda_graph) {
+            g_replay++;
+        } else {
+            g_direct++;
+        }
+        if (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr && g_calls % 256 == 0) {
+            fprintf(stderr, "[GRAPH] calls=%lld capture=%lld replay=%lld direct=%lld decision_us=%lld per_call=%.1f avg_nodes=%.1f last_nodes=%d\n",
+                    (long long) g_calls, (long long) g_cap, (long long) g_replay, (long long) g_direct,
+                    (long long) g_dec_us, (double) g_dec_us / (double) g_calls,
+                    (double) g_nodes / (double) g_calls, cgraph->n_nodes);
+        }
+    }
 
     if (use_cuda_graph && cuda_graph_update_required) {
         // Start CUDA graph capture
@@ -4472,6 +4756,32 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     }
 
     ggml_cuda_graph_evaluate_and_capture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);
+
+    ggml_cuda_op_timing & opt = ggml_cuda_op_timing_get();
+    if (opt.enabled && !use_cuda_graph) {
+        CUDA_CHECK(cudaDeviceSynchronize());
+        const int n_rec = (int) opt.n_rec[cuda_ctx->device];
+        for (int i = 0; i < n_rec; i++) {
+            float t_ms = 0.0f;
+            const cudaError_t ev_err = cudaEventElapsedTime(&t_ms, opt.ev_start[cuda_ctx->device][i], opt.ev_stop[cuda_ctx->device][i]);
+            if (ev_err != cudaSuccess) {
+                // multi-device event queries can be rejected; degrade instead of aborting
+                (void) cudaGetLastError();
+                opt.ev_bad = true;
+                break;
+            }
+            const int op = (int) cgraph->nodes[i]->op;
+            if (op >= 0 && op < GGML_OP_COUNT) {
+                opt.ms[op] += t_ms;
+                opt.calls[op]++;
+            }
+        }
+        opt.graphs++;
+        opt.nodes += cgraph->n_nodes;
+        if (opt.graphs % 256 == 0) {
+            opt.report();
+        }
+    }
 
     return GGML_STATUS_SUCCESS;
 }

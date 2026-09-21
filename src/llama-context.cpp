@@ -1358,6 +1358,8 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
     // per-round cost instrumentation, enabled by LLAMA_ROUND_TIMING; zero cost when unset
     static const bool rt_enabled = (getenv("LLAMA_ROUND_TIMING") != nullptr);
+    // LLAMA_ROUND_TIMING_SYNC adds an explicit device wait, so compute_us becomes real GPU time
+    static const bool rt_sync    = (getenv("LLAMA_ROUND_TIMING_SYNC") != nullptr);
     if (rt_enabled) {
         // raw stderr probe: proves the entry point runs and reports whether the env reached libllama
         static int rt_ub = 0;
@@ -1442,6 +1444,11 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
     if (rt_enabled) {
         t_rt_compute_us += ggml_time_us() - rt_tc;
+        n_rt_splits     = ggml_backend_sched_get_n_splits(sched.get());
+        if (rt_sync) {
+            ggml_backend_sched_synchronize(sched.get());
+            t_rt_sync_us += ggml_time_us() - rt_tc;
+        }
         n_rt_rounds++;
     }
 
@@ -3422,10 +3429,12 @@ llama_perf_context_data llama_context::perf_get_data() const {
         static int rt_pg = 0;
         if (rt_pg < 64) {
             rt_pg++;
-            fprintf(stderr, "[RT] perf: rounds=%d reuse=%d rebuild=%d | build_us=%lld alloc_us=%lld setin_us=%lld enqueue_us=%lld\n",
+            fprintf(stderr, "[RT] perf: ctx=%s n_ctx=%d splits=%d rounds=%d reuse=%d rebuild=%d | build_us=%lld alloc_us=%lld setin_us=%lld enqueue_us=%lld sync_us=%lld\n",
+                    model.name.c_str(), cparams.n_ctx, n_rt_splits,
                     n_rt_rounds, n_rt_reuse, n_rt_rebuild,
                     (long long) t_rt_build_us, (long long) t_rt_alloc_us,
-                    (long long) t_rt_setin_us, (long long) t_rt_compute_us);
+                    (long long) t_rt_setin_us, (long long) t_rt_compute_us,
+                    (long long) t_rt_sync_us);
         }
     }
     if (getenv("LLAMA_ROUND_TIMING") != nullptr && n_rt_rounds > 0) {
