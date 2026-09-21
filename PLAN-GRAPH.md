@@ -122,7 +122,7 @@ flowchart TD
     N5["N5 P2-6 RMS_NORM+SCALE 融合<br/>去~480次launch"]:::todo
     N6["N6a metadata 缓存本身<br/>R149: 只值 -2~-3 ms (仅省 prologue)"]:::todo
     N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
-    N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%"]:::todo
+    N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%<br/>⚠️ R159: ninfer 那个 op **不是 drop-in** ——<br/>它的契约是「路径选择」(predecessor/successor<br/>codebook 的 K 步链, candidate_ids+unary_scores<br/>+projected_hidden, 16 候选), 与我们的<br/>CPU selector 语义不同 => 需要先做语义映射"]:::todo
     N8["N8-vec GQA read-once (n_q=1 路径)<br/>今天 6 遍冗余, 可到 1 遍<br/>qwen38 补丁做的是这条路"]:::todo
     N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R151 查明机制: fattn-tile.cuh:1291-1317 依次试<br/>gqa%8->8, gqa%4->4, gqa%2->2, 否则 1<br/>gqa=6 只命中 %2 => ncols2=2 => 3 遍<br/>ncols2=3 => 2 遍, ncols2=6 => 1 遍<br/>代价: 需新增 config + 实例化<br/>R152 约束(issue #28761): ncols>32 是空 stub => 只能做 ncols2=3/ncols1=8=ncols24"]:::next
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
@@ -782,6 +782,13 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
       ㊵ 新假设 **H4：KV 流量藏在权重流的富余带宽里**（只用 438/800 GB/s）=> 32K 时 KV 应值 5.1 ms/token，实测 0.2 ms。
       ㊶ 由此给 128K 臂预先约定判据：~22.3 ms/token => KV 仍被隐藏（**N1/N8T 在 128K 以下全无价值**）；~42.4 ms/token => KV 开始显形。
       ㊷ **这条改写了 N1/N8T 的定位**：它们不是「长上下文项」，而是「**256K+ 项**」（前提是 H4 在 128K 成立）。
+   —— Round 159（N7 动手前读契约）：
+      ㊸ 读 ninfer 的 candidate_selector.h 全文后发现：那个 op 是 **candidate_selector_path（路径选择）**——
+         输入是 candidate_ids[16,K,B] + unary_scores + projected_hidden[256,K,B] + predecessor_codebook/successor_codebook[256,248320]，
+         沿 K 步链传播 predecessor => **它的数学与我们的 CPU selector 不是同一件事**。
+      ㊹ => N7 的「移植约 80 行」是**乐观估计**：先要做**语义映射**（我们的 selector 在 llama.cpp 里做什么、能否表达成同一算子），
+         否则会写出一个「看起来对但语义不同」的 kernel —— 属于 §2 红线里的「大改动先停下问用户」。
+         **本轮不动手实现，先把这一条记进 N7 标签**（避免下一轮照着旧描述直接开写）。
 ```
 
 ## 5. 作业纪律（血泪）
