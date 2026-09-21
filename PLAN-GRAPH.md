@@ -120,7 +120,7 @@ flowchart TD
     N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%"]:::todo
     N8["N8-vec GQA read-once (n_q=1 路径)<br/>今天 6 遍冗余, 可到 1 遍<br/>qwen38 补丁做的是这条路"]:::todo
-    N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R151 查明机制: fattn-tile.cuh:1291-1317 依次试<br/>gqa%8->8, gqa%4->4, gqa%2->2, 否则 1<br/>gqa=6 只命中 %2 => ncols2=2 => 3 遍<br/>ncols2=3 => 2 遍, ncols2=6 => 1 遍<br/>代价: 需新增 ncols=24/48 的 config + 实例化"]:::next
+    N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R151 查明机制: fattn-tile.cuh:1291-1317 依次试<br/>gqa%8->8, gqa%4->4, gqa%2->2, 否则 1<br/>gqa=6 只命中 %2 => ncols2=2 => 3 遍<br/>ncols2=3 => 2 遍, ncols2=6 => 1 遍<br/>代价: 需新增 config + 实例化<br/>R152 约束(issue #28761): ncols>32 是空 stub => 只能做 ncols2=3/ncols1=8=ncols24"]:::next
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
     N10["[RT] 7 处 fprintf 探针规整为 env 门控"]:::todo
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
@@ -309,6 +309,25 @@ flowchart LR
     XL3["用的是更老的上游<br/>图抖动线同样没有新招"]:::fact
     XL4["多卡长上下文实测表（200k）"]:::fact
   end
+  subgraph RUP["★ 上游 PR/issue 侦察（R152，全部经 api.github.com 核实 state/日期）"]
+    UP1["#28912 MERGED 2026-09-21<br/>tune MMVQ->MMQ crossover for SM70<br/>= 我们的 C5！用 Qwen3.8-27B Q4_K_XL + DFlash2 n_max=7 实测<br/>54.52 -> 69.36 t/s (+27%)"]:::fact
+    UP2["#28037 OPEN 结论: m8n8k4 的差距是架构性的<br/>config tuning gives nothing<br/>= 独立验证我们的 N3 (-1.19%)"]:::fact
+    UP3["#26360 CLOSED(not planned)<br/>正是我们的 N8T 想法（一个 GQA 组只读一次 KV）<br/>上游不做 => 只能我们自己来"]:::fact
+    UP4["#28761 OPEN: ncols1*ncols2 > 32 是空 stub(NO_DEVICE_CODE)<br/>= N8T 必须落在 ncols<=32"]:::warn
+    UP5["f16 反量化缓存: 上游零提案<br/>(need_f16 搜索 0 命中; 只有 vulkan #25494 已合并)"]:::fact
+  end
+  UP1 --> D6
+  UP2 --> X16
+  UP3 --> N8T
+  UP4 --> N8T
+  UP5 --> N1
+  subgraph RSM["★ sm70-attn 分支（R152 新发现，第 9 个项目；1Cat 风格 Split-D N32 D256 张量核 + 核内读 q4_0 KV）"]
+    SM1["声称 176k prefill 372.94 -> 521.93 t/s (+39.9%)<br/>含 SplitKV3 / -ctk q4_0 选项"]:::pending
+    SM2["审计进行中: 入口条件是否覆盖 D256/gqa6/n_q=8<br/>是否核内反量化/支持哪些量化类型"]:::run
+  end
+  SM1 --> N1
+  SM1 --> N9
+  SM2 --> N1
   subgraph RQP["★ qwen38-v100-serve（R148 联网新发现，单卡 V100-32G + Qwen3.8-27B，同题！）"]
     QP1["ncols2=3 GQA 打包补丁<br/>128K KV 流量 26.37->8.59 GB/token (-67.4%)<br/>decode 16.45->23.83 t/s (+44.86%)<br/>KLD 0.000000, 100% top-1"]:::pending
     QP2["现役选择器只打包 2 个 Q 头<br/>= 我们的 KV 冗余是 3x, 不是 6x<br/>（修正 Z1 先验预测）"]:::fact
@@ -593,6 +612,21 @@ flowchart LR
 - **N14（新节点）**：v100-skinny 的 k 随 context 扫描（SK6）说明 **k 是每请求杠杆**：k=7 从 0.5k 的 127.4 掉到 65k 的 54.7，而 **k=3 在 65k 达 76.26，比 no-spec 的 65.46 还快 16.5%** ⇒ 我们 256K decode 34 t/s 很可能**不如关掉投机**。**零代码**可测，已列为金框。
 - **T4 路线（新节点）**：把"降 n_max"从"损失"重新归类为"**用 AL 换内核生态**"的选项，并且它反过来让 N1 有了**更便宜的替代品**（约 80 行 GPU selector + 现成 T=4 栈 vs 336 行 kernel 按 T=8 重写）。T4 指向 N1 的那条虚线是"双向义务"的体现。
 
+### 3.5 ★ 上游侦察结论（R152，全部经 `api.github.com` 核实 state 与日期）
+
+| # | state | 内容 | 对我们的意义 |
+|---|---|---|---|
+| **#28912** | **MERGED 2026-09-21** | tune MMVQ->MMQ crossover for **SM70 (Volta)**；benchmark 用 **Qwen3.8-27B Q4_K_XL + DFlash2 `--spec-draft-n-max 7`**，54.52 -> 69.36 t/s（**+27%**） | **这就是我们的 C5**（我们也是判 4）。上游今天刚合并 => ① 我们的工作被独立确认；② **要对账上游的交叉点取值是否也是 4**，若不同则取更好的 |
+| **#28037** | OPEN 2026-08-30 | Volta FA 分析：**m8n8k4 的差距是架构性的，config tuning gives nothing**；建议 1Cat 风格 split-D WMMA kernel | **独立验证我们的 N3 负结果（-1.19%）**，并指出方向就是 N1 |
+| **#26360** | CLOSED (not planned) 2026-09-14 | 要求「一个 GQA 组只读一次 KV x 多个 query token」的 tile | **正是 N8T**。上游明确**不做** => 我们做不重复劳动，也说明这是真空白 |
+| **#28761** | OPEN 2026-09-11 | `ncols1*ncols2 > 32` 的变体是**空 stub（NO_DEVICE_CODE）** | ⚠️ **直接约束 N8T**：只能走 `ncols2=3 x ncols1=8 = 24`（2 遍），**不能走 48** |
+| #25494 / #23620 / #22094 | MERGED(vulkan) / CLOSED / CLOSED | 只有 Vulkan coopmat1 做了「q8_0 KV 只反量化一次」；CUDA 侧**零提案**（`need_f16` 搜索 0 命中） | **N1 的前提上游无人解决** => 是空白，但也没有现成补丁可抄 |
+| #24166 | CLOSED | KV scratch 按 **allocated**（而非 used）大小分配 => q8_0 长上下文回归 / VRAM 抖动 | 与我们长上下文问题相关，值得单独看 |
+| #25749 / #25835 | MERGED / OPEN | Volta 启用 CUDA graph / **V100 上 CUDA graph 的 VRAM 泄漏报告** | 泄漏那条要知道，避免把 OOM 误判成别的原因 |
+| #28549 / #25406 | MERGED / CLOSED-UNMERGED | 已在树里 / split uid 每次重铸导致复用打不中 | 与 C1 因果链一致 |
+
+**其他 V100 分支**（除 jusko / qwen38 / sm70-attn 外）：`poisonxa16/pxa`、`WyvernTKC/llama.cpp-4xV100`、`123123213weqw/dual-v100-llama.cpp`、`TheTom/llama-cpp-turboquant`（"all FA quant instances"）—— 尚未审计。
+
 ## 4. 维护规矩（**最高优先级，不得省略**）
 
 ```
@@ -642,6 +676,11 @@ flowchart LR
       ㉒ 从 Z1 的服务器日志里**掉出一条事实**：我们的 target GGUF **自带 MTP 头**（`blk.64.nextn.*`）而被加载器当 unused 忽略
          -> 新增 **MT1** 并连到 T4/K3。**规矩：日志里顺手发现的事实也要有节点，否则会丢。**
       ㉓ qwen38 的 `lock-clocks.sh`（锁频）我们从来没做 -> 新增 **Z6**；它会改变测量条件，须先决定再记录。
+   —— Round 152（上游侦察回来）：
+      ㉔ 上游侦察是一类**新的信息来源**，此前图上只有「项目」没有「PR/issue」-> 新增 **RUP 子图（UP1-UP5）+ §3.5 表**，每条都带 state 与日期；
+      ㉕ **#28761 直接改写了 N8T 的做法**（ncols>32 是空 stub => 只能 24，不能 48）-> 补进 N8T 标签；
+      ㉖ **#28912 就是我们 C5 的上游版本**（今天合并，+27%，benchmark 也是 Qwen3.8-27B + DFlash2 n=7）-> 连到 D6 并新增对账待办；
+      ㉗ 第 9 个项目 **sm70-attn** 入库（1Cat 风格 Split-D N32 D256 张量核 + 核内读 q4_0 KV）-> SM1/SM2 节点，连到 N1/N9。
 ```
 
 ## 5. 作业纪律（血泪）
