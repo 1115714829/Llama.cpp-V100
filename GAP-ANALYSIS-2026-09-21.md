@@ -187,6 +187,57 @@ fattn-common.cuh:1026-1088  每次调用对整条 K 和 V 做 to_fp16
 `skinny_kernels.cu:1390` 引用的 `results/qpn_matrix_20260817.csv`、ninfer 的 `bench/ops/nvfp4_qpn2_splitk_sweep.cu`（标注 deleted）等数字**无法在仓库内复核**。
 可复核的是 `results/kernel_matched_20260819.csv` + `benchmarks/kernel_matched_bench.py` 这一对。**引用时请只用可复核的那部分。**
 
+## 8. ★★★★ 最重要的一条：`-sm layer` vs `-sm tensor` —— 纯启动参数，作者自测 **+21.5%**
+
+`jusko-llama-volta-qwen3flash` 的 `docs/examples/windows-dual-v100/bench-results.jsonl`（**同一 session、除 split 外参数逐字相同**，2xV100，Qwen3.8-Flash-Next Q5_K_M，F16 KV，`-c 65536 -b 2048 -ub 1024`）：
+
+| 臂 | TG-64@2048 | PP-60k | GPU util |
+|---|---:|---:|---|
+| `V00-frozen`（**tensor**） | 28.11 t/s | 644 | 43.5 / 45 |
+| `V01-layer64k`（**layer**） | **34.16 t/s（+21.5%）** | **887（+37.7%）** | **23.5 / 30（减半）** |
+
+作者原话（`docs/fork-benchmarks.md:69-71`）：*the tensor-split AllReduce + Meta path was the tax*。
+GPU util **反而减半**说明它不是 GPU-bound —— **与我们的诊断（meta 主机循环占 53%）是同一个病，但我们开错了药**。
+
+### 为什么这条对我们特别重要
+我们的实验清单里**全是「在 tensor 模式内部省时间」，没有一条是「换掉 split 模式」**。
+且 AGENTS §4.8/E3 已记录：`pipeline_parallel` 只在 `split_mode==LAYER && !has_tensor_overrides()` 时为真，
+而我们的 harness **永远传 `--tensor-split`** ⇒ **我们从未测过 layer split 下的同步/主机语义**。
+harness 本身就支持（`SPLIT=${SPLIT:-tensor}`），所以这**是零代码、一臂就能出结果**的实验。
+
+⚠️ 注意：这条路会改变同步语义（`pipeline_parallel` 变真），必须用 §4.2 的 md5 自检 + 轮计时探针看 `enqueue` 与 `decode+sync` 的分解。
+若成立，**我们那 53% 的主机账本直接作废一半**（不是优化它，而是绕开它）。
+
+## 9. 其他必须补的缺口（jusko / xllama，证据级）
+
+| 优先级 | 缺口 | 证据与量化 | 可移植性 |
+|---|---|---|---|
+| **P0-1** | **把 q8_0 KV 的 decode/verify 注意力搬上 Volta 张量核** | `fattn-q8-volta.cuh`（336 行，独立 kernel）：把 q8_0 在 **smem 里反量化成 f16 再喂 `mma.sync.m8n8k4`**；HBM 只读 q8_0。实测 q8 子核 **2.674->1.419 ms @101k、6.879->3.363 ms @260k**；四件套同 fork A/B **TG 27.591->36.471 t/s（+32.19%）**，生成 token SHA 一致。旁证：xllama 明说 V100 上 `planar3/iso3 比 turbo3 慢，因为前者走 VEC（循环内反量化）而后者反量化成 f16 + MMA` | 中（kernel 硬编码 T=4/QH=24/KVH=4；我们是 DFlash2 T=8，需按 T=8 重写分块） |
+| **P1-3** | D256 提示注意力**常量**差异 + 2-CTA 紧凑核 | 我们 `fattn-mma-f16.cuh:124-128`（combine=128, nstages=2）vs 他们 `:124-129`（combine=64, nstages=1 的 32 列版；V2=64,combine=128,nstages=2 的 64 列版）—— **只差 6 个常量**。他们的 2-CTA 紧凑核（`:2005-2291`，门控 `:2221-2251` 要求 `gqa_ratio==6 && D=256`，**正是我们的形状**）自测 **+13.11%** | 高（常量）/ 中（紧凑核要从零写） |
+| **P1-4** | GDN x4 预填充路径（我们 48/65 层是 GDN） | `gated_delta_net.cu:172` 起 `gated_delta_net_cuda_128x4_volta`（S_v=128、每 warp 4 个独立状态列、共享 Q/K/g 载入）；孤立 kernel **1642->1067 us**；整模型 **+2.32% PP（8k）/ +2.03%（16k）**；V100 **40/40 正确** | 中高（新增 167 行、自包含，需按我们 H/S_v 复核） |
+| **P2-5** | MMVQ「每列重复解码权重」（我们所有量化类型都有） | `mmvq.cu:562-609` 的 x4 版把权重解码提到 4 列循环外；上游是逐列调用 `vec_dot` | 中（他们没有我们量化类型的 x4 版） |
+| **P2-6** | `RMS_NORM + SCALE` 融合 | `norm.cu:556` + `ggml-cuda.cu:4226`；自述 *removes 480 extra launches*；无速度声明 | **高**（小改动、与模型无关；host-bound 下任何 launch 削减都是纯赚） |
+| **P3-7** | **KV 压缩：结论是现在不要做** | 我们 ctx 8192、16 层全注意力、4 KV 头、D=256 ⇒ 单序列 KV 约 256 MiB(f16)/136 MiB(q8_0)，而每轮权重流 29 GB/3 卡 ⇒ **KV 只占每轮流量约 1%**。xllama 自测 V100 上代价 −6%（turbo2）到 −22%（planar4/iso4）；其多卡长上下文实测 200k：上游 q8_0 **16.92** vs 本分支 **11.15** vs turbo3 **7.46 t/s**（decode 侧负收益）。且 `planar*/iso*` 被该仓库**自己的 PPL 表**判死（3.03-3.06 vs f16 1.0023 **+203%**） | 低（只留 turbo2/turbo3 备用） |
+
+### 9.1 两条被这份报告纠正的既有结论
+1. **「V100 上 HMMA 天花板 1.36x」被过度外推了。** 那是关于 **MMQ 权重矩阵乘**的结论。
+   两个 fork 都证明**量化 KV 的注意力在 V100 上恰恰应该走张量核**。我们 `fattn.cu:704` 的注释
+   （*On Volta tensor cores are only faster for sufficiently large matrices*）正是被它们反驳的那句。
+   ⇒ 「不要重做 HMMA **权重**路线」仍成立；「不要在 V100 上用张量核做**注意力**」不成立。
+2. **`--spec-draft-n-max 7`（T=8）让我们与整个 T=4 专用解码栈不兼容。**
+   jusko 的全部解码加速（q8 TC kernel、Q5_X4、Q6_W4R4）都是为 n-max=3 / T=4 写的。
+   ⇒ **kernel 级 T 特化是我们完全没利用的维度**，值得算一笔账：n=7 的 AL 增益 vs T=8 核比 T=4 核慢多少。
+
+### 9.2 一个重要的否定性结论：图抖动这条线**只能我们自己解**
+逐行核对：jusko 的 `ggml_cuda_graph_update_required`（`ggml-cuda.cu:2631-2671`）与我们 `llama.cpp:3036-3069` **逻辑完全一致**
+（先比 `cgraph->uid`，再逐节点 memcmp `node_src_ne` / `node_src_nb` / `node_src_data_ptrs`）；
+它的 `ggml-backend.cpp` 只有三处改动（moe-cache 失效、`n_pipeline_copies` 暴露、MoE 预取），**没有 split 缓存 / uid 复用的新招**；
+xllama 用的是更老的上游。⇒ **不要再去外部找这条线的捷径。**
+
+### 9.3 方法论副作用（记一笔）
+这两个仓库都是 **depth=1 的浅克隆**，`git log`/`git diff` 在仓库内做不出 fork 层 delta。
+本次是靠本地 llama.cpp 克隆里存在它们声明的 merge base（上游 `465e49b9c`），`git archive` + `git diff --no-index` 才得到可信的 24 文件 delta。**以后分析这类 fork 先确认能否拿到 merge base。**
+
 ## 4. 待深挖（子代理正在做）
 - `v100-skinny fork_patches/gdn_attn.py`：**GDN 投机状态的快速元数据构建**，作者自测 **-1.4 ms/step**，
   消掉 **21 次 device sync + 约 70 次 copy** —— 我们的 direct 抖动源正是 **GDN 递归状态视图**，这条高度相关。
