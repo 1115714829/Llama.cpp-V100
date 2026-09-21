@@ -116,6 +116,24 @@
 ⇒ **因此 E1 的目标再修一次**：要区分「提交耗时」与「GPU 等待」，必须在两次 `llama_decode` 之后各插一次
 `llama_synchronize(ctx_dft)` 并分别计时（env 门控、只用于诊断；会让该臂变慢，但能给出真实二分）。
 
+### 1.4d E1 实测（探针已上机，标记串 `MARK_GATHER=1 MARK_WAIT=2`）——**结论：两次 draft 前向都是「主机在 decode 里」，GPU 几乎空闲**
+```
+inject timing: n=288 | gather=0.10 copy=0.13 submit=1.88 wait=-1.45 ms/call (layers=5)
+spec timing:   n=272 | draft_decode=13.68 selector=2.79 walk=0.09 wait=-12.77 ms/round
+```
+**读法（关键）**：`wait` 定义为 `同步耗时 - submit 耗时`，**负值说明同步几乎没等**：
+- 块前向：`llama_decode` 自身花 **13.68 ms**，紧随其后的 `llama_synchronize` 只等了 **约 0.91 ms**（13.68-12.77）
+  => **GPU 在 decode 返回时已经基本干完了** => 那 13.68 ms **是主机时间，在 `llama_decode` 内部**，不是 GPU 执行。
+- 注入前向：decode 1.88 ms、同步约 0.43 ms => 同样是**主机主导**。
+- **gather=0.10 / copy=0.13 ms** => 隐状态搬运+memcpy **根本不是问题**（5 层 × 整设备同步只要 0.1 ms）=> **B-3 排除**。
+- 块前向 13.68 vs 注入前向 1.88（都是同一个 ctx、同一个 meta 后端）=> **固定主机成本差 7 倍**；
+  而块前向在 n=3 与 n=7 之间只差 4%（13.18 vs 13.68）=> **与 token 数无关，是这条图路径本身的固定主机开销**。
+
+⇒ **DFlash2 专项的 15.5 ms/轮 = 1.88 + 13.68（主机，在 decode 内）+ 2.79 selector + 0.09 walk**，其中 **GPU 只占约 1.3 ms**。
+⇒ 这与 target 侧独立测到的结论**同病**：`alloc_splits` ≈5.4 ms/call + meta 派发 + prologue，都是**主机侧的图管理**。
+⇒ **下一刀（E2）**：把块前向那 13.68 ms 在 `llama_decode` 内部拆开 —— 用既有的 `LLAMA_ROUND_TIMING`（它已按 `build/alloc/setin/enqueue` 分项）跑一臂，
+   看 **draft ctx 是否也被该探针覆盖**；若没有，就给 draft ctx 补上（同款探针，2 行），拿到 `build/alloc/setin/enqueue` 四段。
+
 ### 1.5 由此得到的三条候选改动（按证据强度排序，需先用分段探针确认再动手）
 | 编号 | 改动 | 落点 | 预期 |
 |---|---|---|---|
