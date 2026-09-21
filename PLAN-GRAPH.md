@@ -111,7 +111,7 @@ flowchart TD
     N0["N0 定论(R142): 强制同步仅 +0.4~0.8 ms/轮(0.65-1.5%)<br/>两臂 draft_n/draft_acc 逐位相同<br/>=> target 步本就同步, 无整轮重叠"]:::ok
     N2["N2 只读诊断: 打印 D==256&&Q>1 的 FA kernel<br/>成本极小"]:::next
     N13["N13 KV dtype A/B (f16 vs q8_0)<br/>零代码, 1cat 自测长上下文 f16 胜"]:::next
-    N1["N1 ★P0-1 q8_0 KV 张量核注意力<br/>前置项!"]:::next
+    N1["N1 q8_0 KV 张量核注意力<br/>R146: 8K 只值 -0.6 ms(占流量 4.5%)<br/>是长上下文项, 不是 8K 目标的贡献项"]:::next
     N3["N3 D256 FA 常量 A/B: 已判决<br/>jusko 常量 pp32768 慢 1.19% => 不采用<br/>（decode 走 TILE 未测, N1 后须重测）"]:::ok
     N4["N4 P1-4 GDN x4 预填充 +2~2.3% PP"]:::todo
     N5["N5 P2-6 RMS_NORM+SCALE 融合<br/>去~480次launch"]:::todo
