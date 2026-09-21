@@ -170,6 +170,7 @@ flowchart TD
   E3 ==>|先搞清哪些字段在变| N11
   E4 ==>|换来整个 T=4 解码栈| T4
   T4["T4 路线: n_max=3 复用 jusko T=4 栈<br/>q8 TC kernel / Q5_X4 / Q6_W4R4"]:::cond
+  MT1["★ MT1 R151 实测发现: 我们的 target GGUF 自带 MTP 头<br/>(blk.64.nextn.eh_proj/enorm/hnorm/shared_head_norm<br/>+ blk.64.ffn_up/down)，加载器报 unused 忽略<br/>= draft-mtp 路线零下载成本可用"]:::next
   T4 ==> K3
   T4 -.-> N1
   E5 ==>|先证手写 mma 在 V100 值钱| N8
