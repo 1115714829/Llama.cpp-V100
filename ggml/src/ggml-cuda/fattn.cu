@@ -687,6 +687,44 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     return BEST_FATTN_KERNEL_TILE;
 }
 
+// Prints which FA kernel a shape selects and whether the whole KV cache must be converted to f16.
+// Used to check the D=256 DFlash2 verify path, which runs with few query tokens.
+static void ggml_cuda_fattn_kernel_debug(const best_fattn_kernel kernel, const ggml_tensor * dst, const bool need_f16_K, const bool need_f16_V) {
+    if (getenv("GGML_CUDA_FA_KERNEL_DEBUG") == nullptr) {
+        return;
+    }
+
+    const ggml_tensor * Q = dst->src[0];
+    const ggml_tensor * K = dst->src[1];
+
+    const int D    = (int) Q->ne[0];
+    const int n_q  = (int) Q->ne[1];
+    const int n_kv = (int) K->ne[1];
+
+    static int seen[16][3] = {};
+    static int n_seen = 0;
+
+    const int key[3] = { D, n_q, (int) need_f16_K * 2 + (int) need_f16_V };
+    for (int i = 0; i < n_seen; ++i) {
+        if (seen[i][0] == key[0] && seen[i][1] == key[1] && seen[i][2] == key[2]) {
+            return;
+        }
+    }
+    if (n_seen < 16) {
+        for (int j = 0; j < 3; ++j) {
+            seen[n_seen][j] = key[j];
+        }
+        n_seen++;
+    }
+
+    const char * name = kernel == BEST_FATTN_KERNEL_MMA_F16 ? "MMA_F16" :
+                        kernel == BEST_FATTN_KERNEL_TILE    ? "TILE"    :
+                        kernel == BEST_FATTN_KERNEL_VEC     ? "VEC"     : "NONE";
+
+    fprintf(stderr, "[FAK] kernel=%s D=%d n_q=%d n_kv=%d kv_type=%d need_f16_K=%d need_f16_V=%d\n",
+            name, D, n_q, n_kv, (int) K->type, (int) need_f16_K, (int) need_f16_V);
+}
+
 size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * dst) {
     GGML_ASSERT(dst->op == GGML_OP_FLASH_ATTN_EXT);
 
@@ -716,6 +754,8 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
         case BEST_FATTN_KERNEL_NONE:
             break;
     }
+
+    ggml_cuda_fattn_kernel_debug(kernel, dst, need_f16_K, need_f16_V);
 
     const ggml_cuda_flash_attn_ext_f16_extra_data f16_extra =
         ggml_cuda_flash_attn_ext_get_f16_extra_data(dst, need_f16_K, need_f16_V);
