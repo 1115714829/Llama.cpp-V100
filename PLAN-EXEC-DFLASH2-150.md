@@ -7,6 +7,8 @@
 | 步骤 | 状态 | 证据 |
 |---|---|---|
 | P0 计划落盘 | **完成** | 本文件 + `PLAN-GRAPH.md` 指针 |
+| **D 本地盘加载实测** | **完成**：`health ok=1 after **30 s**`（NFS 历史 **255 s**，**8.5x**）、`MEDIAN_TG=98.61`、ms/轮 56.5/53.6/55.9、AL 5.58/4.25/6.38、sha256 `f3edac19...`（正门 ✓）、`MODEL_PATH_OK`、服务前后均为 `inactive active active`（未动） | `/tmp/stepd.log` + `/tmp/runarm-loc4.log` |
+| E draft 分段探针 | **未开始**（放行条件=D 完成，现已满足）；插入点已定：`common/speculative.cpp:1393-1402 / 1417-1425 / 1479-1483 / 1493-1496 / 1643-1647` | — |
 | M1 draft 差分臂 | **第 1 次作废**（漏 `--model-draft`）；**第 2 次完成：`draft_decode` 与 n_max 无关**（见 §1.3） | `/tmp/m1-chain.log`（作废）、`/tmp/m1b-chain.log`（有效） |
 | M2 派发数普查 | 待跑 | — |
 | M3 draft 路径定位 | **完成**（见 §1.4：**draft 每轮两次 decode** + 每轮 10-15 次整设备同步） | 子代理侦察 file:line |
