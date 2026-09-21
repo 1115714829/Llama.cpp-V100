@@ -159,6 +159,26 @@ draft  : ctx=Qwen3.8-27B-DFlash2 rounds=556 reuse=0   rebuild=556 | build=70903 
    用 `LLAMA_ROUND_TIMING=1` 跑一臂同时看 target/draft 两行，并配合已有 `LLAMA_SPEC_TIMING` 的 `draft_n/n_block`，
    判断复用失败的**最小充分条件**（只跟注入批有关？还是块批也变？），再决定改哪一处。
 
+### 1.4f E3 复现（第二次独立采样，`LLAMA_ROUND_TIMING=1`）——draft **100% 重建**，target **94% 复用**
+```
+draft  : ctx=Qwen3.8-27B-DFlash2 rounds=422 reuse=0   rebuild=422 | build=53978 alloc=811573 setin=16544 enqueue=2319189 us
+target : ctx=Qwen3.8-27B        rounds=219 reuse=205 rebuild=14  | build=24799 alloc=389918 setin=7272  enqueue=4279468 us
+```
+| 项（每轮 = 每 decode） | **draft** | target |
+|---|---|---|
+| reuse / rounds | **0 / 422 = 0%** | 205 / 219 = **94%** |
+| `alloc_us`/轮 | **1.92 ms** | 1.78 ms |
+| `enqueue_us`/轮 | **5.50 ms** | 19.5 ms |
+| build + setin | 0.13 + 0.04 ms | 0.11 + 0.03 ms |
+
+⇒ **draft 每次 decode 固定花约 7.6 ms 在「图重建 + 重分配 + 重派发」上**（1.92 + 5.50 + 0.17），
+  而它一轮有 **2 次 decode** ⇒ **约 15 ms/轮**，**几乎就是 DFlash2 专项 18.5 ms 的全部**。
+⇒ target 侧的同一组数字是 94% 复用 ⇒ 每轮只花约 1.9 ms（alloc）+ 19.5 ms（enqueue，但它 8 token 一次前向，摊到大图上）。
+
+**⇒ 定论（今天最重要的机制结论）：draft 的 15 ms 不是算力、不是搬运、不是 selector，而是「它的图从来没有被复用」。**
+   修法方向因此非常明确：**让 draft ctx 的图能够复用**（像 target 那样 94%）——这是 DFlash2 线上唯一的大额、且方向明确的项。
+   待定的只是「复用失败的充分条件」（token 数？pos 模式？KV 行索引？），E3 已把 `tok=` 加进探针，读数在手即可判定。
+
 ### 1.5 由此得到的三条候选改动（按证据强度排序，需先用分段探针确认再动手）
 | 编号 | 改动 | 落点 | 预期 |
 |---|---|---|---|
