@@ -831,6 +831,26 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
   **host us/call** 与 **GPU 可见 us/call（rank0 的 ev0..ev1）**；三种规模：164 KB（在役尺寸）/ 1 MB / 10 MB。
 - **判据**：164 KB 下 1000 轮 **0 mismatch**、**spin timeout 0**、GPU 可见 **<=15 us**（NCCL 在役 68-95 us）。
 
+### 18.2 A1 小样结果（v2 协议：逐块 flag、无全局屏障、slot+epoch）
+
+命令：`LD_LIBRARY_PATH=$NCCL/lib CUDA_VISIBLE_DEVICES=0,1,2 /root/ar_push_test <n> <iters>`
+（v1 = 有 pub_cnt/go_flag 两道网格屏障；v2 = 逐块 flag，块 k 只等对端块 k）
+
+| 规模 | 指标 | **push v1** | **push v2** | **NCCL**（同 harness、同预热） |
+|---|---|---:|---:|---:|
+| 160 KB/rank | 主机 us/次 | 10.12 | **9.5-10.1** | 36.6-38.6 |
+| 160 KB/rank | GPU 可见 us/次 | 69.08 | **37.4 / 47.6** | **36.7** |
+| 1 MB/rank | GPU 可见 us/次 | 102.5 | 93.0 / 93.2 | **55.2** |
+| 正确性 | - | 1000 轮 0 错 | **1000 轮 0 错、0 自旋超时** | - |
+
+**结论**：
+1. **正确性问题已解决**（这是上次失败并回退的根因）：`slot = call % SLOTS` + flag 比较 `>= epoch` + `pub_cnt` 单调累加（v1）/ 逐块 flag（v2）
+   => 1000 轮跨迭代 slot 复用**零错误**；自旋有上限（`SPIN_CAP`）且有超时计数，**不会挂死 GPU**。
+2. **主机侧便宜 3.7x**（10 us vs 37 us）=> 这是 R1 能确定拿到的部分。
+3. **GPU 侧在役尺寸（160 KB）只是打平**（37-48 vs 37 us），1 MB 时 NCCL 更快（55 vs 93）=> **R1 单独不够**。
+4. 1cat 的 18 us/次是**图内**数字（设备端等待，无主机 gap；`custom_all_reduce.cuh:1944-1955` 只在 capture 时启用 push kernel）。
+   => **R1（主机侧更便宜）预期 +5~12%；要拿满必须 R2（入图）**，而 R2 需要元后端不在 AR 处切图（上游架构级，风险高，需用户批准）。
+
 ### 18.1 子代理取证：1cat 的 allreduce **确实在捕获图内**（回答 R1/R2 取舍）
 
 - 机制：**CUDA-IPC 共享内存 push，每次调用一个 kernel，不走 NCCL**
