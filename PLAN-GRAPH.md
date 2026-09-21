@@ -627,6 +627,31 @@ flowchart LR
 
 **其他 V100 分支**（除 jusko / qwen38 / sm70-attn 外）：`poisonxa16/pxa`、`WyvernTKC/llama.cpp-4xV100`、`123123213weqw/dual-v100-llama.cpp`、`TheTom/llama-cpp-turboquant`（"all FA quant instances"）—— 尚未审计。
 
+### 3.6 ★ N8T 的可执行配方（R153，子代理逐行核实，**4 处编辑，不需要新文件**）
+
+```
+ncols2 = 3  @ D=256（=> 2 遍，-33% 的 KV 读）:
+  (a) 配置表: GGML_CUDA_FATTN_TILE_CONFIG_CASE(256,256,24, 256, 2, 64, 64)  插在 fattn-tile.cuh:74 附近
+      （打包值 537921792，与 :73 同值只要字段一致；key 是总列数 ncols1*ncols2=24，不是 ncols2）
+  (b) 阶梯: 在 :1174 之后加一档 cols_per_block=24 的 rung，构造 flash_attn_tile<DKQ,DV,8,3>
+  (c) 选择器: 在 launch_fattn_tile_switch_ncols2 的 %2 判断之前插 gqa_ratio % 3 == 0 -> switch_ncols1<DKQ,DV,3>
+  (d) 核对 cpw = ncols/nwarps = 24/8 = 3、np = 1（合法，:873 的 static_assert 只在 cpw==1||np==1 时通过）
+  => 不需要新的 .cu（现有 template-instances/fattn-tile-instance-dkq256-dv256.cu 会隐式实例化）
+  => 不需要改 CMake（那是 generate_cu_files.py 按 (DKQ,DV) 生成文件时才要）
+
+ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只与 3 等价）:
+  (a) CONFIG_CASE(256,256,48, 256, 1, 64, 64) 或 512 线程版； (b)(c)(d) 同理
+
+⚠️ 陷阱（会静默算错）: ncols 与 nwarps 不整除时只有 static_assert(cpw==1||np==1) 把关(:873)；
+   例如 ncols=12 + 256 线程 => cpw=1，只算 8/12 列。
+⚠️ 前提: use_gqa_opt 要求 K->ne[1] % 256 == 0 且 mask != NULL（fattn-tile.cuh:1246-1253）；
+   不成立时 ncols2=1 => 6 遍。Z2 探针打印的 n_kv 正好能验这一条。
+⚠️ TILE 读不了 q8_0: need_f16_K/V 恒真（fattn.cu:744-748），整条 K/V 每次调用转 f16（fattn-common.cuh:1041-1051, :1054-1087）；
+   所以那 3 遍是走在 **f16 副本**上的 => 每 context token 实际流量 = 读 q8 34 + 写 f16 64 + 3x读 f16 64 = **290 KiB**（先验预测已按此更正）。
+
+**8K 下的实际收益（用 438 GB/s 校准）**: 3 遍 2.43 GB/轮 = 5.5 ms -> 2 遍 1.9 GB = 4.3 ms -> 1 遍 1.36 GB = 3.1 ms
+  => ncols2=3 省约 **1.2 ms/轮（2%）**，ncols2=6 省约 **2.4 ms/轮（4%）**。**8K 上不大，长上下文才放大。**
+
 ## 4. 维护规矩（**最高优先级，不得省略**）
 
 ```
@@ -681,6 +706,12 @@ flowchart LR
       ㉕ **#28761 直接改写了 N8T 的做法**（ncols>32 是空 stub => 只能 24，不能 48）-> 补进 N8T 标签；
       ㉖ **#28912 就是我们 C5 的上游版本**（今天合并，+27%，benchmark 也是 Qwen3.8-27B + DFlash2 n=7）-> 连到 D6 并新增对账待办；
       ㉗ 第 9 个项目 **sm70-attn** 入库（1Cat 风格 Split-D N32 D256 张量核 + 核内读 q4_0 KV）-> SM1/SM2 节点，连到 N1/N9。
+   —— Round 153（Z1 首点 + 带宽校准 + N8T 配方）：
+      ㉘ **Z1 8K 无投机 = 45.31 t/s = 22.07 ms/token** -> 反推**有效带宽 438 GB/s**（我们一直按 800 估）=> 所有带宽类估算 ÷1.82；
+         与 qwen38 数字反推的 ~434 GB/s 独立吻合。**旧结论「权重流 12.1 ms 已到 roofline」撤销**（按 438 算是 22.1 ms，正好等于实测）。
+      ㉙ N8T 从「一个想法」变成**4 处编辑的配方**（且不需要新 .cu / 不改 CMake）；同时发现两个坑（ncols 与 nwarps 不整除会**静默算错**；use_gqa_opt 不成立时退回 6 遍）-> 写进 §3.6；
+      ㉚ 先验预测第三次更正：TILE 的 3 遍是走在 **f16 副本**上，所以每 context token 是 **290 KiB** 不是 230（已改）；
+      ㉛ 用 438 GB/s 重算 N8T 的 8K 收益：ncols2=3 省 ~1.2 ms/轮、=6 省 ~2.4 ms/轮 => **8K 上小，长上下文才放大**（与 N1 同一结论）。
 ```
 
 ## 5. 作业纪律（血泪）
