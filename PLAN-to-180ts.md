@@ -60,6 +60,18 @@
   其 `cmake/patches/sm70_flash_attn_d256_*.patch` 与 `csrc/attention/sm70_v37/` 是现成参考）=> 新内核，**需批准**。
 - **验收**：256K decode >= 60 t/s（先 2x），greedy sha256 逐位一致（纯 kernel 重写应保持一致）、长上下文标尺复测。
 
+## 2.5 未探索的"零代码"实验清单（2026-09-21 登记，按价值排序）
+
+| 编号 | 实验 | 为什么可能有用 | 状态 |
+|---|---|---|---|
+| Z1 | `--spec-draft-n-max ∈ {3,5,7}` | 同时改变 verify 批大小（M=n+1）与 AL => tg 的净效应未知 | **已在跑**（`/root/nmax.sh` -> `/tmp/nmax.log`） |
+| Z2 | **当前库下的 8K TP 重扫**（TP2/TP3/TP4） | 现有 TP 结论来自 **NCCL+P2P 之前**的旧会话；AR 实现换过后最优 TP 可能移动 | **已排队**（`/root/tpsweep.sh` -> `/tmp/tpsweep.log`） |
+| Z3 | `--flash-attn off` @8K/32K | M=2..8 走 TILE 会**把整段 KV 反量化成 f16**；非 FA 路径直读 q8_0（8K 时 KQ 物化仅几 MB） | 待做：需先给 harness 加 FA 开关（两个现有 harness 都把 `--flash-attn on` 写死） |
+| Z4 | **混合 KV**：`-ctk q8_0 -ctv f16`（及反向） | TILE 只转换需要 f16 的那一侧 => 可能省一半转换流量，同时保留一半压缩 | 待做：同上需参数化 harness |
+| Z5 | `--spec-draft-n-min` / selector top-k 微调 | 二线旋钮，预期 <2% | 待做（低优先） |
+
+=> 建议下一会话先做 **Z3/Z4**（各约 2 臂、零代码改动），因为它们直接命中"每轮 + 长上下文"的转换开销。
+
 ## 3. 不需要批准、可立即做的两项（低风险）
 
 1. **6.7 ms 未归因余量仪表化**（已定位区间：采样器、投机接受/校验记账、服务器每轮簿记）：
