@@ -1614,6 +1614,13 @@ target 序列 `1 0 0 1 1 1 1 1 1 1 1 1 1 0 0 1 1 1 1 1 1 1 1 1`（长串停在�
    **修正后的假设**：若这次运行里 `direct` 占比高（direct = 主机逐节点派发，40 节点 x 约 2 µs ≈ 80 µs），
    92 µs/次就几乎正好等于「一次 direct 调用」。pbdiag 那次是 `capture=2742 replay=64875 direct=15071`（direct 18%），
    平均值只有约 20 µs —— 与 92 µs 不符，说明**本次运行的比例可能不同，必须实测**。
+   **Round 104 实测补充**：同一次运行里同时开 `GGML_META_HOST_TIMING` 与 `GGML_CUDA_GRAPH_DEBUG`（`/tmp/meta2.txt`，TAG=metadiag2），
+   `[META]` 复现一致（calls=192：total=18.543 loop=16.087 **dev=13.313** ar=2.770 prologue=2.456），
+   但 **`[GRAPH] calls=... capture/replay/direct` 汇总行没有出现**（日志里只有 `[GRAPH] prop diff #......` 行 340 条，那个计数器已到 406000）。
+   => **本次运行的 capture/replay/direct 比例仍然未知**，「92 µs ≈ 一次 direct 调用」这个假设**尚未被验证**。
+   下一版探针要修：`ggml-cuda.cu:4740` 的打印条件是 `g_calls % 256 == 0`，长跑里应该会打；没打出来说明该分支没走到或 `gdbg_t0 == 0`，需查清后再测。
+   **副产品**：`prop diff` 大量命中 `cache_r_l*`（VIEW）与 `conv`/`SCALE`/`GET_ROWS` 节点 —— 与 §24/A2 时期「递归状态视图在抖动」的结论一致，
+   但注意这些 diffs 的 `new_ne == old_ne` 且 `new_data == old_data`，**属性其实没变**，说明该探针的判定条件过宽（会误报），引用时需谨慎。
    下一步要查的是「为什么经过 meta 后端这一层，每次调用变贵了」，而不是算子本身。
 3. ⚠️ **本探针的口径缺陷（我自己写的，必须记住）**：`[META]` 的静态变量是**函数级**的，target 与 draft 两个 meta 后端**共享同一组计数器**，
    故 `sub/call=49.3` 是两者混合平均，**不是 target 单独的值**；早前文档里的「139 子图」也**未被本探针证实**，需重新核实。
