@@ -130,7 +130,7 @@ flowchart TD
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
     N12["N12 MMVQ x4 权重解码外提（jusko）"]:::todo
     N14["N14 按 context 自适应 n_max<br/>SK6: k=3@65k 比 no-spec 还快 16.5%<br/>零代码, 先测 256K 上 n_max=7 是否反而更差"]:::next
-    Z["★ 先手量测 Z1-Z5（零代码/低成本, 新的一类对象）<br/>Z1 ctx 斜率=正在跑 / Z2 FA kernel 诊断=码已写待编(a8fb6542f)<br/>Z3 n_max 扫描 / Z4 KV dtype / Z5 已完成(layer 慢 40%)"]:::run
+    Z["★ 先手量测 Z1-Z5<br/>R160: Z1 的 ctx 扫描**已作废**(prompt 太短,<br/>--ctx-size 只分配不填充 => 三臂同条件)<br/>Z1 仍有效: 8K 无投机 45.31 t/s = 438 GB/s<br/>Z2 探针已编(FAK 有, MKEY 待增量重编)<br/>Z3 n_max / Z4 KV dtype / Z5 已完成"]:::warn
     Z6["Z6 锁频 (qwen38 的 lock-clocks.sh)<br/>nvidia-smi -pm 1 -lgc max -lmc max<br/>我们没做; 会改变测量条件 => 须先决定再记录"]:::todo
     Z7["★ Z7 模型大小标定 (零代码, 判定 BW1 归因)<br/>同一 harness 换 M=Q2_K_XL(9.14 GiB)<br/>Q8_0 27.04 GiB 实测 22.07 ms/token<br/>若线性 => 7.46 ms/token, 证明纯带宽受限<br/>若远大于 => 说明有非带宽的固定开销"]:::next
   end
@@ -789,6 +789,15 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
       ㊹ => N7 的「移植约 80 行」是**乐观估计**：先要做**语义映射**（我们的 selector 在 llama.cpp 里做什么、能否表达成同一算子），
          否则会写出一个「看起来对但语义不同」的 kernel —— 属于 §2 红线里的「大改动先停下问用户」。
          **本轮不动手实现，先把这一条记进 N7 标签**（避免下一轮照着旧描述直接开写）。
+   —— Round 160（自查发现，推翻自己上一轮的结论）：
+      ㊺ 读 harness 固定 prompt 块发现：**P1/P2/P3 各只有一句话**（约 100-200 字符）。
+         `--ctx-size` 只**分配** KV 缓存、**不会填充**它 => 8K/32K/128K 三臂的 decode 都发生在 n_kv 只有几百的**同一条件**下。
+      ㊻ => **Z1 的零斜率是测量设计的假象**；由此推出的「KV 被隐藏」「N1/N8T 是 256K+ 项」**全部作废**，
+         并已从 AGENTS.md §1 撤下（那是最危险的地方 —— 每次会话自动加载）。
+      ㊼ 仍然有效：8K 那一个点（45.31 t/s => 438 GB/s）与只依赖它的三条（权重流 40% / LOWBIT 改判 / 两阶段）。
+      ㊽ 教训：**「改了哪个参数」不等于「那个参数真的起作用了」** —— 上机前必须确认实验条件真被改变。
+         与 R155/R159 同源：都是「表面参数/二手描述」与实际语义脱节。
+      ㊾ 正确的深度测试：`llama-bench -d <depth>`，或先用长 prompt（`/tmp/prompt256k.txt`）填满 KV 再测。
 ```
 
 ## 5. 作业纪律（血泪）
