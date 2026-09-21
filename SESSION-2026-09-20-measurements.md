@@ -1373,6 +1373,107 @@ canonical 重建 + `llama-bench -sm tensor -ts 1/1/1 -fa 1 -p 0 -n 64 -r 2`，
 `-d {8192, 32768, 131072, 262144}` x `-ctk/-ctv {q8_0, f16}`，另加 `-fa 0` 诊断两臂（8K/32K）。
 判据：每 KV-token 的 ms 斜率 vs §16.3 的 roofline 倍差（结果回来后补在 §17）。
 
+### 25. Round 95-96：多卡扩展性与 draft 放置的两条新证据（2026-09-21）
+
+#### 25.1 源码事实：AR 就是切图边界（`ggml/src/ggml-backend-meta.cpp:2434-2463`）
+```
+for (i = 0; i < n_subgraphs; i++) {
+    for (j = 0; j < n_backends; j++) ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+    if (n_backends > 1 && i < n_subgraphs - 1) comm_allreduce(comm_ctx, nodes.data());   // host side
+}
+```
+- 每个子图 = **每设备一次 graph_compute**，随后**一次主机侧 AR** => 每轮 139 子图 = 138 次 AR = **417 次 graph_compute**（3 设备）。
+- 因此 **AR 次数 == 子图数 == 图捕获/重放边界数**。每次 AR 是一次**隐式跨设备栅栏**：三卡必须在每个子图末尾对齐，任何单卡抖动被乘 138 次。
+- 这解释了 §25.2 的"卡越多越慢"；也说明 P-A 的真正价值**不是**省主机时间（R1 已证明主机不在关键路径，`enqueue` 省 4.8 ms 而轮时零改善），
+  而是**消除 138 个栅栏/边界**。只把 AR 挪进图而不合并边界（如 R1 的设备侧 push）不会有收益 —— 这与 R1 的实测一致。
+
+#### 25.2 8K TP 重扫（诊断口径 NODROP=1，`/tmp/tp-sweep.txt`，各臂顺序执行）
+| 臂 | CARDS | MEDIAN_TG | AL(p1) | 反推 ms/轮 | enqueue/轮 |
+|---|---|---:|---:|---:|---:|
+| tp01 | 0,1 | 60.55 | 3.65 | 60.3 | 19.9 ms |
+| tp012 | 0,1,2 | 78.49 | 4.90 | 62.4 | 27.4 ms |
+| tp0123 | 0,1,2,3 | 59.98 | 3.80 | 69.7 | 38.8 ms |
+| tp012345 | 0-5 | 48.76 | 3.90 | 94.2 | 62.0 ms |
+
+- **卡数越多轮时单调变差**（60 -> 62 -> 70 -> 94 ms/轮）：权重流按 1/N 下降的收益被 AR/提交开销完全吃掉。
+- 非提交部分（轮时 - enqueue/轮）在四臂上几乎恒定（40 / 35 / 31 / 32 ms）=> 变差**全部**来自 enqueue 窗口（即 AR + 提交）。
+- ⚠️ 绝对数字（TP3 = 78.49）**低于权威口径 98.88**：该扫描是 NODROP=1 且四臂背靠背，存在污染（§4.24 的教训：测量必须独占 + 官方口径）。
+  **本表只取相对趋势**；干净口径的 TP2/TP3 交错重测见 §25.4。
+
+#### 25.3 draft 放置：`--spec-draft-device` 的证伪理由可能已过期
+- 旧结论（`AUDIT-2026-09-20-dsh.md:103`）："DFlash2 draft 是全词表 draft、借用 target 的 lm head（GGUF 无 `output.weight`）=> `--spec-draft-device` 必崩（`Meta()` 占位缓冲）"。
+  这是**根因已定但未解决**，不等于"此路不通"。
+- 现在的代码已明确为此设计：
+  - `src/models/dflash.cpp:160-161`：a draft with its own embeddings + head references no target tensors and can run on devices the target does not use（注释里直接点名 `-devd with a tensor-split target`）
+  - `common/speculative.cpp:2817-2823`：`n_devs == 1` => `result.split_mode = LLAMA_SPLIT_MODE_LAYER`
+    => 单设备 draft **没有 meta 包装 => draft 侧 0 次 AR、约 1/3 的 kernel 数**（draft 权重仅 1.14 GB，本来就该放一张卡）
+  - 代价：`common/speculative.cpp:994` `is_dflash2_cpu = is_dflash2 && split_mode == TENSOR`
+    => 单设备 draft 会切到**图内 selector**（不再是那个已被并行化的 CPU selector），选择器数值路径改变 => AL 可能变。
+- harness 早已有 `DEVD` 参数（`/root/p60-ab-harness.sh:73-78`，注释就是"pins the draft model to a single device (avoids its ...)"）。
+- 预期收益：draft 13.6 -> 数 ms（权重流下限仅 1.4 ms）、selector 2.7 -> 图内。
+- 判据（按顺序）：① 能不能启动（不 abort）② greedy sha256/AL 是否可接受 ③ ms/轮。脚本 `/root/devd-ab.sh`，结果见 §25.4。
+
+##### 25.3.1 判决（2026-09-21 14:05）：**仍然崩，且根因就是 2026-09-20 记的那条** -> 路线封死
+`DEVD=CUDA0` 一臂在 `llama_context` 构造期间 abort，日志原文（`/tmp/p60-dvA-server.log`）：
+```
+ggml-backend.cpp:942: pre-allocated tensor (output.weight) in a buffer (Meta()) that cannot run the operation (NONE)
+  libllama.so graph_reserve -> resolve_fused_ops -> sched_reserve -> llama_context::llama_context
+  libllama-common.so common_speculative_init_result
+```
+- 机制确认：本 draft 是**全词表 draft**（GGUF 里没有自己的 `output.weight` / `token_embd.weight`，1.14 GB 也装不下），
+  它的 lm_head 就是**目标模型的那个 tensor**，住在**目标的 `Meta()` 缓冲**里（TP 切分状态）。
+  把 draft 放到单张 CUDA 卡上时，sched 要把这个叶子 tensor 交给 CUDA0 执行 => `ggml_backend_dev_supports_op` 直接拒绝。
+- 因此 `--spec-draft-device` 对本模型**在当前架构下不可用**（不是配置问题，是"借用 target lm_head"这一 DFlash2 全词表设计与"draft 独占设备"互斥）。
+  三种可能的解法都属结构性改动，且都要动 `output.weight` 的归属：
+  ① 让 draft 自己复制一份 lm_head（+约 0.5 GB 显存 / 一张卡）；② 让 draft 的最后一层 matmul 仍留在 target 的 Meta 后端（跨后端图）；
+  ③ 把 draft 也做成 reduced-vocab（需要重新导出 GGUF，超出本项目范围）。
+  **本轮不做**；结论按"已证伪"归档（`AUDIT` 的那条从"根因已定未解决"升级为"根因已确认且互斥"）。
+- 附注：`--spec-draft-device none` **不是**"用默认值"，上游语义是"不要把 draft 放到 GPU"，会解析成**空设备表** =>
+  `E llama_prepare_model_devices: LLAMA_SPLIT_MODE_TENSOR needs >= 1 devices` => 模型直接加载失败（本轮踩到，8 臂作废一次）。默认值必须用**空字符串**。
+
+#### 25.4 干净口径的 A/B（进行中）
+- `/root/tp-ab.sh`：官方口径（带 drop_caches）TP2/TP3/TP3/TP2 交错四臂，验 §25.2 的相对趋势在正式口径下是否成立。
+- `/root/devd-ab.sh`：TP3 target 固定，DEVD = {CUDA0, 默认(TP3), CUDA3, 默认(TP3)} 交错四臂。
+- 纪律：两轮之间不并发任何其它 GPU 任务（§4.24）；两脚本都只追加，不删既有 `/tmp/p60-*-server.log`。
+
+#### 25.5 度量口径的可复现性风险（Round 96 发现，正在查）
+同一个库（`/root/libdir-instr`，md5 `ea4f0af6...`）、同一 SPEC、同一 seed=42，两次运行 MEDIAN_TG 差 28%：
+
+| 运行 | NPRED | tg(p1/p2/p3) | AL(p1/p2/p3) | 反推 ms/轮 | draft_decode |
+|---|---:|---|---|---:|---:|
+| `nmax.sh` n_max=7（13:11） | **512** | 100.27 / 81.39 / 116.74 | 5.55 / 4.22 / 6.38 | 55.4 | 13.37 |
+| `tp3a`（13:27，本轮 A/B） | **192** | 78.49 / 68.64 / 96.63 | 4.90 / 3.90 / 6.13 | 62.4 | 13.76 |
+
+- `nmax.sh` 的 AL 与权威口径**逐位相同**（5.55 / 4.22 / 6.38）=> 权威口径那一支就是 **NPRED=512**。
+- 主口径的文字描述里**没有写 NPRED**；harness 的默认是 **512**（`NPRED=${NPRED:-512}`），我这轮误用了 192（沿用旧扫描的习惯）。
+- 排除项：机器空闲（load 1.2、`vllm-1cat`/`llmscope` inactive、GPU 0 MiB）；`draft_decode` 13.37 vs 13.76、`selector` 2.66 vs 2.72 两次一致
+  => **不是外部抢占，也不是 draft 侧回归**；差异落在 target 步。
+- 正在查：`/root/lib-ab.txt`（libdir-nccl vs libdir-instr，均在 192）与 `/root/npr-ab.txt`（512 vs 192，各交错两臂）。
+- **新增纪律**：报数字**必须写明 NPRED**；跨会话比较前**先复现一次权威臂（NPRED=512）**确认口径，否则整轮实验作废。
+
+##### 25.5.1 结论（同日 13:49 定论）：差异来自 NPRED，**不是库**
+用两轮实测的**响应 JSON 里的 `timings`**（比 harness 从 server 日志 grep 更可信）对齐：
+
+| 运行 | NPRED | pred_n | pred_ms | draft_n | draft_acc | rounds | AL | 接受率 | ms/轮 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| nmax7 p1 | 512 | 512 | 5096.3 | 642 | 419 | 91.7 | 5.58 | **0.653** | **55.6** |
+| tp3a p1 | 192 | 192 | 2433.5 | 271 | 152 | 38.7 | 4.96 | **0.561** | **62.9** |
+| nmax7 p2 | 512 | 512 | 6278.7 | 843 | 390 | 120.4 | 4.25 | 0.463 | 52.1 |
+| tp3a p2 | 192 | 192 | 2782.7 | 334 | 142 | 47.7 | 4.02 | 0.425 | 58.3 |
+| nmax7 p3 | 512 | 306 | 2612.7 | 336 | 258 | 48.0 | 6.38 | 0.768 | 54.4 |
+| tp3a p3 | 192 | 192 | 1976.7 | 211 | 159 | 30.1 | 6.37 | 0.753 | 65.6 |
+
+- **库被排除**：`la1`（libdir-nccl）与 `lb1`（libdir-instr）在 NPRED=192 下 `pred_ms` 2433.5 / 2544.0、`draft_n`/`draft_acc` **逐位相同** =>
+  两库**数值完全一致**（同一条采样轨迹，AL 也逐位相同）；libdir-instr 反而快 4.5%。**没有库回归。**
+- **NPRED 解释一切**：(a) 192 的 `pred_ms` 里含约 **500 ms 一次性热身**（首次图捕获/分配），在 38.7 轮里占 13%，在 91.7 轮里只占 3.6%；
+  (b) 更长的生成里**接受率更高**（p1 0.653 vs 0.561，p2 0.463 vs 0.425；p3 两者几乎相同 0.768/0.753，正是"越写越像套话"的推理轨迹特征）。
+- **权威口径 = NPRED=512**（harness 默认），AL 5.55/4.22/6.38 与 `nmax7` 逐位相同。
+- **作废**：本轮所有 NPRED=192 的绝对数字（`tp-sweep.txt`、`lib-ab.txt` 的绝对 tg）只能用于**同口径相对比较**；
+  TP2/TP3 的排序已按 NPRED=512 重跑（`/root/round97.sh`，日志 `/tmp/round97.txt`）。
+- **工具**：`/root/timings.py <tag...>` 从 `/tmp/p60-<tag>-p{1,2,3}.json` 打印 pred_n/pred_ms/tps/draft_n/draft_acc/prompt_n ——
+  **今后判定投机指标一律以它为准**，不再用 server 日志 grep（有 `tail -1` 竞态与口径不明）。
+
+
 
 
 

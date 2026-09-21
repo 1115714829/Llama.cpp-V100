@@ -8,6 +8,23 @@
 > - `SPEC-P-A-ar-in-graph.md` —— P-A（AR 纳入图捕获）：现状源码事实、两条候选路线、可复用资产（patches/0006 的设备侧协议）、四步实施、硬门与止损
 > - `SPEC-P-D-longcontext-attention.md` —— P-D（长上下文 decode attention）：A4 证伪并行度路线的证据、三步计划（先向量化+ILP，再考虑专用内核）、止损
 > - P-C（mask/KV 宽度分桶）与 P-B（draft 减少 kernel 数）：P-C 首次子代理尝试零写入被中断，记录在 `SESSION` §23（含三条判读路径）；P-B 的量化诊断进行中（`/tmp/pbdiag.log`，用已提交的四个探针，无需改代码）
+> - **Round 95-96 新增（证据在 `SESSION` §25）**：
+>   ① **AR == 切图边界**（`ggml/src/ggml-backend-meta.cpp:2434-2463`：每子图 = 每设备一次 graph_compute + 一次主机侧 AR）
+>      => 每轮 139 子图 / 138 次 AR / **417 次 graph_compute**，每次 AR 都是隐式跨设备栅栏。
+>      => **P-A 的价值在「合并边界」，不在「省主机时间」**（R1 已证伪后者）；只把 AR 挪进图而不合并边界 = 复现 R1 的零收益。
+>   ② **8K TP 重扫（诊断口径）**：TP2/3/4/6 = 60.3 / 62.4 / 69.7 / 94.2 ms/轮 => **卡越多越慢**，权重流 1/N 的收益被 AR/提交全部吃掉；
+>      非提交部分四臂恒定（40/35/31/32 ms）。⚠️ 绝对数字低于权威口径（NODROP + 背靠背），只取趋势；官方口径交错重测中（`/root/tp-ab.sh`）。
+>   ③ **`--spec-draft-device` 的「必崩」结论可能已过期**：`src/models/dflash.cpp:160-161` 已按单设备 draft 设计，
+>      `common/speculative.cpp:2817-2823` 对 `n_devs == 1` 直接给 `LLAMA_SPLIT_MODE_LAYER` => **draft 侧 0 次 AR、约 1/3 kernel 数**（draft 仅 1.14 GB）。
+>      代价：会切到图内 selector（`speculative.cpp:994`）。正在干净口径重测（`/root/devd-ab.sh`）。
+>      **判决（14:05）**：仍然崩，根因就是 2026-09-20 记的那条 —— `ggml-backend.cpp:942: pre-allocated tensor (output.weight) in a buffer (Meta()) that cannot run the operation (NONE)`。
+>      本 draft 是全词表 draft（GGUF 无自己的 head），lm_head 就是 target 那个住在 `Meta()` 里的 tensor，单卡 draft 无法执行 => **该路线在当前架构下封死**（三条解法都属结构性改动，本轮不做）。
+>      附注：`--spec-draft-device none` 语义是「不要 offload draft」=> 解析成空设备表 => 加载直接失败；默认值必须传**空字符串**。
+>   ④ **⚠️ 度量口径事故已定论（Round 96）**：本轮一批数字误用 **NPRED=192**，而权威口径是 **harness 默认 NPRED=512**。
+>      差异**不是库**：libdir-nccl 与 libdir-instr 在 192 下 `pred_ms` 2433.5 / 2544.0、`draft_n`/`draft_acc` 逐位相同（同一条采样轨迹），instr 还快 4.5%。
+>      真因是 192 的 `pred_ms` 含约 **500 ms 一次性热身**（38.7 轮里占 13%，91.7 轮里占 3.6%）+ 短生成接受率偏低（p1 0.561 vs 0.653）。
+>      ⇒ **报数字必须写明 NPRED**；判定投机指标一律用 `/root/timings.py <tag>` 读响应 JSON 的 `timings`，不要 grep server 日志（有 `tail -1` 竞态）。
+>   ⑤ 已按 NPRED=512 重跑：DEVD（draft 单卡）4 臂 + TP2/TP3 4 臂 => `/root/round97.sh` -> `/tmp/round97.txt`（job `pwsh-45`）。
 >
 > **权威数字（正式口径，四次实测离散 <0.5%）**：tg **98.12 / 98.70 / 98.88 / 98.88 t/s**，AL 5.55/4.22/6.38，**57.6 ms/轮**，greedy sha256 **f3edac19...**（同配置逐位可复现）。
 > 长上下文（§21）：8K 24.9 -> 256K **53.0 ms/token**（+113%，斜率 0.113 us/KV-token）；256K+DFlash2 投机 = 34.13 t/s。
