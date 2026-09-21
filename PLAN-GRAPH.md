@@ -947,6 +947,24 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
           11 个浅深度全部一致到 0.6% 以内 => **三个探针 commit 对 decode 无可测影响**（§4.18 的同源校验通过，且不用额外开臂）。
        ㊺ chain 3 于 17:59:52 拿到机器：`META_SWAPPED` -> `BUILD_RC=0 ERRORS=0 TARGETS=115` -> `LIB_MD5_BASE=281ab75d...`（变了）
           / `LIB_MD5_CUDA=8fc530e2...`（未变，符合预期）/ **`MARK_RCACHE=1`**（新代码确实进了被加载的库）=> 三臂正在跑。
+    —— Round 176（**N6a 的第一个结果：机制动了，轮时没动** —— 而且对比被探针污染，必须如实记录）：
+       ㊻ 三臂（NODROP=1, NPRED=256, PORT=8161/8162/8163，同一库 `libggml-base=281ab75d...`）：
+          **C0 = 干净基线（N6a 关、无探针）MEDIAN_TG=83.14**；**C1 = N6a 开 + 三探针 MKEY/GRAPH_DEBUG/META_HOST = 81.00**；
+          两臂 greedy sha256 **都是 `f3edac19...`** ✓（正确性门通过，N6a 没有改变 token 流）。
+       ㊼ **机制确实动了**：`[MKEY]` 的 n0 在 C1 里**开始循环**（r=0 / r=2 / r=6 共用 `0x7ffda0ff0ec0`），
+          而 N6a 之前（arm A）四轮 12 个地址**互不相同** => simple tensor 的地址被复用了，**N6a 的 early-out 生效**。
+       ㊽ **但轮时没有改善**：C1 比 C0 还**慢 2.6%**，而三探针本身只值约 2.5%（对比 chain 1 的 fpdB=81.12 @ 三探针 vs C0=83.14）
+          => **N6a（当前形态）对轮时 ≈ 0**。
+       ㊾ **`[GRAPH]` 计数是最硬的否证**：attr（无 N6a）与 C1（N6a 开）的 `calls=82688 capture=2742 replay=64875 direct=15071`
+          **逐位相同** => N6a **没有改变 replay/direct 的判决序列** => 「key 抖动导致 direct」这个前提**只对了一半**：
+          key 抖动是真的（MKEY 已证），但**那些 direct 调用是因为属性真的在变**（`[DIRECT_PROBE]` top5 就是 `attn_norm-0` 这类形状随 n_tokens 走的节点）。
+       ㊿ **一个必须记住的坑（差点误判为巨大胜利）**：`[META] dev` 从 attr 的 **17.435** 掉到 C1 的 **8.329 ms/call**（-52%），
+          看上去像 -30 ms/轮；但 **attr 带了 `GGML_CUDA_OP_TIMING` + `GGML_CUDA_DIRECT_DEBUG`**（前者对每个 direct 节点记 2 个 CUDA event，
+          后者在 331776 次属性差异上逐字段统计）=> **这个 dev 差主要是探针税，不是 N6a 的功劳**。
+          => 规矩：**跨臂比较绝不能改变探针集**；探针花掉的每一毫秒都会伪装成被优化项的收益。
+       ① 下一步（已明确）：**(a)** 用 C0 vs 「N6a 开且无探针」这一对做**干净**判决（2 分钟一臂）；
+          **(b)** 无论 (a) 结果如何，真正的抖动源已经定位到 **token 数随轮变化**（`ne1 = 4/8/2/1`）=>
+          **下一刀是把 verify/注入批固定成常量尺寸**（多出来的行用 mask 屏蔽），那才是让 direct 掉下来的结构改动。
 ```
 
 ## 5. 作业纪律（血泪）
