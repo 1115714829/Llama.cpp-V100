@@ -112,6 +112,33 @@
   **sm_70 上 `nvcuda::wmma` 只有 m16n16k16，且 `ldmatrix` 要 sm_75 => 拿 wmma 直接写 Volta attention 走不通**，必须手写 PTX。
   这与我们早前「自写 WMMA 原型只有 90 GB/s」的实测一致。
 
+## 6. ★★★ sglang-V100 的关键发现表（证据级，全部作者自测）
+
+| 技术点 | 文件:行 | 量化效果 | 可移植性 |
+|---|---|---|---|
+| **GQA read-once**：一个 CTA 覆盖一个 KV 头的全部 Q 头 | `tilelang_fa_v100/_kernels_paged_decode.py:1-7`（docstring 原文 *One CTA evaluates every GQA query head belonging to a KV head, so K/V pages are fetched once instead of once per query head*）；grid=`(heads_kv, max_splits, batch)` :73-77 | **128K 30.04 -> 200K 49.58 tok/s；TPOT 33.289 -> 20.170 ms** | **高**（思路+常量可抄，实现要为我们重写一版 ggml VEC 变体） |
+| **E5M2 KV -> FP16 只左移 8 位、无查表** | `_kernels_paged_decode.py:131-137`（`bits = raw << 8`，注释 *avoids a dependent LUT load on Volta's K-panel critical path*） | 分组 attention 微内核 **0.065/0.186/0.444/0.766 ms @1K/25K/70K/128K**；旧 LUT 路线 128K 约 0.963 ms | 高（任何 1 字节 KV 都能用；前提是 KV 换成 E5M2 类） |
+| **D=256 长上下文尾块精确 split-KV** | `_paged_adapter.py:33,95-115`（仅当 logical_dense_kv 且 max_seq_len>=32768 且 num_tokens<=2048；Q<=64/128/256/512/1024/2048 -> splits=64/32/16/8/4/2） | **Q=64, K=245,760, Hq/Hkv=6/1 => 4.306 ms vs 未切分 40.675 ms（9.45x）**，max abs diff 4.8e-7 | **高**（策略与阈值可直接照抄到我们的 prefill 尾块） |
+| **反面证据：满 8K chunk 故意不切分** | `_kernels_dense_d256_splitkv.py:1-8`（*two through five splits were all slower than the dense one-CTA-per-query-tile path at Q=4096/K=32768*） | splits 2/3/4/5 全部慢于 dense | 高（**这解释了我们 A4 的负结果**，避免重犯） |
+| decode split-KV 常量 | `_kernels_paged_decode.py:17-18`（DECODE_SM_TARGET=80、MIN_TOKENS_PER_SPLIT=64）、:334 `max_splits=ceil(80/(batch*heads_kv))`、:335 `block_n=32 if dim==256 else 64`、:340 `threads=block_m*4` | CTA 目标 80->120 **反而更慢** | 高 |
+| D=256 dense prefill 几何 | `_kernels_dense_d256.py:21-23`（BLOCK_M=64, BLOCK_N=32, THREADS=256）、:28-34（QK=FullCol, PV=FullRow）、:15-19（D=256 单独开 fast-math） | GDN prefill 2048/4096/8192 = **1.455/2.199/3.725 ms** vs 旧 2.017/3.236/5.674（**-27.9/-32.0/-34.3%**） | 中（几何可借鉴，TileLang->CUDA 要重写） |
+| 长前缀先 gather 成 dense 再算 | `_kernels_dense_d256.py:1-7`（*removing page-table lookup, integer divide, and scattered-page address resolution from every K/V element load*）；阈值 `_paged_adapter.py:30-31`（MIN_QUERY_TOKENS=3920、MIN_CONTEXT=8192） | D256 prefill 路线入口条件 | 中（我们无 paged KV，但「统一 logical 布局再算」可用） |
+| **主机侧/小算子级提速（最便宜的一类）** | `benchmark/qwen38_nvfp4_v100_70tps_20260907/README.md:21-28`（逐轮加：63.206->67.646->69.662->70.036->70.108->71.977 tok/s，**+19.4%**）、:88-95（**QSA split-merge 23.69->4.84 us**，in-model 每 attention 层约 **34->5.80 us**）、:122-127（page-table metadata 8192 页 **23.26->2.11 us**）、:150-152（**one-shot push all-reduce 3.35 us**） | **纯主机侧+算子级优化拿到 25K decode +19.4%，attention 内核未动** | **高（对我们 29.4 ms 主机循环最直接）** |
+
+### 6.1 ⚠️ 一条**反驳我们既有结论**的数据：push all-reduce 3.35 us
+我们 R1 的结论是「设备侧 push AR 在役 **61.5 us** vs NCCL 53.0 us，更差」并据此**证伪**了这条路。
+而 sglang-V100 记录的是 **one-shot push all-reduce 3.35 us** —— **差 18 倍**。
+必须查清口径差异（几卡？消息多大？是否含同步？是内核时间还是端到端？）。
+**若它成立，R1 的结论需要重审** —— 而不是当作已证伪永久排除。
+
+### 6.2 对我们三条线的直接映射
+
+| 我们的问题 | 对应外部手段 | 作者实测收益 |
+|---|---|---|
+| 256K decode 34 t/s（KV 带宽 105 GB/s vs roofline 800） | **GQA read-once**（GQA=6 最坏 6x DRAM 流量） | 128K 30.04 -> 200K **49.58** tok/s；TPOT 33.3 -> 20.2 ms |
+| 256K prefill 895 t/s / TTFT 293 s | **D=256 尾块精确 split-KV**（按 Q 长度分 64/32/16/8/4/2 路） | Q=64/K=245760 **4.306 ms vs 40.675 ms（9.45x）** |
+| 每轮 29.4 ms 主机循环（53%） | **只捕获单形状 CUDA 图** + 主机侧小算子优化 | 主机侧优化单独 **+19.4%**（内核未动） |
+
 ## 4. 待深挖（子代理正在做）
 - `v100-skinny fork_patches/gdn_attn.py`：**GDN 投机状态的快速元数据构建**，作者自测 **-1.4 ms/step**，
   消掉 **21 次 device sync + 约 70 次 copy** —— 我们的 direct 抖动源正是 **GDN 递归状态视图**，这条高度相关。
