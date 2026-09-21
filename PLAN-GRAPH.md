@@ -295,6 +295,22 @@ flowchart LR
     XL3["用的是更老的上游<br/>图抖动线同样没有新招"]:::fact
     XL4["多卡长上下文实测表（200k）"]:::fact
   end
+  subgraph RQP["★ qwen38-v100-serve（R148 联网新发现，单卡 V100-32G + Qwen3.8-27B，同题！）"]
+    QP1["ncols2=3 GQA 打包补丁<br/>128K KV 流量 26.37->8.59 GB/token (-67.4%)<br/>decode 16.45->23.83 t/s (+44.86%)<br/>KLD 0.000000, 100% top-1"]:::pending
+    QP2["现役选择器只打包 2 个 Q 头<br/>= 我们的 KV 冗余是 3x, 不是 6x<br/>（修正 Z1 先验预测）"]:::fact
+    QP3["该补丁只对 F16/BF16 KV 开启<br/>（寄存器压力）=> q8_0 不在覆盖范围"]:::cond
+    QP4["单卡 V100-32G @128K: 16.49 stock<br/>23.83 no-mtp 补丁 / 42.22 MTP<br/>@8K: MTP 62.41"]:::fact
+    QP5["--cache-prompt 多轮 agent<br/>每轮 22.94s -> 3.08s (7.45x)"]:::pending
+    QP6["lock-clocks.sh 锁频 + serve.env<br/>+ check-env.sh 完整可复现栈"]:::pending
+  end
+  QP1 --> N8
+  QP2 --> N8
+  QP2 -.->|修正先验| Z
+  QP3 --> K1
+  QP3 --> N13
+  QP4 --> T4
+  QP4 --> K3
+  QP5 --> G
   subgraph RFA["flash-attention-v100（63 文件 / 1 MB）"]
     FA1["sm_70 的 nvcuda::wmma 只有 m16n16k16<br/>ldmatrix 要 sm_75 => 直接写 Volta attention 走不通<br/>必须手写 PTX"]:::pending
     FA2["D=256 时 smem 88.1 KB => 只能 1 CTA/SM<br/>K/V 共用一块 smem 是唯一出路（union 布局）"]:::fact
@@ -487,6 +503,23 @@ flowchart LR
 | XL2 | `planar*/iso*` 被该仓库**自己的 PPL 表**判死（3.03-3.06 vs f16 1.0023，**+203%**） | A | X2 |
 | XL3 | 用的是**更老的上游**，图抖动线同样没有新招 | A | C1（否定性） |
 | XL4 | 200k 多卡长上下文对照表 | A | K2 |
+
+#### 3.2.8 ★ qwen38-v100-serve（R148 联网新发现 —— 与我们同题：Qwen3.8-27B / V100 / 长上下文 agent）
+
+> 仓库 `https://github.com/jackinthebox52/qwen38-v100-serve`，2026-09-05 创建，27 KB / 10 文件，3 star。已克隆到 `v100-refs/qwen38-v100-serve`。
+> 描述原文：*LLama.cpp patches for serving Qwen 3.8 27b on Nvidia Volta V100 hardware efficiently under long-context agentic loads.*
+
+| # | 解读到的内容 | 证据 | 落到 |
+|---|---|---|---|
+| QP1 | **`ncols2=3` GQA 打包补丁**（`patches/0001-t2-001-gqa-packing-sm70.patch`，改 `fattn-vec.cuh`，+71/−21 行）：把 3 个共享同一 KV 头的 Q 头打进一个 block。声明 **128K KV DRAM 流量 26.37 -> 8.59 GB per token（−67.4%）**、**decode 16.45 -> 23.83 tok/s（+44.86%）**、KLD 0.000000 / 100% top-1 | A（补丁 + README 表，作者自测） | **N8** |
+| QP2 | ★ **现役选择器只打包 2 个 Q 头（ncols2=2）** ⇒ GQA ratio 6 的 KV 重读冗余是 **3 遍不是 6 遍**（26.37/8.59 = **3.07** 精确吻合） | 补丁 commit message 原文 | **N8** + **修正 Z1 先验预测**（204 -> 102 KiB） |
+| QP3 | ⚠️ 该补丁**只对未量化（F16/BF16）KV 开启**（寄存器压力），q8_0 不在覆盖范围 | 补丁 commit message + diff 守卫 | **K1**、**N13** —— 这条把 N8 与 KV dtype 绑在一起了 |
+| QP4 | 单卡 V100-SXM2-32GB 实测：**128K** stock 16.49 / 补丁 no-mtp 23.83 / **MTP 42.22 tok/s**；**8K** MTP 62.41 tok/s | README 表 | **K3**、**T4**（MTP 是 DFlash2 之外的另一条草稿路线） |
+| QP5 | **`--cache-prompt` 多轮 agent 会话**：每轮 wall time 22.94 s -> **3.08 s（7.45×）** | README 表 | **G**（用户真实场景就是 256K agent 多轮） |
+| QP6 | 附带的运维栈：`lock-clocks.sh`（锁频）、`serve.sh` / `serve.env.example`（完整服务参数）、`check-env.sh`、`stack-requirements.txt`、`build.sh` | 仓库文件 | 测量纪律（锁频=减少漂移）与部署对照 |
+
+> ⚠️ **待核**：README 的表是作者自测、单卡、温度 0、agentic 语料，与我们 3 卡 NPRED=512 drop_caches 口径**不可直接比**；
+> 补丁本身是否适用于我们的树（base b11053 的 `fattn-vec.cuh`）也**还没验**。CP1-CP6 的深入解读由子代理进行中。
 
 #### 3.2.7 flash-attention-v100 —— Volta attention 的硬约束
 
