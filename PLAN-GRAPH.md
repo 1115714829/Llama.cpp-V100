@@ -80,6 +80,25 @@ N2 ──> 为 N1 提供动机证据（便宜的先做）
 
 ## 5. 作业纪律（血的教训，必守）
 
+### 5.1 ★ 实验排程事故与已固化的对策（Round 140）
+
+**事故**：主线启动 `sync-ab.sh` 时，FA 子代理的第一轮 `llama-bench` 已在几秒前发射（其脚本含 `pkill`），
+结果**主线的 sy0 臂被 KILL 作废**；且该臂的 29 GB 模型加载与主线的 sy1 臂前 3 分钟重叠 => **sy1 也可能受污染**。
+
+**救回的原因**：`sync-ab.sh` 用的是 **A-B-B-A 交错**（baseline / SYNC / SYNC / baseline）。
+前两臂一废一污，但**后两臂（sy1b + sy0b）都落在污染窗口之后，构成干净的一对** => 结论仍然可得。
+=> **纪律：正式 A/B 一律用 A-B-B-A 交错，不要 A-B-A-B 或单对。** 它是对「中途污染」的冗余保护。
+
+**已固化的对策**（子代理提出并被采纳，比『靠人记得等』健壮）：
+```
+1) 实验脚本【不主动 pkill 任何东西】：检测到 llama-bench / llama-server 或别的实验脚本
+   (sync-ab.sh / layer-ab.sh / p60-ab-harness.sh) 就 MACHINE_BUSY_ABORT 退出。
+2) 只回收【自己端口】的 llama-server；遇到别人的 server 直接 abort。
+3) 启动任何实验前先查 /tmp/*.txt 里有没有别的任务在跑（SYNC_AB_DONE / LAYER_AB_DONE 等）。
+```
+
+### 5.2 其余纪律
+
 ```
 - 测量必须独占机器。启动任何实验前先看 /tmp/*.txt 里有没有别的任务在跑。
   已踩过两次: layer-ab 与 fa-ab 相撞; sync-ab 与 fa-ab 相撞(第二次在发生前拦住)。
