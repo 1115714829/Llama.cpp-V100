@@ -953,6 +953,17 @@ res &= (kq_mask->ne[1] == n_tokens/n_stream);
 **三查**（error 行数为 0、有 `Built target` 行、二进制标记串非 0）。修好后：`BUILD3_RC=0`、`error lines: 0`、md5 `2c123419...`、**marker = 1** ✓。
 => 这次是 AGENTS §4.18 的"二进制标记串校验"救的场（若只看 BUILD_RC 就会把两个臂都当成有效测量）。
 
+### 18.10 6.7 ms 未归因余量的定位（2026-09-21，无需新探针）
+
+现有探针已覆盖的区段：
+- **target decode + sync**：`tools/server/server-context.cpp:3694-3713`（`LLAMA_SPEC_TIMING`，含 completion wait ✓）
+- **draft 三阶段**：`draft_decode / selector / walk`（`spec timing` ✓）
+- **图 alloc**：`llama-context` 的 `[RT] alloc_us` ✓
+
+=> 每轮 56.6 ms 减去以上全部（32.5 + 13.6 + 2.7 + 2.2 = 51.0）余 **约 6.7 ms 落在探针未覆盖区**：
+   **采样器（target 采样 + 投机接受时的重采样）、投机接受/校验记账、服务器每轮簿记（batch 构建、token 发射）**。
+=> 下一步（下一会话，成本低）：在这三处各加一个 `LLAMA_SPEC_TIMING` 门控计时即可定量；若确认是软件开销且可优化，则可直接改进（无需架构改动）。
+
 ## §20 A4 判决（2026-09-21）：FA 的 KV 切分度**越深越差** —— 假设证伪，并由此定性 128K+ 的瓶颈
 
 **实测**（`llama-bench -d 131072 -n 64 -r 2`，q8_0 KV，TP3 卡 0/1/2，M=1 普通解码，不 drop_caches 的诊断口径）：
