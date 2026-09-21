@@ -1508,6 +1508,38 @@ ggml-backend.cpp:942: pre-allocated tensor (output.weight) in a buffer (Meta()) 
 - 留档 target 的逐步值：`[RT] target decode+sync` = 48.8 / 33.7 / 35.6 / 37.3 / 32.3 / 29.4 / 43.7 / 41.6 / 32.3 ms/轮（前几段含热身，稳定段 **29-37 ms/轮**）。
 - 纪律补充：判定图复用**必须同时看两行 `[RT] perf`**（`grep -a -h "RT. perf" <log>` 全取，不要 `tail -1`）。
 
+#### 25.9 ★★ 外部查证后的更正：`reuse=0` **不等于** CUDA 图被重录（Round 100，用户提醒要查上游）
+
+用户提醒「要习惯用互联网查 PR/论坛来确定事件」。查证结果**修正了 §25.7 的解读**，必须记住：
+
+**① 我们树里已经带了上游 PR #28549（`Enable CUDA graph for MTP draft`，2026-09-07 提、2026-09-16 合并）。**
+它的 PR 描述原文：
+> MTP alternates between Output-producing draft batches, and No-output prefill and catch-up batches.
+> Previously both shapes reused one `llm_graph_result`, so they shared the same CUDA graph cache key and repeatedly replaced each other's captured graph.
+> This PR: Adds a second graph-result arena for MTP no-output batches. Gives both graph shapes distinct, stable CUDA graph cache keys.
+
+=> `llama-context.h:370-371` 那句注释（`Separate arenas give batches with and without outputs distinct CUDA graph cache keys.`）+
+`std::array<llm_graph_result_ptr, 2> gf_res_prev;` **就是 #28549 的成果**。它解决的是 **CUDA 后端里 `ggml_cgraph*` 作为缓存键被两个形状互相顶掉**的问题。
+
+**② 因此 §25.7 的推论要收窄**：`reuse=0 rebuild=556` 说明的是 `llama_context::process_ubatch` 每次都走 build+alloc 路径，
+**不是** CUDA 图每轮重录（那是 #28549 之前的状态）。每个槽有自己的 `llm_graph_result`（含自己的 `ggml_cgraph*`），
+所以 CUDA 后端的图缓存仍能命中。**剩下的是 sched 侧成本**：`build_graph` + `ggml_backend_sched_alloc_graph` + `sched_reset`。
+这与 AGENTS §4.20 的结论一致（「sched 只有单份 splits/graph」「guard 要求连续同一个图 arena 才复用」）。
+
+**③ `gf_res_prev_active` 是单指针是**有意**的**（Round 98 读码结论，见 `SPEC-P-B-draft-graph-reuse.md` §A0），
+与 #28549 的分工吻合：#28549 管「CUDA 图别被顶掉」，单指针管「sched 里当前分配的是哪张图」。**路线 A 永久作废。**
+
+**④ 上游 PR #25406（`ggml-backend: opt-in stable split-graph uids across unchanged submissions`，2026-07-07 提出，已关闭未合并）**
+独立指出了同一条链：`ggml_backend_sched_split_graph()` 每次都给 split 重新分配 uid（`ggml-backend.cpp:1588`），
+导致「uid 作键」的复用快路径永远打不中（它点名了 RPC 后端与 CUDA 后端）。它给的解法是 `GGML_SCHED_SPLIT_UID_REUSE=1`：
+split 未变时保留旧 uid，用「op/type/ne/nb/data/view/op_params/sources/flags/buffer 的逐节点 memcmp 快照」判定未变。
+**我们树里已有同族但不同的东西**：`GGML_SCHED_SPLIT_CACHE`（`ggml-backend.cpp:2019-2024`，按图指纹跳过 `split_graph`）。
+两者的共同短板：**交替形状时指纹/uid 也在交替 ⇒ 都打不中**。这正是 draft 的处境（target 每轮 1 次调用所以能中）。
+=> 若要继续这条线，正确做法是**把「按指纹缓存」从 1 份扩成 2 份**（对应两个槽），而不是改 `gf_res_prev_active`。
+
+**⑤ 方法教训（写进纪律）**：否定一个自己的修法之前，**先查上游 PR / issue**。本次若先查，可以省掉一轮的自行推导，
+而且能直接拿到 #28549/#25406 这两个已成文的设计与验证方法。
+
 #### 25.8 ★★ 口径重算：**每轮的瓶颈首先在主机侧，不在 GPU**（Round 98）
 把 §25.7 的四个计数器按「每轮」摊开（draft 556 次 process_ubatch / 288 轮 = 每轮约 2 次；target 294 / 288 ≈ 1 次）：
 
