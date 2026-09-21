@@ -58,6 +58,20 @@
 4. **轮时**：期望 **-10 ~ -15 ms/轮**（prologue 3.3 + direct 11.6），即 55.5 -> 40-45 ms/轮（tg 100 -> 123-139）。
 5. 同源 A/B：四库 md5 + 二进制标记串；env 门控，**默认关**，跑通后再议默认。
 
+## 4.5 一个必须先排除的伪阴性（本轮刚意识到）
+
+`ggml_backend_meta_graph_hash()` 对**每个节点整块 `ggml_tensor`**（约 600 B）做哈希：
+  - 649 节点的 draft 图 ≈ 390 KB/次；4951 节点的 target 图 ≈ 3 MB/次；按 3.6 次/轮 => **每轮约 1-3 MB 的哈希**。
+  - 若哈希实现只有 ~1 GB/s，**每轮要多花 1-3 ms** —— 这正好可能**吃掉 prologue 省下的 1.5 ms/call**，
+    甚至让它看起来是负收益。
+
+=> **判读 C1 时必须看 `[META]` 的 `total`，不能只看 `prologue`**：
+   - `prologue` 是 rebuild 块内部的时间，**不含**我的哈希（哈希在 `if (needs_rebuild)` 之前）；
+   - 若 `prologue` 下降但 `total` 没降（或反而升），**先怀疑哈希成本**，而不是判定「rebuild 跳过没用」。
+   - 真正确立收益的仍是 `[MKEY]` 的 n0 稳定性 + `[GRAPH] direct` 下降 + C0/C1 的 MEDIAN_TG 对比。
+   - 若是哈希成本问题，下一刀是**只哈希会变的字段**（`ne/nb/data/buffer/view_offs/view_src/flags` + 每个 src 的指针与形状），
+     而不是整块结构体 —— 按 `[DIRECT_PROBE]` 的字段直方图，`data/src_data/src_ptr/ne/nb/view` 就是全部抖动来源。
+
 ## 5. 风险与红线
 
 - 改的是本仓库最敏感的文件（meta 后端）。**必须 env 门控、默认关**。
