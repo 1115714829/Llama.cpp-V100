@@ -63,6 +63,29 @@ arena 是 `ggml_backend_sched` 里**唯一**的那份 gallocr。在槽 1 上跑�
 旁证：同文件注释写的是 `distinct CUDA graph cache keys`（指 CUDA 后端按 `ggml_cgraph*` 缓存 CUDA 图），
 **不是**“每个槽一份显存 arena” => 不能据注释断定安全。
 
+### A0. ⛔ 路线 A 已被主线否掉（Round 98，读了 sched 源码之后）
+
+`ggml/src/ggml-backend.cpp:2080-2093`：
+```cpp
+enum ggml_status ggml_backend_sched_graph_compute_async(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
+    if (!sched->is_reset && !sched->is_alloc) { ggml_backend_sched_reset(sched); }
+    if (!sched->is_alloc) { if (!ggml_backend_sched_alloc_graph(sched, graph)) return GGML_STATUS_ALLOC_FAILED; }
+    return ggml_backend_sched_compute_splits(sched);   // <-- 只认 sched->splits
+}
+```
+
+复用路径（`llama-context.cpp:1372`）**跳过** `alloc_graph` => `sched->is_alloc` 仍为 true => `graph_compute` 不会重新分配，
+直接 `compute_splits(sched)`，而 `sched->splits` 对应的是**上一次 `alloc_graph` 传进去的那张图**（`sched->graph` 是 sched 内部唯一的一份拷贝，`ggml-backend.cpp:1482-1492`）。
+
+**结论**：`gf_res_prev_active` 这个单指针是**承重的**，不是疏漏 —— 它保证「被复用的 res」就是「当前在 sched 里已分配的那张图」。
+若按路线 A 改成按槽索引，就会在「复用了槽 0 的 res、但 sched 里分配的是槽 1 的图」时，
+**用槽 1 的 splits 去算槽 0 的 tensor** => 结果错乱。**路线 A 作废，禁止实施。**
+
+### A1. 因此真正的修法必须让**两个槽各自保持已分配**
+可选：① 每个槽一份 sched（各自 gallocr/arena）；② 让 sched 支持多张常驻图（`is_alloc` 按图记录）。
+两者都要付出**双份 compute arena 显存**的代价 —— 而 target 的权重已占 7.3 GB/卡（16 GB 卡），风险高。
+⚠️ 这正是 AGENTS §4.20 记为「按批大小分槽的 arena 实测无效」的方向，**必须先解释清楚为什么上次无效**再投入。
+
 ### B. 消除交替本身（不碰复用机制）
 让 draft 的注入步也走 `n_outputs > 0` 的槽（注入本来就不需要 logits，属于浪费，但只要能复用就值），
 或把注入与块前向合成**一次** `llama_decode`。后者更彻底，但动 `common/speculative.cpp` 的调用结构。
