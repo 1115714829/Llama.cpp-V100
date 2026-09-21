@@ -747,6 +747,15 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
   （`blockIdx.z = partition_idx`、`start_token_idx = partition_idx * PARTITION_SIZE`）+ 归约 `:2728`；
   partition size 256/512/**1024（seq_len >= 32768）**（`flash_attn_v100/flash_attn_interface.py:19-20, 599-608`）。
 - D256 专项：`csrc/attention/sm70_v37/` + `cmake/patches/sm70_flash_attn_d256_{splitkv3,pipeline,k_pingpong,gqa_arch}.patch`。
+  - 四个补丁的**具体战术**（本地只读仓库实读）：
+    - `splitkv3`：给 dense decode 加 `sm70_d256_splitd_dense_splitkv3_fwd`，带 `partial_out/partial_max/partial_sum` => **显式 3 路 KV 切分**。
+    - `pipeline`：把 FA2 的 `HEADDIM_SWITCH` 全替换成**只编 D=256 causal prefill** 的窄路径
+      （`flash_fwd_d256_splitd_sm70.cu`、`flash_fwd_hdim256_causal_prefill_sm70.cu`；断言 `d==256 && causal && seqlen_q>=1024 && num_splits<=1`）=> **为单一形状极致特化**。
+    - `gqa_arch`：新增 `flash_fwd_d256_gqa_arch_sm70.cu`，编入 tile 常量 `QK_TB_M=128 QK_TB_N=512 QK_WARP_M=64 QK_WARP_N=128`、
+      `PV_TB_M=64 PV_TB_N=256 PV_WARP_M=32 PV_WARP_N=64`、`PREFIX_QK_FULL_STATS`、`PREFIX_QK_SKIP_APPLY` => GQA 专用的 D256 分块。
+    - `k_pingpong`：注释原文 "The second K stage is live only before P is materialized, so it may alias the beginning of the later P region"
+      => **用 smem 别名把 K 双缓冲塞进同样的共享内存**（`kKStageElements = 2240`）。
+  => 他们的路线 = **为 D256/GQA/causal 单一形状写专用内核 + 显式 split-KV(3) + smem ping-pong**，而不是通用模板调参。
 - 生产（`scripts/serve_qwen38_27b_nvfp4_v100.sh:81-86`）：
   `--attention-backend FLASH_ATTN_V100 --dtype half --kv-cache-dtype fp8_e4m3 --max-model-len 262144 --tensor-parallel-size 4 --block-size 2048`；
   权重 NVFP4，计算是 **fp16 HMMA**（`csrc/attention/sm70_v37/tail.cu:30-31`，`SM70_8x8x4_F32F16F16F32`）。
@@ -757,13 +766,82 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 - V100 无 INT8 张量核；MMQ 依赖 `VOLTA_MMA_AVAILABLE`（`mma.cuh:152/838`）的**模拟 int8 mma**。
 - 1cat 用 NVFP4 权重 + fp16 HMMA（marlin SM70：`csrc/quantization/marlin/sm70_marlin_*.cu{h}`，cutlass `default_mma_core_sm70.h`）。
 - 与实测吻合：32K prefill 我们 2170 t/s vs 1cat 公开 3567-4069 t/s（1.6-1.9x）。
-- **隔离实验（未做）**：单卡 `test-backend-ops perf -o MUL_MAT` 比 q8_0 与 f16 权重的 prefill 形状吞吐；或用 f16 GGUF 跑 32K prefill 对照。
+- **量化核算（本轮算出，把"假设"升级为"有量级支持"）**：
+  - 32K prefill：GEMM 2 x 27e9 x 32768 = **1.77 PFLOP**，attention 约 0.21 PFLOP（12%）=> 合计约 **1.98 PFLOP**。
+  - 实测 2170 t/s => 15.1 s => **131 TFLOPS / 3 卡 = 43.7 TFLOPS/卡**。
+  - V100 的 dp4a（INT8）峰值约 4 x FP32 = **62.8 TOPS/卡** => **我们已到自身天花板的约 70%**。
+  - 1cat 公开 32K/64K 3567-4069 t/s（4 卡）=> 约 **55-61 TFLOPS/卡**，与 **fp16 HMMA 峰值 125 TFLOPS 的 ~50% 效率**吻合。
+  => **prefill 的 ~1.65x 差距是"天花板差距"（int8 模拟 vs fp16 张量核），不是调参问题**；
+     要拿只能改用 fp16/低比特权重 + HMMA（1cat 的 marlin 路线），即换量化格式/自写 GEMM，属大改动。
+  - 隔离实验（仍未做）：单卡 `test-backend-ops perf -o MUL_MAT` 比 q8_0 与 f16 权重的 prefill 形状吞吐；或用 f16 GGUF 跑 32K prefill 对照。
 
 ### 16.8 本轮判据与下一步
 1. 长上下文 decode 的 **KV dtype x 深度曲线**（§16.9 正在跑）：若 f16 KV 在深上下文反超 q8_0 => **零代码可交付配置**（用户 256K 场景）。
 2. 若要动内核：把 TILE/MMA 的"整段 f16 反量化"改成按 tile 反量化（或 TILE 支持 q8_0 直读），即 1cat partition 路线的等价物；**属大改动，先问用户**。
+   - **补充实测（Round 40 源码核查）**：`fattn-vec.cuh:544-572` 只实例化 `cols_per_block = 1`（`Q->ne[1]==1`）与 `= 2`（其余），
+     => **VEC 只适合 M<=2**，无法直接接管 M=8；TILE 内核签名即 `const half2 * V_h2`（`fattn-tile.cuh:563, 858`）=> **必须 f16 V**。
+     => "让 TILE 直读 q8_0"**不是有界改动**（要在 TILE 的共享内存 staging 里加反量化，等于重写 V 通路）。
 3. 量化权重 prefill 天花板：用 f16 GGUF 做 32K prefill 隔离实验。
 4. push AR（信用/确认握手）仍是独立子项目，优先级低于 1 与 2。
+
+### 16.12 allreduce 延迟的本质：**主机介导、未被图捕获**（源码核实）
+
+- 源码：`ggml/src/ggml-backend-meta.cpp:2453` `backend_allreduce_success = backend_ctx->comm_allreduce(backend_ctx->comm_ctx, nodes.data());`
+  —— **元后端在 `graph_compute` 之间调用 allreduce**；CUDA 后端只是把它注册成接口函数（`ggml-cuda.cu:5995-5996`）。
+- => 每轮 138 次 AR **都不在 CUDA graph 内**：每次都是一次主机发起的独立操作（NCCL enqueue + 内核 + 依赖 gap），
+  而**下一段图依赖它的结果** => GPU 在这段时间**空转**（这正是 §16.11 里"12.1 + 13.1 = 24.9"能闭合的原因）。
+- => 与 1cat 的真正差别不是"NCCL vs push"，而是 **1cat 的整轮 fullgraph 让 AR 也进了图**（其 6.6-11 us 是 GPU 侧、无主机往返）；
+  我们的 push 原型之所以更慢（126-161 us）：**它在每次调用里加了主机侧 flag 轮询**，等于把主机往返放大。
+- **两条修法（都属结构性改动，需按 §2 走审批）**：
+  - **R1（设备侧、无主机往返的 AR）**：把 push/credit 机制全部做成设备端（生产者/消费者都在 GPU 上自旋），主机只发一次 launch。
+    难点：跨迭代的 slot 复用需要 credit/ack（上次失败根因），且必须有 3 卡确定性单测。
+  - **R2（把 AR 纳入图捕获）**：让 AR 边界不切断图（或让 CUDA 后端把 AR 作为图内节点）。这正是 goal 里的 P2（"跨设备整轮图捕获"，预期 -9 ms/轮）。
+- **判据（无论走哪条）**：in-situ `[AR] ar_us_avg` 从 68-95 us 降到 <=15 us，且 greedy sha256 不变、AL 不劣化。
+
+### 16.11 判决定论：普通解码 = 权重流 + 集合通信（两条独立测量互相印证）
+
+Round 42 实测（canonical 构建，`llama-bench -m Qwen3.8-27B-Q8_0 -d 8192 -n 64 -r 2 -sm tensor -ts 1/1/1 -fa on -ctk/-ctv q8_0`）：
+
+```
+tg64 @ d8192 = 40.19 +- 3.15 t/s   =>  24.9 ms/token（普通解码，M=1，无投机）
+```
+
+对照本会话独立算出的两个下限：
+| 成分 | 数值 | 来源 |
+|---|---:|---|
+| 权重流（9.02 GiB/卡 @ ~800 GB/s） | **12.1 ms** | 27.05 GiB Q8_0 / 3 卡（GGUF 实测参数） |
+| 138 次集合通信 x 94.9 us（无偏） | **13.1 ms** | GGML_CUDA_AR_TIMING + 关图对照臂 |
+| **合计** | **25.2 ms** | 实测 **24.9 ms**（误差 1%） |
+
+=> **结论 1**：普通解码已经**正好等于"权重流下限 + 集合通信"**，说明
+（a）权重流已接近硬件 roofline，没有"读得慢"的余地；
+（b）**target 步里约 40-50% 是 allreduce 延迟**，这正是 1cat（17.463 ms/轮、其自研 push 式设备 IPC allreduce 约 6.6-11 us）与我们（94.9 us）差 2.3x 的主因；
+（c）投机解码轮 57.6 ms = target 32-34 + draft 13 + selector 2.6 + 残差 6-8，而 target 32-34 = 12.1（权重）+ 13.1（AR）+ 其余（M=8 的额外激活与尾部）=> **账本闭合**。
+
+**推论（量化路线图，用于排优先级）**：
+| 改动 | 假设效果 | 每轮 ms | tg |
+|---|---|---:|---:|
+| 现状 | - | 57.6 | 96 |
+| AR 降到 10 us（1cat 式 push/设备 IPC） | -13.1 -> -1.4 ms | **~46** | ~121 |
+| 再 + draft 侧 13 -> 5 ms（融合/整轮图） | -8 ms | **~38** | ~146 |
+| 再 + M=8 前向本体（图捕获/调度残差） | -8 ms | **~30** | ~185 |
+
+=> **验收标准 1（>=180 t/s、约 20 ms/轮）在数学上要求三件事同时成立**（AR 重写 + draft 侧减半 + 图/调度残差消除），
+单靠任何一项都到不了；而 AR 重写是**唯一能一次拿 13 ms** 的一项。
+
+### 16.10 已落地的探针（Round 41，env 门控 + 默认行为不变）
+`ggml/src/ggml-cuda/fattn-common.cuh`（launch_fattn，非 stream-K 分支，插入点在 `blocks_num.y` 与 `dst_tmp.alloc` 之前）：
+```
+// The scan above keeps the split at one wave, so for long contexts each block still
+// walks a long serial KV loop. GGML_CUDA_FA_SPLIT_FLOOR raises the split to probe this.
+if (const char * env = getenv("GGML_CUDA_FA_SPLIT_FLOOR")) {
+    parallel_blocks = std::max(parallel_blocks, std::min(atoi(env), ntiles_KV));
+}
+```
+- 理由：上游把 `parallel_blocks` 限制在**一波**（wave 效率扫描，`fattn-common.cuh:1179-1199`），长上下文时每块仍串行走 300-680 个 KV tile；
+  提高切分度是"用并行度换每块串行长度"的直接探针（代价：combine 流量 `O(parallel_blocks x M x heads x D)` 与启动延迟）。
+- **默认零影响**（env 未设时行为与上游逐位相同）；用 `/root/fa-split-probe.sh` 在 `-d {32768,131072,262144}` 上扫 floor={0,64,256,1024}（NODROP 诊断口径）。
+- 若有效：改默认需重新过验收（**切分度会改变归约顺序 => greedy sha256 会变**，必须按 §16 的纪律冻结配置后重测）。
 
 ### 16.9 正在跑的实测（脚本 `/root/lc-sweep.sh`，日志 `/tmp/lc-sweep.log`）
 canonical 重建 + `llama-bench -sm tensor -ts 1/1/1 -fa 1 -p 0 -n 64 -r 2`，
