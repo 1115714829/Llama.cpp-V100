@@ -814,6 +814,23 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 | 图 rebuild 比例 | 178/367 = 48% | 179/357 = 50% | 24/294 = 8% |
 | alloc_us（含 prefill） | 4472 ms / 367 轮 | 4246 ms / 357 轮 | 2.44 ms/轮（纯解码） |
 
+## §18 A1 工作流（AR 结构性改造）已启动：设备侧 push AR 小样
+
+**工件**（2026-09-21，Round 46）：
+- 源码：`/root/ar_push_test.cu`（服务器）与 `.dsh/tmp/ar_push_test.cu`（本地，可复现）；
+  编译：`nvcc -O3 -arch=sm_70 -DUSE_NCCL -I$NCCL/include -o /root/ar_push_test /root/ar_push_test.cu -L$NCCL/lib -l:libnccl.so.2`
+  （NCCL 路径 = `/root/llm/ac922env/1cat-20260907/venv/lib/python3.11/site-packages/ac922_nccl_runtime`）。
+- 设计（针对上次失败的根因）：
+  1. **主机侧零轮询**：每次调用只发 1 个 kernel/卡（NCCL 路径是 3 次 set_device + group 调用）。**这是与上次 126 us 原型的关键差别**（上次在主机侧轮询 flag）。
+  2. **slot + epoch 方案**：SLOTS=8，每次调用的 slot = call % SLOTS，flag 写入对端并比较 `>= epoch`；
+     `pub_cnt[slot]` 单调累加、目标值 = use_count * gridDim（**不需要复位**）=> 天然避免跨迭代覆盖（上次的正确性根因）。
+  3. 固定求和顺序（w=0,1,2）=> 结果**逐位可复现**。
+  4. **自旋有上限**（`spin_cap = 1<<22`）+ 超时计数 `err`，超时会打印 "spin timeouts per rank" =>
+     **不会把 GPU 挂死**（实验代码必须的安全网）。
+- 测量口径：同一 harness 内并联 **NCCL 基线**（同样的 host-loop、同样的 event 口径），分别报
+  **host us/call** 与 **GPU 可见 us/call（rank0 的 ev0..ev1）**；三种规模：164 KB（在役尺寸）/ 1 MB / 10 MB。
+- **判据**：164 KB 下 1000 轮 **0 mismatch**、**spin timeout 0**、GPU 可见 **<=15 us**（NCCL 在役 68-95 us）。
+
 ### 17.1.1 反推纠正：`rebuild` 的增长来自 **prefill 分块**，不是解码轮退化
 
 用新数据算：`rebuild` 与 prefill 分块数**精确吻合**
