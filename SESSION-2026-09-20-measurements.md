@@ -934,6 +934,23 @@ ggml_build_forward_expand(gf,
 **三查**（error 行数为 0、有 `Built target` 行、二进制标记串非 0）。修好后：`BUILD3_RC=0`、`error lines: 0`、md5 `2c123419...`、**marker = 1** ✓。
 => 这次是 AGENTS §4.18 的"二进制标记串校验"救的场（若只看 BUILD_RC 就会把两个臂都当成有效测量）。
 
+### 18.5 A1 集成的第一次 A/B 判读（标量版）：**主机省了，GPU 亏了，净 -6.5%**
+
+| 臂 | 库 | env | prompt1 | prompt2 | prompt3 | 中位 tg | **ms/轮** | greedy sha256 |
+|---|---|---|---|---:|---:|---|---|---|
+| `aroff` | canonical `629dd1fb` | - | 98.70 / AL 5.55 | 80.11 / 4.22 | 114.71 / 6.38 | **98.70** | **56.2** | f3edac19... |
+| `aron` | 含 AR `2c123419` | DEVICE=1 | 89.80 / 5.38 | 74.19 / 4.26 | 111.38 / 6.67 | **89.80** | **59.9（+6.5%）** | 69207026... |
+
+- **设备侧 AR 确实生效**：`enqueue` 窗口 5.94 s / 294 轮 -> 4.56 s / 289 轮 = **-4.8 ms/轮**（主机侧变便宜 ✓✓，与 §18.2 小样一致）。
+  （`device-side push AllReduce enabled` 是 `GGML_LOG_INFO`，被服务日志级别过滤；`GGML_CUDA_AR_TIMING` 也没开 => 这次没有 `[AR]` 行，证据改用 `enqueue` 窗口 ✓。）
+- **但 GPU 侧亏得更多** => 净 **+6.5% 每轮**（更差）✗。原因（可归因）：
+  1. 我的 push 协议是"**向所有对端发布 + 本地求和**"，每卡流量约 `2 x nranks x n`，而 NCCL 走 ring（约 `2n`）=> 3 卡下我多搬约 3x 字节 ✗；
+  2. `GRID=8` 时每卡 8 次 flag 往返（原子写 + 自旋读）都在关键路径上 ✗。
+- greedy sha256 变了（69207026...）—— 归约顺序改变的正常结果（与 §18.3 的验收口径一致：本类改动走 AL 不劣化 + 同配置可复现）。
+- **下一步（不再盲目上机）**：先用独立小样 `/root/ar_push_test.cu`（无需加载模型，~1 分钟/次）扫
+  `GRID in {2,4,8}` x `向量宽度 in {scalar,float4}` x 传输协议（all-push vs 分段），
+  **只有在小样里稳定优于 NCCL（160 KB 下 GPU 时间 <= 0.7x NCCL）才再上 llama.cpp 端到端** ✓。
+
 ### 18.2 A1 小样结果（v2 协议：逐块 flag、无全局屏障、slot+epoch）
 
 命令：`LD_LIBRARY_PATH=$NCCL/lib CUDA_VISIBLE_DEVICES=0,1,2 /root/ar_push_test <n> <iters>`
