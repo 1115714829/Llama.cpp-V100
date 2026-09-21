@@ -1,5 +1,28 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
-> ## ⏱ 5 分钟接手块（2026-09-21 会话末定格）
+> ## ★ 最新定格（2026-09-21 Round 143 - 读这一段就够）
+>
+> **目标（用户重申）**：tg **>= 150 T/s**（= AL 5.55 下 **ms/轮 <= 37.0**，现 55.5）；180 / ~20 ms 是上界；对标 1cat 17.463 ms/轮。
+> **入口是 `PLAN-GRAPH.md`**（§1 主图 / §3 七个外部项目解读矩阵 / §3.4 使能链）；**账在 `PLAN-to-180ts.md`**（本轮已按 150 重写）。
+>
+> **本轮新事实**
+> 1. **N0 定论（R142）**：target decode 后强制同步只多花 **0.4-0.8 ms/轮**，两臂 `draft_n`/`draft_acc` 逐位相同
+>    ⇒ target 步**本就同步**、无整轮重叠 ⇒ **可加性模型成立**（轮时 ≈ 主机 + GPU 串行）⇒ **省主机时间是有效的**。
+>    R1 的『省 4.8 ms 主机但轮时不动』= 代价从主机搬到了 GPU。证据 `N0-VERDICT-2026-09-21.md`。
+> 2. **N3（D256 FA 常量 A/B）**：`libdir-fa-base` pp32768 = **2163.26 t/s** vs `libdir-fa-v2` = **2135.90 / 2137.86**（两轮）
+>    ⇒ jusko 的 D256 常量在我们这里**慢约 1.3%**（待 base 第二轮复核后定性）。1cat 公开 32K/64K prefill = 3567-4069 ⇒ **预填充差 1.65-1.88x**。
+> 3. **7 个参考项目解读矩阵完成**（57 条提取物 + 证据等级 A/B/C + 『该抄哪个文件:行』反查表）见 `PLAN-GRAPH.md` §3。
+> 4. **使能链 §3.4**（用户要求『A 现在看着亏但 B 的基础是 A』）：E1 push AR -> N11、E2 GPU selector -> N11、E3 metadata 缓存 -> N11、
+>    E4 降 n_max/T=4 -> jusko 全部 T=4 栈、E5 N1 -> N8/LOWBIT/N3、E6 f16 KV -> K1 改写、E7 MMVQ x4 -> LOWBIT、E8 主机循环 -> K4。
+> 5. **新增节点**：N12（MMVQ x4）、N13（KV dtype A/B）、**N14**（按 context 自适应 n_max，零代码）、**T4**（用 AL 换 T=4 内核生态）。
+>
+> **头号判断（`PLAN-to-180ts.md` §2）**：到 150 需要 -18.5 ms；**只要 N6（主机 metadata 缓存，-12~-16）与 N1（q8_0 KV 张量核，-3~-13）各自落地一半就到了**。
+> **先手是 Z1-Z5 零代码量测**（ctx 斜率 / FA kernel 只读诊断 / n_max 扫描 / KV dtype / split 模式<已完成>），必须排在结构性改动之前。
+>
+> **状态**：`llama.cpp` HEAD `8cc57365a`（7 个自建 commit，工作树干净）；`study-docs` 见 `git log`（含 §3 矩阵、N0 判决、本计划）。
+>
+> ---
+>
+> ## ⏱ 5 分钟接手块（2026-09-21 会话末定格 - 以下为 Round 98 时的定格，部分已被上面覆盖）
 >
 > **状态（2026-09-21 Round 98 更正）**：本地 `llama.cpp` **停在 `c2d716519` 但工作树是脏的**（A2 索引式写入补丁 + `GGML_RS_INDEX_WRITE` 门控，未提交，gate 默认关）；
 > **服务器源码树不是 canonical**：`/root/llm/test/v100-opt/llama.cpp` 里也带着同一个 A2 补丁（`grep -c GGML_RS_INDEX_WRITE src/llama-graph.cpp` = 2），

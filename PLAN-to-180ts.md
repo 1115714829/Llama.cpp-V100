@@ -1,91 +1,146 @@
-# PLAN：把 DFlash2 每轮 57.6 ms 收到 ~20 ms（= tg 96 -> 180+）
+# PLAN：把每轮 55.5 ms 收到 <= 37.0 ms（tg 99.97 -> 150+，上界 180）
 
-> 依据：2026-09-21 DSH 会话全部实机实测（`SESSION-2026-09-20-measurements.md` §16-§20、`HANDOFF.md` 顶部）。
-> 所有数字都可复核；已证伪项已剔除（见文末"不做清单"）。
+> **本文件原名 `PLAN-to-180ts.md`，Round 143 按用户 2026-09-21 重申的硬指标重写**（tg 至少 150 T/s；180 是上界）。
+> 上一版写于项目早期（57.6 ms/轮、tg 96），其中 P-B 的机制**已被校正**，本轮就地改；P-A/P-C/P-D 的状态也一并更新。
+> **图是入口**：`PLAN-GRAPH.md` §1（进度与因果）、§3（7 个外部项目解读矩阵）、§3.4（使能链）；本文件是**账**。
 
-## 1. 当前账本（8K 投机标尺，AL 5.55，56.6 ms/轮，四次实测离散 <0.5%）
+## 0. 目标与判据（写清楚）
 
-| 成分 | ms/轮 | 依据 | 可动性 |
-|---|---:|---|---|
-| target 权重流（M=8） | 12.1 | 9.02 GiB/卡 @ ~800 GB/s = roofline | 已到顶 |
-| **AR（138 次，事件计时 53.0 us）** | **7.3** | `[AR] ar_us_avg=53.0` | **可降到 ~2.5（R2）** |
-| M=8 相对 M=1 的增量（激活/GDN） | ~6.5 | pp8 30.8 - pp1 24.3 ms | 需内核/融合工作 |
-| M=1 其余固定成本 | ~5.5 | 普通解码 24.9 - 12.1 - 7.3 | 部分可动 |
-| 图 alloc/复用（target） | ~2.2 | `[RT] alloc_us` | 分桶后可降 |
-| **draft 侧（注入 + 块前向）** | **13.6** | `draft_decode=13.61`；权重仅 1.14 GB => 非带宽受限 | **可降到 ~5（结构性）** |
-| CPU selector | 2.7 | 已并行化（8 线程） | 已优化 |
-| **未归因余量** | **~6.7** | 差额；已定位到采样器/接受记账/服务器簿记 | 待仪表化 |
+| | tg | ms/轮（AL 5.55） | 相对现在 |
+|---|---:|---:|---|
+| 现在（权威口径，NPRED=512 + drop_caches） | 99.97 / 99.18（离散 0.8%） | **55.5** | - |
+| **硬指标（用户重申）** | **>= 150** | **<= 37.0** | **需再 -33%** |
+| 原验收（上界） | 180 | <= 30.8 | 需 -44% |
+| 对标 1cat | 221-263 | 17.463 | - |
 
-**目标 ~20 ms 需要四项同时成立**：AR 7.3->2.5、draft 13.6->5、余量 6.7->2、以及 M8 增量/alloc 各削一部分。
+- 权威口径 = `CARDS=0,1,2 SPLIT=tensor L=/root/libdir-instr P2P=1 NPRED=512` + `drop_caches`；正确性门 = greedy sha256 `f3edac19...`。
+- **tg = AL ÷ ms/轮** ⇒ 报数必须两个并列（AGENTS §4.4）。
+- 第二大缺口在**预填充**：32K pp = **2163 t/s**（Round 143 实测），1cat 公开 32K/64K **3567-4069** ⇒ 差 1.65-1.88x。
 
-## 2. 四项结构性工作（按"收益/风险"排序）
+## 1. 当前账本（三套互相独立的分解，**不可相加**）
 
-### P-A：AR 入图捕获（R2）—— 唯一能一次拿约 4.8 ms/轮的一项
-- **现状**：AR 由 meta 后端在 `graph_compute` 之间**主机侧**调用，不在 CUDA 图内（`ggml-backend-meta.cpp:2453`）；
-  每轮 139 段 x 3 后端 = 417 次图提交 + 138 次 AR。事件计时 53.0 us/次。
-- **1cat 的做法**：CUDA-IPC push AR，**只在 `cudaStreamCaptureStatusActive` 时启动**（`csrc/custom_all_reduce.cuh:1944-1955`），
-  NSYS 图节点桶里是 **18 us/次**（128 节点 / 2.313 ms，在 1257 节点 target 图内）。
-- **为什么必须入图**：本会话已证明"主机侧更便宜"换不来轮时（R1 证伪：enqueue 省 4.8 ms/轮，轮时零改善）=> 只有把 AR 变成图内节点才能省 GPU 可见时间。
-- **改法（两条）**：① 让 meta 后端不在 AR 处切图（把 AR 表达为图节点/自定义 op）；② 或让 CUDA 后端把 AR 作为图内节点捕获。
-  两条都要动上游架构级代码 => **需批准**。
-- **验收**：`[AR] ar_us_avg` <= 25 us、每轮 <= 50 ms、greedy sha256（同配置可复现）、AL 不劣化。
+### 1.1 可加性分解（4 臂 layer A/B 实测，Round 136；Round 142 独立验证）
 
-### P-B：draft 侧 13.6 ms/轮 —— **机制已校正：逐内核开销，不是图管理**（2026-09-21 校正）
-- **校正依据**：draft 的 `[RT]` 实测 `alloc_us = 1044 ms / 556 轮 = 1.88 ms/轮` ✗（远小于 12 ms 的旧说法）；
-  权重流也只有 1.14 GB / ~800 GB/s = **1.4 ms** ✗ => 两者都解释不了 13.6 ms。
-- => 只能是**逐内核启动/固定开销**：draft 5 层（5120 维、FFN 17408）× 每层数十个小 kernel ≈ 500 个 kernel/轮，
-  按本机实测的 10-25 us/kernel 计 => **约 5-12 ms** ✓ 与 13.6 ms 吻合。
-- => **抓手从"整轮单图"改为"减少 draft 的 kernel 数"**（算子融合：GDN/激活/归一化/采样头的融合），
-  整轮单图只解决其中的"图提交"部分（417 段启动间隙属于 target 侧）。
-- 验收不变：`spec timing: draft_decode` <= 6 ms、每轮 <= 50 ms、AL 不劣化、sha256 逐位一致。
+```
+轮时 55.1 = 主机 20.6 + GPU 串行 34.5      （离散 0.06% / 0.23%）
+```
+- **Round 142（N0）已判定这套模型成立**：在 target decode 后强制插一次同步只多花 **0.4-0.8 ms/轮**（0.65-1.5%），
+  两臂 `draft_n`/`draft_acc` 逐位相同 ⇒ **target 步本来就已同步，不存在『主机跑在 GPU 前面一整轮』的重叠**。
+  ⇒ **省下来的主机时间是有效的，不会被 GPU 掩盖**（这是 N6 值得做的直接依据）。
+  ⇒ R1『省 4.8 ms 主机但轮时不动』的正解是**代价从主机搬到了 GPU**，不是重叠（`N0-VERDICT-2026-09-21.md`）。
 
-### P-B'（旧表述，保留备查）：draft 侧整轮单图 / 静态形状
-- **现状**：draft 每轮 `reuse=0 / rebuild=556`（100% 重建）；每轮两个不同形状的图（注入 + 块前向）交替，
-  而 `ggml_backend_sched` 只有单份 splits/graph => 每轮必然 reset+重切+重分配（`alloc_splits` ~5 ms/次）。
-- **已排除的局部补丁**：`GGML_SCHED_SPLIT_CACHE`、按批大小分槽的 arena（均实测无效）。
-- **改法**：把 draft 的两个图合并为一次提交（1cat 的"注入即投影"路线）或让 draft 上下文有独立 scheduler；
-  属新子系统 => **需批准**。
-- **验收**：draft 侧 `rebuild` 显著下降、`spec timing: draft_decode` <= 6 ms、每轮 <= 50 ms、AL 不劣化。
+### 1.2 meta 主机循环分解（`GGML_META_HOST_TIMING` 实测）
 
-### P-C：mask/KV 宽度分桶 —— TTFT 专项（prefill 的约 20%）
-- **现状**：`llama-graph.cpp:48-65` `can_reuse_kq_mask` 要求 `kq_mask->ne[0] == n_kv`，K/V 也是按 n_kv 切出的视图
-  => 每个 prefill 块形状都变 => 每块重建图。64K 时 `alloc_us` 合计 **8.0 s / 39.25 s prefill = 约 20%**（312 块）。
-- **改法**：mask 与 K/V 视图按桶对齐（如 512/1024），桶内未用区间填 `-inf`；**会改变 attention 读数范围** => 必须重验 sha256/AL/perplexity。
-- **验收**：64K/256K prefill 时间下降 >=10%、`rebuild` 比例大幅下降、greedy sha256 逐位一致（若纯 padding 则应一致）。
+```
+29.4 ms/轮（53%）= dev 19.7 + ar 6.1 + prologue 3.3
+其中 CUDA 图调用 13.97% 走 direct，吃掉 dev 的 59% = 约 11.6 ms/轮
+```
+- `[META]` 的 statics 是**函数级**的 ⇒ target 与 draft 的 meta 后端**共享计数**，这一套不能按后端拆。
+- 抖动主体是**形状 ne/nb**（3-4 倍于指针），来源是 **GDN/delta-net 递归状态视图**（`cache_r_l*`、`conv_input`、`k_conv`、`Qcur_full`）。
 
-### P-D：长上下文 decode 的内核吞吐（256K：34 -> ?）
-- **现状**：256K decode 每 token 54 ms，而 KV 带宽 roofline 约 5.7 ms（9.5x）；**A4 已证伪"并行度不足"**
-  （更深切分单调变差 26.85 -> 22.43 t/s）=> 是 **VEC/TILE 内核在长 KV 下的有效带宽只有约 105 GB/s**。
-- **改法**：写 D256/GQA 专用长上下文 attention 内核（1cat 的 `FLASH_ATTN_V100` 路线：partition split-KV + 向量化 KV 加载 + 原生量化读数；
-  其 `cmake/patches/sm70_flash_attn_d256_*.patch` 与 `csrc/attention/sm70_v37/` 是现成参考）=> 新内核，**需批准**。
-- **验收**：256K decode >= 60 t/s（先 2x），greedy sha256 逐位一致（纯 kernel 重写应保持一致）、长上下文标尺复测。
+### 1.3 轮内阶段分解（`LLAMA_ROUND_TIMING` + `LLAMA_SPEC_TIMING` 实测）
 
-## 2.5 未探索的"零代码"实验清单（2026-09-21 登记，按价值排序）
+| 成分 | ms/轮 | 依据 |
+|---|---:|---|
+| target 整步 `decode+sync` | **33.0**（32.3-34.3） | `[RT]`；其中 **enqueue 主机提交 20.09**（N0 实测 5,907,654 us / 294 轮） |
+| ↳ 剩余 = 真正等 GPU 的尾部 | ~13 | 33.0 - 20.09；N0 证明它**不是**异步窗口 |
+| draft 前向 `draft_decode` | **13.8-14.4** | 权重只有 1.14 GB ⇒ 非带宽受限（见 §4 P-B） |
+| CPU selector | **4.3** | 已并行化 8 线程（23.45 -> 4.3） |
+| 未归因余量 | **~4.4** | 55.5 - 33.0 - 13.8 - 4.3 |
 
-| 编号 | 实验 | 为什么可能有用 | 状态 |
+> ⚠️ 旧文里的『CPU selector 2.7』与 AGENTS 的『4.3』冲突，**以 4.3 为准**（26.8% 那个数就是按 4.3 算的）。
+> ⚠️ `enqueue_us` **不是 GPU 时间**：真正的同步在 `llama-context.cpp:1376`，条件 `pipeline_parallel` 要求 `split_mode==LAYER && !has_tensor_overrides()`，
+> 而 harness **永远传 `--tensor-split`** ⇒ 恒假。N0 用强制同步证明了这个 20.09 ms 是**真实主机工作**，不是异步窗口。
+
+## 2. ★ 到 150 的账：谁出多少毫秒
+
+需要 **-18.5 ms**（55.5 -> 37.0）。下表每一项都标了**依据等级**；标『推算』的必须在动手前先用 §5 的 Z 项量掉。
+
+| 项 | 现在 | 预计可省 | 依据等级 | 说明 |
+|---|---|---:|---|---|
+| **N6 主机 metadata 缓存 + 状态指纹失效** | meta 主机循环 29.4（dev 19.7，direct 吃掉 59% = 11.6） | **-12 ~ -16** | 分解**实测** + 外部 A 级（v100-skinny 稳态 **75/97** 字段逐字节不变，失效条件正是 GDN 递归状态）；**可省比例是推算** | 直接打 53% 那笔账。三分类处理：内容变但形状/地址不变 -> 预分配 + 原地改写；形状真变 -> 用**状态指纹在输入数据里表达**，不进图 key；真需要进 key 的才重建 |
+| **N1 q8_0 KV 张量核注意力** | TILE 每轮把**整条** KV 反量化成 f16 | **-3 ~ -13** | 算术（8K 下 1.36 GB/轮：读 q8 0.29 + 写 f16 0.54 + 读 f16 0.54 GB）+ **有效带宽待实测** | 外部 A 级：jusko `fattn-q8-volta.cuh` 336 行，101k 2.674->1.419 / 260k 6.879->3.363 ms，TG +32.19%，SHA 一致。**必须先做 Z1 拿到 KV 斜率** |
+| **N7 selector 上 GPU** | 4.3 | **-3.8** | 4.3 **实测**；GPU 版收益按 ninfer 契约推算 | 约 80 行 kernel + K/B 契约现成；**RNG 必须换 counter-based**（否则图重放会漂） |
+| **N5 RMS_NORM + SCALE 融合** | 约 480 次多余 launch | **-1.5 ~ -2.4** | 推算（launch 成本 3-5 us 未实测） | 外部 A 级（jusko 自述 *removes 480 extra launches*）；host-bound 下纯赚 |
+| **N12 MMVQ x4 权重解码外提** | 权重流 12.1 中的解码部分 | **-0.5 ~ -2** | 推算（弱） | jusko `mmvq.cu:562-609`；同时是 LOWBIT 的前置（E7） |
+| **P-B draft 算子融合**（约 500 kernel/轮 -> <=200） | draft 13.8 | **-5 ~ -8** | 机制已校正（见 §4 P-B）；按 10-25 us/kernel 推算 | **不是图管理**：draft `alloc_us` 实测只有 **1.88 ms/轮**，权重流 1.4 ms ⇒ 13.8 ms 里绝大部分是**逐内核启动/固定开销** |
+| **合计** | | **-26 ~ -45** | | |
+
+### 结论（本计划的头号判断）
+
+```
+只需要 N6 与 N1 各自落地一半 —— 就够到 37.0 ms/轮 = tg 150。
+180 需要 N6 基本全中 + N1 全中 + P-B 落地，且余量 4.4 ms 也要削一半。
+```
+
+**不叠加声明**（防止把账算重）：
+- **N6 与 N11 是同一笔钱**（整轮单图是 N6 的结构性版本）。先按 N6 的外科式做法拿，拿不动再上 N11。
+- **P-B 与 N6 部分重叠**：draft 的 kernel 启动开销也可能被 meta 主机循环计数。
+- **E1-E3 说明 N11 被三条链同时使能**（push AR / GPU selector / metadata 缓存），所以 N11 排在 N6、N7 之后。
+
+## 3. 关键路径与前置（引用 §3.4 使能链）
+
+```
+主路径 1：N6（主机 metadata 缓存）--> K4 才有意义；N6 拿不动 --> N11（整轮单图）
+          而 N11 需要：E1 图兼容 AR（X3 重审）+ E2 GPU selector（N7）+ E3 状态指纹（N6 的产物）
+主路径 2：N1（q8 KV 张量核）--> N8 GQA read-once / N3 在 decode 上生效 / K1 改写 / T4 与 LOWBIT 的可行性判决
+          旁路 T4：降 n_max 到 3 直接复用 jusko 全部 T=4 栈（用 AL 换内核生态）
+先手：Z1-Z5（零代码/低成本量测）必须排在结构性改动之前 —— 它们把『推算』变成『实测上限』
+```
+
+## 4. 四项结构性工作（就地更新状态）
+
+### P-A：AR 入图 —— **状态降级：不再单独作为一项**
+- 上一版把『AR 7.3 ms/轮 -> 2.5』当唯一一次能拿 4.8 ms 的项。**R1 已证伪『省主机时间』这条路径**，N0 又证明无重叠。
+- ⇒ AR 的价值**并入 N11/E1**：它的意义是『**让整轮能进一张图**』（1cat 图内 AR 18 us，且其 push AR 与 graph 捕获有交互），
+  而不是自己省毫秒。**只把 AR 挪进图而不合并切图边界 = 复现 R1 的零收益。**
+- 参考：每轮 139 子图 / 138 次 AR / **417 次 graph_compute**，每次 AR 都是隐式跨设备栅栏。
+
+### P-B：draft 13.8 ms/轮 —— **机制已校正：逐内核开销，不是图管理**
+- 校正依据（实测）：draft `alloc_us` = 1044 ms / 556 轮 = **1.88 ms/轮**；权重流 1.14 GB / ~800 GB/s = **1.4 ms** ⇒ 两者都解释不了 13.8 ms。
+- ⇒ 只能是**逐内核启动/固定开销**：5 层（5120 维、FFN 17408）× 每层数十个小 kernel ≈ **500 kernel/轮**，按 10-25 us/kernel 计 => **5-12 ms** ✓ 吻合。
+- ⇒ **抓手是算子融合（减少 kernel 数），不是整轮单图**；整轮单图只解决『图提交』那部分，且对 draft 侧是 1.88 ms 量级。
+- ⚠️ 外部对照：1cat 的 draft 是 **3.32-3.76 ms**（约 4x 差距），且它**有独立的一批图**（`dflash/cudagraph.py:85-133`）。
+- 验收：`spec timing: draft_decode` <= 8 ms（第一步）-> <= 6 ms；AL 不劣化；sha256 逐位一致。
+
+### P-C：mask/KV 宽度分桶 —— TTFT 专项（prefill 的约 20%），**未动**
+- `llama-graph.cpp:48-65` `can_reuse_kq_mask` 要求 `kq_mask->ne[0] == n_kv`，K/V 也是按 n_kv 切出的视图 ⇒ 每个 prefill 块形状都变 ⇒ 每块重建图。
+- 实测：64K 时 `alloc_us` 合计 **8.0 s / 39.25 s prefill = 约 20%**（312 块）。
+- 改法：mask 与 K/V 视图按桶对齐（512/1024），桶内填 `-inf`；**会改变 attention 读数范围 ⇒ 必须重验 sha256/AL/perplexity**。
+- **与 N9 的关系**：N9（尾块 split-KV，外部实测 9.45x）打的是**算子时间**，P-C 打的是**建图时间**，两者可并行推进但不叠加。
+
+### P-D：长上下文 decode 内核 —— **已被 N1/N8 接管**
+- 现状：256K decode 34 t/s（53.0 ms/token），有效 KV 带宽约 **105 GB/s** vs roofline 800。
+- ⚠️ 口径更正（GAP §7.3 第 7 条）：**105 GB/s 可能是『冗余流量』而不是『低效』** —— 若同组 6 个 Q 头各读一遍（`fattn-vec.cuh:106-111`），真实 DRAM 流量是 **105 x (2~6) = 210-630 GB/s**，已贴着 roofline。
+  ⇒ **先做 Z1（真实流量/斜率），再决定要不要重写内核**（原 P-D 的『直接写新内核』是被 A4 误导的结论）。
+- A4（更深 KV 切分）已证伪，且 sglang 给了**外部解释**：满 8K chunk 时 splits 2/3/4/5 全部慢于 dense（SG4）。
+
+## 5. 先手：零代码 / 低成本量测（**必须排在结构性改动之前**）
+
+| # | 实验 | 判据 | 接到 |
 |---|---|---|---|
-| Z1 | `--spec-draft-n-max ∈ {3,5,7}` | 同时改变 verify 批大小（M=n+1）与 AL => tg 的净效应未知 | **已在跑**（`/root/nmax.sh` -> `/tmp/nmax.log`） |
-| Z2 | **当前库下的 8K TP 重扫**（TP2/TP3/TP4） | 现有 TP 结论来自 **NCCL+P2P 之前**的旧会话；AR 实现换过后最优 TP 可能移动 | **已排队**（`/root/tpsweep.sh` -> `/tmp/tpsweep.log`） |
-| Z3 | `--flash-attn off` @8K/32K | M=2..8 走 TILE 会**把整段 KV 反量化成 f16**；非 FA 路径直读 q8_0（8K 时 KQ 物化仅几 MB） | 待做：需先给 harness 加 FA 开关（两个现有 harness 都把 `--flash-attn on` 写死） |
-| Z4 | **混合 KV**：`-ctk q8_0 -ctv f16`（及反向） | TILE 只转换需要 f16 的那一侧 => 可能省一半转换流量，同时保留一半压缩 | 待做：同上需参数化 harness |
-| Z5 | `--spec-draft-n-min` / selector top-k 微调 | 二线旋钮，预期 <2% | 待做（低优先） |
+| **Z1** | **ctx 扫描**：8K/32K/128K 同 build 测 **decode ms/轮 的斜率**（NODROP 诊断口径即可；含 DFlash2 与 no-spec 两臂） | 每 token 的 KV 边际成本 -> 把 N1 的收益从推算变实测上限；同时判 K2（低效 vs 冗余） | **N1、K2、P-D** |
+| **Z2** | **只读诊断**：在 `ggml_cuda_get_best_fattn_kernel` 打印 `D==256 && Q->ne[1]>1` 时选中的 kernel 与 `K->ne[1]` | 确认 8-token verify 确实走 TILE + 每次调用整条 KV 反量化 | **N1、N2** |
+| **Z3** | **n_max 扫描**：3 / 5 / 7 x（8K, 128K），3 prompt + seed 42 | AL 与 ms/轮 **同时**报；外部 A 级证据说 k=3 在 65k 比 no-spec 还快 16.5%（SK6） | **N14、T4、K3** |
+| **Z4** | **KV dtype**：f16 vs q8_0 x（32K, 128K） | 1cat 自己的验收表说长上下文 FP16 全胜（128K PP +61% / 256K dec +17%），但那可能是**反量化的钱**（E6） | **N13、K1** |
+| **Z5** | split 模式：layer vs tensor | **已完成**：layer 慢 40%（77.0 vs 55.1 ms/轮）⇒ 保留 tensor（X1） | - |
 
-=> 建议下一会话先做 **Z3/Z4**（各约 2 臂、零代码改动），因为它们直接命中"每轮 + 长上下文"的转换开销。
+## 6. 不做清单（已证伪，勿重试）
 
-## 3. 不需要批准、可立即做的两项（低风险）
+```
+layer split（我们实测慢 40%）        KV 压缩（KV 仅占每轮流量约 1%，V100 上 -6~-22%）
+A4 更深 FA KV 切分（sglang 解释了负结果）  MoE（模型稠密）        NCCL 调参（默认最好）
+VEC 接管 M=8（-31%）               --spec-draft-device（output.weight 在 Meta() 缓冲，架构封死）
+VLLM_SM70_USE_BREAKABLE_CUDAGRAPH（-13~-29%）  AR 的 us 级微优化      并发测量
+TP2/TP4/TP6（tensor 模式内）       多形状 decode graph 缓存（上限 2%）  CPU->GPU 采样迁移（上限 7%）
+```
 
-1. **6.7 ms 未归因余量仪表化**（已定位区间：采样器、投机接受/校验记账、服务器每轮簿记）：
-   各加一个 `LLAMA_SPEC_TIMING` 门控计时即可定量；若确认为软件开销 => 直接优化，无需架构改动。
-2. **调试探针规整**：树里 7 处 `[RT]` `fprintf` 收拢为统一的 env 门控探针（代码卫生 + 交接友好）。
+## 7. 验收与纪律（每次报数都要过）
 
-## 4. 明确不做（已证伪，勿重试）
-
-MoE 方向（模型稠密）｜NCCL 调参｜**设备侧 push AR 的"省主机"路线**（R1，轮时无收益）｜
-**递归状态索引式写入**（A2，逐位中性但 prefill 真因是 mask/KV 宽度）｜**更深的 FA KV 切分**（A4，单调变差）｜
-让 VEC 接管 M=8｜`VLLM_SM70_USE_BREAKABLE_CUDAGRAPH`｜AR 的 us 级微优化｜并发测量（会污染结论）。
-
-## 5. 复现与状态
-
-- 正式数字：`CARDS=0,1,2 SPLIT=tensor L=/root/libdir-instr P2P=1 NPRED=512 bash /root/p60-ab-harness.sh`（带 drop_caches）。
-- 长上下文标尺：`/root/lc-spec.sh`（3 prompt、固定 seed、报 tg/AL/中位数）；深度/ dtype 扫描：`/root/lc-sweep.sh`。
-- 代码状态：`llama.cpp` 干净 at `c2d716519`；实验补丁在 `patches/0001..0006`；判决与预算见 `SESSION` §16-§20 与 `HANDOFF` 顶部。
+```
+1) 同源 A/B：同一 build dir、同一套 CMake 参数；四库 md5（libggml-cuda / libggml-base / libllama / libllama-common）+ 二进制标记串；
+2) 每配置 >=2 臂报离散度；正式数字带 drop_caches；测量独占机器（AGENTS §4.24）；每臂不同 PORT + 端口守卫；
+3) 报数同时给 AL 与 ms/轮；>=3 prompt + 固定 seed；权威口径 NPRED=512；指标读 /root/timings.py 不 grep 日志；
+4) 正确性门：greedy sha256 逐位一致（当前 f3edac19...）；归约类改动加 perplexity 相对变化 <=0.1%；
+5) 每完成一件事 -> 回 PLAN-GRAPH 复读接线（AGENTS §0）。
+```
