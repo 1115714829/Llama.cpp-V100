@@ -1491,6 +1491,23 @@ ggml-backend.cpp:942: pre-allocated tensor (output.weight) in a buffer (Meta()) 
 - `enqueue/轮`：TP3 20.3 ms vs TP2 15.9 ms（TP3 多 4.4 ms），但 TP3 总轮时仍少 2.2 ms => **AR/提交成本不是每轮的主导项**，
   省下的权重流（每卡 1/3 vs 1/2）才是；这也解释了为什么加到 4/6 卡反而更差（§25.2）。
 
+#### 25.7 ★ 新发现：**draft 上下文的图从来没有被复用**（`reuse=0 rebuild=556`）
+`[RT] perf` 每个上下文都打印一次，之前只看最后一行（target），漏掉了 **draft 那一行**。NPRED=512 官方口径下（`/tmp/p60-tp3a-server.log`）：
+
+| 上下文 | rounds | reuse | rebuild | build_us | alloc_us | setin_us | enqueue_us |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| target `Qwen3.8-27B` | 294 | **270** | 24 | 43 208 | 648 186 | 9 890 | 5 975 508 |
+| **draft** `Qwen3.8-27B-DFlash2` | 556 | **0** | **556** | 71 007 | **1 042 602** | 21 837 | 3 118 019 |
+
+- **draft 一次都没有复用图**（556 次调用 = 278 轮 x 2 次 llama_decode：注入 + 块前向，全部 rebuild）；target 复用率 92%。
+- **draft 的 `alloc_us` 总量是 target 的 1.6 倍**（1.043 s vs 0.648 s）——而 draft 只有 5 层 / 1.14 GB，target 是 65 层 / 29 GB。纯病态。
+  摊到每轮：alloc 约 **1.9 ms**、build 约 **0.13 ms**。
+- `draft_decode`（`llama_decode(ctx_dft)` 墙钟）13.60 ms/轮；其中主机侧合计 7.65 ms/轮，其余约 6 ms 是等 GPU。
+- **这直接改写 P-B 的做法**：不是「融合 draft 算子」，而是**让 draft 的图能复用**（或走静态形状）。
+  target 在「注入(N) / 块(8)」交替下能复用 92%，说明机制上做得到；draft 为什么 0% 必须先定论。
+- 留档 target 的逐步值：`[RT] target decode+sync` = 48.8 / 33.7 / 35.6 / 37.3 / 32.3 / 29.4 / 43.7 / 41.6 / 32.3 ms/轮（前几段含热身，稳定段 **29-37 ms/轮**）。
+- 纪律补充：判定图复用**必须同时看两行 `[RT] perf`**（`grep -a -h "RT. perf" <log>` 全取，不要 `tail -1`）。
+
 
 
 
