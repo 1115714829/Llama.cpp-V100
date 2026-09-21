@@ -123,6 +123,7 @@ flowchart TD
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
     N12["N12 MMVQ x4 权重解码外提（jusko）"]:::todo
     N14["N14 按 context 自适应 n_max<br/>SK6: k=3@65k 比 no-spec 还快 16.5%<br/>零代码, 先测 256K 上 n_max=7 是否反而更差"]:::next
+    Z["★ 先手量测 Z1-Z5（零代码/低成本, 新的一类对象）<br/>Z1 ctx 斜率=正在跑 / Z2 FA kernel 诊断=码已写待编(a8fb6542f)<br/>Z3 n_max 扫描 / Z4 KV dtype / Z5 已完成(layer 慢 40%)"]:::run
   end
   N0 -->|实测支撑| ADD
   N0 -->|裁决: 非重叠, 而是代价从主机搬到 GPU| X3
@@ -174,6 +175,8 @@ flowchart TD
   SK6 -.-> N14
   N14 --> G
   N14 -.-> K3
+  Z -->|把 N1/N6 的推算变成实测上限| N1
+  Z -->|先量再改, 不许跳步| G
   REFS["★ 外部项目解读矩阵（7 个项目 / 57 条提取）<br/>见 §3 - 含该抄谁的哪个文件反查表"]:::ref
   REFS --> N1
   REFS --> N6

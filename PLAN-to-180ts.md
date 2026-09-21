@@ -125,6 +125,9 @@
 | **Z4** | **KV dtype**：f16 vs q8_0 x（32K, 128K） | 1cat 自己的验收表说长上下文 FP16 全胜（128K PP +61% / 256K dec +17%），但那可能是**反量化的钱**（E6） | **N13、K1** |
 | **Z5** | split 模式：layer vs tensor | **已完成**：layer 慢 40%（77.0 vs 55.1 ms/轮）⇒ 保留 tensor（X1） | - |
 
+**状态（Round 145）**：Z5 已完成；**Z1 正在跑**（`/root/z1-harness.sh` 的 CTX 旋钮，8K/32K/128K 无投机臂，NPRED=128 诊断口径，等正确性门结束再上）；
+**Z2 探针已写进代码并提交**（`a8fb6542f`：`GGML_CUDA_FA_KERNEL_DEBUG`，打印选中的 kernel / D / n_q / n_kv / KV 类型 / need_f16），**待编译**；Z3/Z4 未开始。
+
 ## 6. 不做清单（已证伪，勿重试）
 
 ```
