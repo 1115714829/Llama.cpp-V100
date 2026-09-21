@@ -1,7 +1,11 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
 > ## ⏱ 5 分钟接手块（2026-09-21 会话末定格）
 >
-> **状态**：本地 `llama.cpp` **干净 at `c2d716519`**（0 修改）；服务器 = canonical 源码 + 仅 A4 探针（`GGML_CUDA_FA_SPLIT_FLOOR`，默认关，已归档 `patches/0004`）；
+> **状态（2026-09-21 Round 98 更正）**：本地 `llama.cpp` **停在 `c2d716519` 但工作树是脏的**（A2 索引式写入补丁 + `GGML_RS_INDEX_WRITE` 门控，未提交，gate 默认关）；
+> **服务器源码树不是 canonical**：`/root/llm/test/v100-opt/llama.cpp` 里也带着同一个 A2 补丁（`grep -c GGML_RS_INDEX_WRITE src/llama-graph.cpp` = 2），
+> 且 `/root/libdir-instr/libllama.so.0.4.1` 是 **13:21 用这棵树重建的**。A4 探针（`GGML_CUDA_FA_SPLIT_FLOOR`）也在，默认关。
+> ⚠️ 两者都是 env 门控、默认关 => 行为等同 canonical（Round 97 的官方口径实测已用 `AL 5.55/4.22/6.38` + `sha256 f3edac19...` 逐位证明），
+> 但**任何要把服务器树当基线的新实验，必须先用 `md5 + 二进制标记串` 确认它到底带了哪些补丁**（AGENTS §4.22）。
 > 实验补丁 `patches/0001..0006`；研究仓库最新提交见 `git log`。
 > **规格文件（2026-09-21 新增，用户已授权做结构性改动）**：
 > - `PLAN-to-180ts.md` —— 总计划（四项 + 已证伪清单 + 零代码实验清单 Z1–Z5）
