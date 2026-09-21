@@ -120,13 +120,14 @@ flowchart TD
     N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%"]:::todo
     N8["N8-vec GQA read-once (n_q=1 路径)<br/>今天 6 遍冗余, 可到 1 遍<br/>qwen38 补丁做的是这条路"]:::todo
-    N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R150: 今天 3 遍冗余 => 这是**我们**该做的<br/>放开门控 fattn-tile.cuh:1309 的 gqa_ratio % 2"]:::next
+    N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R151 查明机制: fattn-tile.cuh:1291-1317 依次试<br/>gqa%8->8, gqa%4->4, gqa%2->2, 否则 1<br/>gqa=6 只命中 %2 => ncols2=2 => 3 遍<br/>ncols2=3 => 2 遍, ncols2=6 => 1 遍<br/>代价: 需新增 ncols=24/48 的 config + 实例化"]:::next
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
     N10["[RT] 7 处 fprintf 探针规整为 env 门控"]:::todo
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
     N12["N12 MMVQ x4 权重解码外提（jusko）"]:::todo
     N14["N14 按 context 自适应 n_max<br/>SK6: k=3@65k 比 no-spec 还快 16.5%<br/>零代码, 先测 256K 上 n_max=7 是否反而更差"]:::next
     Z["★ 先手量测 Z1-Z5（零代码/低成本, 新的一类对象）<br/>Z1 ctx 斜率=正在跑 / Z2 FA kernel 诊断=码已写待编(a8fb6542f)<br/>Z3 n_max 扫描 / Z4 KV dtype / Z5 已完成(layer 慢 40%)"]:::run
+    Z6["Z6 锁频 (qwen38 的 lock-clocks.sh)<br/>nvidia-smi -pm 1 -lgc max -lmc max<br/>我们没做; 会改变测量条件 => 须先决定再记录"]:::todo
   end
   N0 -->|实测支撑| ADD
   N0 -->|裁决: 非重叠, 而是代价从主机搬到 GPU| X3
@@ -186,6 +187,7 @@ flowchart TD
   N14 -.-> K3
   Z -->|把 N1/N6 的推算变成实测上限| N1
   Z -->|先量再改, 不许跳步| G
+  Z6 -->|先固定条件再谈离散度| BASE
   REFS["★ 外部项目解读矩阵（7 个项目 / 57 条提取）<br/>见 §3 - 含该抄谁的哪个文件反查表"]:::ref
   REFS --> N1
   REFS --> N6
