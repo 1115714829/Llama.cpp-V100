@@ -838,6 +838,39 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 
 => **A2 与 A3 是同一个修法的两面**，优先级仅次于 A1（AR）。
 
+### 19.2.1 两个写入点的确切代码（已读全）
+
+**(a) conv_state 写入**（`src/models/delta-net-base.cpp:490-496`，公共分支 `cparams.n_rs_seq == 0`，`:479-481` 里 `s_slot = 0`）：
+```
+ggml_tensor * conv_state_update =
+    ggml_view_2d(ctx0, conv_states_all, row_count, n_seqs, conv_states_all->nb[1],
+                 (s_slot * mem_size + kv_head) * row_size);
+ggml_build_forward_expand(gf, ggml_cpy(ctx0, conv_state_last, conv_state_update));
+```
+**(b) ssm state 写入**（`src/models/delta-net-base.cpp:555-558`，公共分支 `!keep`）：
+```
+ggml_build_forward_expand(gf,
+    ggml_cpy(ctx0, new_state,
+        ggml_view_2d(ctx0, ssm_states_all, hparams.n_embd_s(), n_seqs, ssm_states_all->nb[1],
+                     kv_head * hparams.n_embd_s() * ggml_element_size(ssm_states_all))));
+```
+=> 两处的**目标行索引语义完全相同**：`row_j = head + j`（j 为 seq 序号，`s_slot = 0`）=> **一个 `s_write` 索引张量通吃两个点** ✓。
+`kv_head = mctx_cur->get_head()`（`:458`），`mem_size = mctx_cur->get_size()`（`:459`）。
+
+### 19.2.2 待落地的原子改动（不能拆开，拆开会算错）
+
+1. `src/llama-memory-recurrent.{h,cpp}`：加 `get_n_rs_seq()` 访问器（`n_rs_seq` 现在是 memory 结构体成员，上下文未暴露）。
+2. `src/llama-graph.h` `llm_graph_input_rs`：加 `ggml_tensor * s_write;  // I32 [n_seqs]`（写目标行索引，主机侧每调用填值）。
+3. `src/llama-graph.cpp` `build_rs_inp_impl()`（`:3502-3522`）：当 `get_n_rs_seq() == 0` 时创建 `s_write` 并 `ggml_set_input`。
+4. `llm_graph_input_rs::set_input()`（`:329-343`）：填 `s_write[j] = head + j`（与既有 `s_copy` 同款主机缓冲）。
+5. `can_reuse()`（`:345-361`）：`if (s_write == nullptr) { res &= head == mctx->get_head(); }`（`s_write` 存在时不再要求 head 相同）；
+   `rs_z` 检查**保留**（它仍可能进视图偏移）。
+6. 两个写入点改为：`ggml_set_rows(ctx0, ggml_reshape_2d(dst_all, row, nelem/row), ggml_reshape_2d(src, row, n_seqs), inp->s_write)`
+   （需要把 `inp` 传进 state 写入所在函数；若签名不便，可从 `mctx_cur` 侧取同一个索引张量）。
+7. **保留** `n_rs_seq != 0` 的回滚分支（生产为 0，非 0 时才走旧路径 ✓ 降低风险）。
+
+**验收**：同配置 **greedy sha256 逐位不变**（写索引值与旧视图偏移**完全等价**，只是不再进图）+ draft 侧 `[RT] rebuild` 从 556 显著下降 + ms/轮下降 + AL 不劣化。
+
 ### 19.3 改动面（已对齐上游先例，机械替换）
 
 **已确认的管道**：`s_copy` 就是"主机侧填值的 int32 行索引张量"——
