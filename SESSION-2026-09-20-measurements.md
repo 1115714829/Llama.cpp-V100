@@ -503,6 +503,59 @@ llama.cpp 对**注意力 KV 早就用了索引式写入**：llama-kv-cache.cpp:1
 **验证判据（一次跑测即可判定）**：GGML_CUDA_GRAPH_DEBUG=1 下
 `[GRAPH] direct=` 每轮值应从约 66 降到个位数，`draft_decode` 从 13 ms 降到约 3 ms，greedy sha256 不变。
 
+---
+
+## 11. 2026-09-21 下午：两个"负结果"带来的方向纠正（重要）
+
+### 11.1 CUDA graph 缓存键加形状信息 => 无收益，已回退
+
+假说：不同批量的子图重建到同一 arena，nodes[0] 地址相同 => 共用缓存键 => 互相顶掉（对应统计里 src_ne 116 / src_nb 4）。
+实现：ggml_cuda_graph_get_key() 改为对 (nodes[0], n_nodes, 所有节点的 ne[0..2]) 做 FNV 哈希并放进稳定表。
+
+实测（NPRED=192, NODROP=1, 同源同协议）：
+
+| 指标 | 改动前 | 改动后 |
+|---|---:|---:|
+| MEDIAN_TG | 77.26 | **77.28**（无变化） |
+| [GRAPH] capture | 2742 | **3132（+14%，更差）** |
+| [GRAPH] direct | 14187 | 13407（-5%） |
+| [GRAPH] per_call | 4.5 us | 7.3 us（哈希开销） |
+| draft_decode | 13.86 ms | 14.09 ms |
+
+=> 净效果为负，**回退**。greedy sha256 两侧一致（只是性能问题）。
+
+### 11.2 方向纠正：draft 的"12 ms 图管理"不在关键路径上，draft 瓶颈在 GPU 侧
+
+首次拿到 draft ctx 自己的 [RT] 行（此前只有 target 的）：
+
+~~~text
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=269 reuse=0 rebuild=269
+     | build_us=33503 alloc_us=509256 setin_us=12491 enqueue_us=1542455 sync_us=0
+~~~
+
+折算每轮：build 0.12 ms + alloc 1.9 ms + setin 0.05 ms + **enqueue 5.7 ms**（reuse=0：每轮重建图）。
+而 draft_decode = 13.9 ms => 主机侧只解释约 7.7 ms，且 enqueue 是**异步提交窗口**（与 GPU 工作重叠），
+**剩余约 6 ms 是它在等 GPU**（logits D2H 同步）。
+
+=> **结论（纠正 §8.12 与 §10 的框架）**：draft 侧 13 ms 的主因是 **GPU 侧效率**（约 1 GB 权重读取 + MoE + GDN 顺序算子，
+实测有效带宽仅约 70-100 GB/s），而非主机侧图管理；把图管理降到 0 也不会带来墙钟收益（它与 GPU 工作重叠）。
+**下一步应攻 draft 的 GPU 内核效率（算子融合），而不是图缓存。**
+
+### 11.3 归档问题修复
+
+patches/0002、0003 之前经 PowerShell 重定向写出，是 **UTF-16**（git apply 报 no valid patches）=> 已重编码为 UTF-8
+（0002: 28856 -> 14427 B）。注意 0002 是针对当时的 ggml-cuda.cu 生成的，现已漂移，需手工重贴。
+
+### 11.4 push allreduce 失败的根因（已确证）
+
+搜索发现上游 #23480「Add missing buffer set in allreduce fallback !COMPUTE clear」与 #21808
+「TP: fix 0-sized tensor slices, AllReduce fallback」正是这一类问题。对照代码：
+**NCCL 路径在归约前对未标 GGML_TENSOR_FLAG_COMPUTE 的分片先 cudaMemsetAsync 清零，而我的 push 内核没有**
+=> 本应为 0 的 padding 分片被加进归约结果 => **结果错误**（与实测"内容为空、sha256 不同"一致）。
+次要问题：40 个块的到达 flags 挤在同一缓存行 => NVLink 往返放大 => 161 us vs NCCL 68 us。
+=> 若重做：先补清零 + flags 每块独占一行 + 先跑 3 卡确定性单测。
+
+
 
 
 
