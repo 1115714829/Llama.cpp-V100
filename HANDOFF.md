@@ -27,7 +27,9 @@
 >    要看两件事：`[FAK]` 确认 8-token verify 走 **TILE** 且 `n_kv % 256 == 0`（决定 `use_gqa_opt` 成不成立）；`[MKEY]` 判 CUDA 图 key 是否在旋转容器间交替。
 > 3. **阶段一第一项 = N6b（形状稳定化）** —— §2.7 证明它是 150 的**硬前提**（没有它阶段一只有 tg 128）。
 >    第一步是**纯诊断**：`GGML_META_NODE_DIFF`（设计见子代理规格，已记在 §4 R149），逐字段报「哪些 ne/nb 在变、变成什么」。
-> 4. **Z3 + Z7 已合成一键脚本：`bash /root/z-batch.sh`**（默认 `NODROP=1` 的 DIAG 快路径，头部注释写明了 Z7 的判读方式）。
+> 4. **等长任务一律用 `bash /root/wait-for.sh <file> <pattern> [max_minutes] [stall_ticks]`**（两级看门狗，只返回一行 `WAIT_RESULT=`；
+>    见 `AGENTS.md` §4.35。**不要反复发起短查询** —— 那会烧掉上下文而结果不会提前到）。
+> 5. **Z3 + Z7 已合成一键脚本：`bash /root/z-batch.sh`**（默认 `NODROP=1` 的 DIAG 快路径，头部注释写明了 Z7 的判读方式）。
 >    Z3 = n_max 扫描 3/5/7（8K）；Z7 = Q8_0 vs Q2_K_XL 的模型大小标定（判 438 GB/s 里多少是带宽、多少是固定开销）。
 >    **Z4（KV dtype）用 `/root/z4-harness.sh` 的 `CTKV` 旋钮**；深度曲线用 **`/root/z-depth.sh`**（`DIAG` 旋钮）。
 > 5. **Z7（模型大小标定）**：同 harness 换 Q2_K_XL ⇒ 判定 438 GB/s 里多少是带宽、多少是固定开销，直接决定 BW1（+16%）与 N6/P-B 的优先级。
