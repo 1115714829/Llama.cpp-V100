@@ -36,6 +36,13 @@
       draft 的 `alloc_us` 总量 **1.043 s > target 的 0.648 s**（draft 只有 5 层 / 1.14 GB）=> 摊到每轮 alloc 约 1.9 ms + build 0.13 ms。
       **P-B 的正确做法因此改写**：不是「融合 draft 算子」，而是**让 draft 的图能复用**（target 在同样的「注入/块」交替下复用 92%，说明机制上可行）。
       纪律：判定图复用必须 `grep -a -h "RT. perf" <log>` **全取两行**，不要 `tail -1`。
+>   ⑦ **根因已定位到源码（Round 97）**：`src/llama-context.h:371-374` —— 图结果缓存有**两个槽**
+      （`gf_res_prev[n_outputs > 0]`，注释说是为了给「有输出/无输出」两批不同的 CUDA 图缓存键），
+      但 `gf_res_prev_active` **只有一个指针**（`llama-context.cpp:1372/1387/1419`）。
+      DFlash2 的 draft 每轮严格交替「注入(n_outputs==0) / 块前向(n_outputs>0)」=> 单指针永远对不上 => **reuse=0**；
+      target 每轮只 1 次调用 => 同槽连续命中 => 92%。
+      修法与风险分析见新规格 `1cat-vllm-v100-study/SPEC-P-B-draft-graph-reuse.md`（3 条候选路线 + 必须先证明的 arena 安全性）。
+      已派子代理做**判定性探针实验**（env 门控 `LLAMA_GRAPH_SLOT_DEBUG`，只验证假设，不改默认行为）。
 >
 > **权威数字（正式口径，四次实测离散 <0.5%）**：tg **98.12 / 98.70 / 98.88 / 98.88 t/s**，AL 5.55/4.22/6.38，**57.6 ms/轮**，greedy sha256 **f3edac19...**（同配置逐位可复现）。
 > 长上下文（§21）：8K 24.9 -> 256K **53.0 ms/token**（+113%，斜率 0.113 us/KV-token）；256K+DFlash2 投机 = 34.13 t/s。
