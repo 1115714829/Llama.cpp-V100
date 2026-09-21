@@ -1,0 +1,27 @@
+M1_START 18:10:32
+IDLE 18:10:32
+LIB_BASE=281ab75d34e2326c3f79a9c8e67b20d1 LIB_CUDA=8fc530e2fb48eee720d6a6af25b17dd5
+===ARM m1none spec=--spec-type none 18:10:32===
+RC_m1none=0
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=44.94
+P60_DONE TAG=m1none STATUS=OK
+META_m1none=[META] calls=1408 sub/call=129.0 ar/call=128.0 | total=11.350 loop=11.141 dev=5.669 ar=5.462 ms/call | prologue=0.209 (1.8%)
+GRAPH_m1none=[GRAPH] calls=556032 capture=3192 replay=545004 direct=7836 decision_us=750215 per_call=1.3 avg_nodes=30.6 last_nodes=8
+RT_m1none=[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=1436 reuse=1415 rebuild=21 | build_us=32861 alloc_us=420848 setin_us=35181 enqueue_us=16842317 sync_us=0
+m1none p1 pred_n=512 pred_ms=11370.405 tps=44.94 draft_n=None draft_acc=None prompt_n=76
+m1none p2 pred_n=507 pred_ms=11199.461 tps=45.18 draft_n=None draft_acc=None prompt_n=106
+m1none p3 pred_n=280 pred_ms=6228.357 tps=44.80 draft_n=None draft_acc=None prompt_n=84
+===ARM m1dflash spec=--spec-type draft-dflash --spec-draft-n-max 7 18:11:28===
+RC_m1dflash=0
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=42.55
+P60_DONE TAG=m1dflash STATUS=OK
+META_m1dflash=[META] calls=1408 sub/call=129.0 ar/call=128.0 | total=11.932 loop=11.669 dev=6.173 ar=5.485 ms/call | prologue=0.264 (2.2%)
+GRAPH_m1dflash=[GRAPH] calls=555520 capture=2805 replay=544879 direct=7836 decision_us=817963 per_call=1.5 avg_nodes=38.4 last_nodes=78
+RT_m1dflash=[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=1435 reuse=1414 rebuild=21 | build_us=39401 alloc_us=529995 setin_us=36291 enqueue_us=17665927 sync_us=0
+m1dflash p1 pred_n=512 pred_ms=12010.511 tps=42.55 draft_n=None draft_acc=None prompt_n=76
+m1dflash p2 pred_n=507 pred_ms=11818.941 tps=42.81 draft_n=None draft_acc=None prompt_n=106
+m1dflash p3 pred_n=280 pred_ms=6576.506 tps=42.42 draft_n=None draft_acc=None prompt_n=84
+M1_END 18:12:24
+M1_DONE

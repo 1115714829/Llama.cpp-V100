@@ -1,0 +1,937 @@
+0.00.000.284 I srv  llama_server: initializing ...
+0.00.350.991 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.352.909 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.353.007 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.116.906 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.116.922 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.116.939 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.116.946 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.116.952 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.116.974 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.116.981 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.116.988 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.116.994 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.117.001 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.117.007 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.117.015 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.117.022 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.117.029 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.117.049 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.03.469.668 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+[MKEY] r=0 i=0 j=0 n0=0x7ffda0ff0ec0 uid=22 n=79
+[GRAPH] prop diff #0 node=norm-0 op=RMS_NORM new_ne=[5120,2] old_ne=[0,0] new_data=0x7ffec1248100 old_data=(nil)
+[GRAPH] prop diff #1 node=attn_norm-0 op=MUL new_ne=[5120,2] old_ne=[0,0] new_data=0x7ffec1248100 old_data=(nil)
+[GRAPH] prop diff #2 node=cache_r_l0 (reshaped) op=RESHAPE new_ne=[9600,8] old_ne=[0,0] new_data=0x7ffd80000000 old_data=(nil)
+[GRAPH] props changed #0: device=0 nodes=79 uid=22 warmup=0
+[MKEY] r=0 i=0 j=1 n0=0x7ffd08330ec0 uid=151 n=79
+[GRAPH] props changed #1: device=1 nodes=79 uid=151 warmup=0
+[MKEY] r=0 i=0 j=2 n0=0x7ffcf1320ec0 uid=280 n=79
+[GRAPH] props changed #2: device=2 nodes=79 uid=280 warmup=0
+[MKEY] r=0 i=1 j=0 n0=0x7ffda0ff5530 uid=23 n=8
+[GRAPH] props changed #3: device=0 nodes=8 uid=23 warmup=0
+[MKEY] r=0 i=1 j=1 n0=0x7ffd08335530 uid=152 n=8
+[GRAPH] props changed #4: device=1 nodes=8 uid=152 warmup=0
+[MKEY] r=0 i=1 j=2 n0=0x7ffcf1325530 uid=281 n=8
+[GRAPH] props changed #5: device=2 nodes=8 uid=281 warmup=0
+[MKEY] r=0 i=2 j=0 n0=0x7ffda0ff60b0 uid=24 n=78
+[MKEY] r=0 i=2 j=1 n0=0x7ffd083360b0 uid=153 n=78
+[MKEY] r=0 i=2 j=2 n0=0x7ffcf13260b0 uid=282 n=78
+[MKEY] r=0 i=3 j=0 n0=0x7ffda0ffa890 uid=25 n=8
+[MKEY] r=0 i=3 j=1 n0=0x7ffd0833a890 uid=154 n=8
+[MKEY] r=0 i=3 j=2 n0=0x7ffcf132a890 uid=283 n=8
+[GRAPH] prop diff #2000 node=node_685 op=GATED_DELTA_NET new_ne=[1920,1026] old_ne=[0,0] new_data=0x1000d284100 old_data=(nil)
+[GRAPH] prop diff #4000 node=cache_r_l17 (view) op=VIEW new_ne=[11520,1] old_ne=[0,0] new_data=0x7ffd86ba1800 old_data=(nil)
+[GRAPH] prop diff #6000 node=conv_input-25 (view) op=VIEW new_ne=[3,3200] old_ne=[0,0] new_data=0x7ffc83066100 old_data=(nil)
+[GRAPH] prop diff #8000 node=node_2711 op=GATED_DELTA_NET new_ne=[1920,1026] old_ne=[0,0] new_data=0x7ffec5884100 old_data=(nil)
+[GRAPH] prop diff #10000 node=node_3319 op=MUL_MAT new_ne=[15,2] old_ne=[0,0] new_data=0x7ffc82748100 old_data=(nil)
+[GRAPH] calls=256 capture=0 replay=0 direct=256 decision_us=5035 per_call=19.7 avg_nodes=39.2 last_nodes=8
+[GRAPH] prop diff #12000 node=Vcur-51 op=MUL_MAT new_ne=[512,2] old_ne=[0,0] new_data=0x7ffc83448100 old_data=(nil)
+[GRAPH] prop diff #14000 node=conv_input-60 op=CONCAT new_ne=[5,3200] old_ne=[0,0] new_data=0x1000aa66100 old_data=(nil)
+0.03.703.983 I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+0.03.703.990 I common_speculative_init_result: loading draft model '/root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf'
+0.04.453.833 W model has unused tensor selector_predecessor.weight (size = 35758080 bytes) -- ignoring
+0.04.453.844 W model has unused tensor selector_successor.weight (size = 35758080 bytes) -- ignoring
+0.04.622.801 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 8192, kv_unified = 'false'
+0.04.877.121 I common_speculative_impl_draft_dflash: adding speculative implementation 'draft-dflash'
+0.04.877.143 I common_speculative_impl_draft_dflash: - n_max=7, n_min=0, p_min=0.00
+0.04.877.144 I common_speculative_impl_draft_dflash: - block_size=8, mask_token_id=248070, n_extract=5, sample_from_anchor=true
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+[MKEY] r=1 i=0 j=0 n0=0x7ffc48ff2450 uid=430 n=62
+[MKEY] r=1 i=0 j=1 n0=0x7ffc31fe2450 uid=441 n=62
+[MKEY] r=1 i=0 j=2 n0=0x7ffba8ff2450 uid=452 n=62
+[MKEY] r=1 i=1 j=0 n0=0x7ffc48ff6f10 uid=431 n=54
+[MKEY] r=1 i=1 j=1 n0=0x7ffc31fe6f10 uid=442 n=54
+[MKEY] r=1 i=1 j=2 n0=0x7ffba8ff6f10 uid=453 n=54
+[MKEY] r=1 i=2 j=0 n0=0x7ffc48ffb6f0 uid=432 n=75
+[MKEY] r=1 i=2 j=1 n0=0x7ffc31feb6f0 uid=443 n=75
+[MKEY] r=1 i=2 j=2 n0=0x7ffba8ffb6f0 uid=454 n=75
+[MKEY] r=1 i=3 j=0 n0=0x7ffc49001460 uid=433 n=54
+[MKEY] r=1 i=3 j=1 n0=0x7ffc31ff1460 uid=444 n=54
+[MKEY] r=1 i=3 j=2 n0=0x7ffba9001460 uid=455 n=54
+[GRAPH] prop diff #16000 node=noise_norm-3 (reshaped) (reshaped) op=RESHAPE new_ne=[5120,2] old_ne=[0,0] new_data=0x7ffc1a864000 old_data=(nil)
+0.04.968.471 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.04.968.512 I srv  llama_server: model loaded
+0.04.968.521 I srv  llama_server: listening on http://127.0.0.1:8162
+0.15.008.809 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.15.008.904 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+[RT] llama_decode entered: n_tokens=42
+[RT] ctx::decode entered: n_tokens=42
+[RT] process_ubatch entered: n_tokens=42
+[MKEY] r=2 i=0 j=0 n0=0x7ffda0ff0ec0 uid=475 n=79
+[MKEY] r=2 i=0 j=1 n0=0x7ffd28ff0ec0 uid=604 n=79
+[MKEY] r=2 i=0 j=2 n0=0x7ffd11fe0ec0 uid=733 n=79
+[MKEY] r=2 i=1 j=0 n0=0x7ffda0ff5530 uid=476 n=8
+[MKEY] r=2 i=1 j=1 n0=0x7ffd28ff5530 uid=605 n=8
+[MKEY] r=2 i=1 j=2 n0=0x7ffd11fe5530 uid=734 n=8
+[MKEY] r=2 i=2 j=0 n0=0x7ffda0ff60b0 uid=477 n=78
+[MKEY] r=2 i=2 j=1 n0=0x7ffd28ff60b0 uid=606 n=78
+[MKEY] r=2 i=2 j=2 n0=0x7ffd11fe60b0 uid=735 n=78
+[MKEY] r=2 i=3 j=0 n0=0x7ffda0ffa890 uid=478 n=8
+[MKEY] r=2 i=3 j=1 n0=0x7ffd28ffa890 uid=607 n=8
+[MKEY] r=2 i=3 j=2 n0=0x7ffd11fea890 uid=736 n=8
+[GRAPH] prop diff #18000 node=conv_input-5 (view) op=VIEW new_ne=[3,3840] old_ne=[0,0] new_data=0x6229266190 old_data=(nil)
+[GRAPH] prop diff #20000 node=cache_r_l13 (view) op=VIEW new_ne=[30720,0] old_ne=[0,0] new_data=0x7ffd45448000 old_data=(nil)
+[GRAPH] calls=512 capture=0 replay=0 direct=512 decision_us=10039 per_call=19.6 avg_nodes=39.9 last_nodes=44
+[GRAPH] prop diff #22000 node=node_1771 op=RMS_NORM new_ne=[128,5] old_ne=[0,0] new_data=0x6229948100 old_data=(nil)
+[GRAPH] prop diff #24000 node=node_2379 op=GET_ROWS new_ne=[245760,1] old_ne=[0,0] new_data=0x7ffb03048100 old_data=(nil)
+[GRAPH] prop diff #26000 node=attn_gated-39 op=MUL new_ne=[1536,42] old_ne=[0,0] new_data=0x6237648100 old_data=(nil)
+[GRAPH] prop diff #28000 node=norm-48 op=RMS_NORM new_ne=[5120,42] old_ne=[0,0] new_data=0x6233e48100 old_data=(nil)
+[GRAPH] prop diff #30000 node=attn_output-56 op=VIEW new_ne=[128,18] old_ne=[0,0] new_data=0x7ffb08084100 old_data=(nil)
+[GRAPH] calls=768 capture=0 replay=0 direct=768 decision_us=14897 per_call=19.4 avg_nodes=39.4 last_nodes=8
+[MKEY] r=3 i=0 j=0 n0=0x7ffb91fe0620 uid=864 n=58
+[MKEY] r=3 i=0 j=1 n0=0x7ffb7afd0620 uid=865 n=58
+[MKEY] r=3 i=0 j=2 n0=0x7ffb63fc0620 uid=866 n=58
+[MKEY] r=4 i=0 j=0 n0=0x7ffcfafd0ec0 uid=870 n=79
+[MKEY] r=4 i=0 j=1 n0=0x7ffce3fc0ec0 uid=999 n=79
+[MKEY] r=4 i=0 j=2 n0=0x7ffcccfb0ec0 uid=1128 n=79
+[GRAPH] prop diff #32000 node=cache_r_l0 (view) (copy of conv_input-0 (view)) op=CPY new_ne=[11520,1] old_ne=[0,0] new_data=0x7ffd40038400 old_data=(nil)
+[MKEY] r=4 i=1 j=0 n0=0x7ffcfafd5530 uid=871 n=8
+[MKEY] r=4 i=1 j=1 n0=0x7ffce3fc5530 uid=1000 n=8
+[MKEY] r=4 i=1 j=2 n0=0x7ffcccfb5530 uid=1129 n=8
+[MKEY] r=4 i=2 j=0 n0=0x7ffcfafd60b0 uid=872 n=78
+[MKEY] r=4 i=2 j=1 n0=0x7ffce3fc60b0 uid=1001 n=78
+[MKEY] r=4 i=2 j=2 n0=0x7ffcccfb60b0 uid=1130 n=78
+[MKEY] r=4 i=3 j=0 n0=0x7ffcfafda890 uid=873 n=8
+[MKEY] r=4 i=3 j=1 n0=0x7ffce3fca890 uid=1002 n=8
+[MKEY] r=4 i=3 j=2 n0=0x7ffcccfba890 uid=1131 n=8
+[GRAPH] prop diff #34000 node=cache_s_l9 (view) op=VIEW new_ne=[294912,1] old_ne=[0,0] new_data=0x7ffd83a05000 old_data=(nil)
+[GRAPH] prop diff #36000 node=node_1381 op=ADD new_ne=[15,30] old_ne=[0,0] new_data=0x7ffb03160100 old_data=(nil)
+[GRAPH] prop diff #38000 node=cache_r_l26 (view) (copy of conv_input-26 (view)) op=CPY new_ne=[11520,1] old_ne=[0,0] new_data=0x7ffd6a56e400 old_data=(nil)
+[GRAPH] props changed #1000: device=1 nodes=7 uid=1062 warmup=0
+[GRAPH] prop diff #40000 node=ffn_up-34 op=MUL_MAT new_ne=[5888,30] old_ne=[0,0] new_data=0x6237448100 old_data=(nil)
+[GRAPH] calls=1024 capture=0 replay=0 direct=1024 decision_us=19492 per_call=19.0 avg_nodes=39.2 last_nodes=7
+[GRAPH] prop diff #42000 node=ffn_gate-43 op=MUL_MAT new_ne=[5888,30] old_ne=[0,0] new_data=0x6229c48100 old_data=(nil)
+[GRAPH] prop diff #44000 node=q_conv_predelta-52 op=SCALE new_ne=[128,5] old_ne=[0,0] new_data=0x6235f48100 old_data=(nil)
+[GRAPH] prop diff #46000 node=cache_r_l61 (view) op=VIEW new_ne=[11520,1] old_ne=[0,0] new_data=0x7ffd97e29c00 old_data=(nil)
+[MKEY] r=5 i=0 j=0 n0=0x7ffc48ff0620 uid=1259 n=58
+[MKEY] r=5 i=0 j=1 n0=0x7ffc31fe0620 uid=1260 n=58
+[MKEY] r=5 i=0 j=2 n0=0x7ffba8ff0620 uid=1261 n=58
+[MKEY] r=6 i=0 j=0 n0=0x7ffda0ff0ec0 uid=1265 n=79
+[MKEY] r=6 i=0 j=1 n0=0x7ffd28ff0ec0 uid=1394 n=79
+[MKEY] r=6 i=0 j=2 n0=0x7ffd11fe0ec0 uid=1523 n=79
+[MKEY] r=6 i=1 j=0 n0=0x7ffda0ff5530 uid=1266 n=8
+[MKEY] r=6 i=1 j=1 n0=0x7ffd28ff5530 uid=1395 n=8
+[MKEY] r=6 i=1 j=2 n0=0x7ffd11fe5530 uid=1524 n=8
+[MKEY] r=6 i=2 j=0 n0=0x7ffda0ff60b0 uid=1267 n=78
+[MKEY] r=6 i=2 j=1 n0=0x7ffd28ff60b0 uid=1396 n=78
+[MKEY] r=6 i=2 j=2 n0=0x7ffd11fe60b0 uid=1525 n=78
+[MKEY] r=6 i=3 j=0 n0=0x7ffda0ffa890 uid=1268 n=8
+[MKEY] r=6 i=3 j=1 n0=0x7ffd28ffa890 uid=1397 n=8
+[MKEY] r=6 i=3 j=2 n0=0x7ffd11fea890 uid=1526 n=8
+[GRAPH] prop diff #48000 node=z-4 op=MUL_MAT new_ne=[2304,4] old_ne=[2304,42] new_data=0x7ffb02848100 old_data=0x7ffb02848100
+[GRAPH] prop diff #50000 node=cache_r_l13 (view) (copy of conv_input-13 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd6529b000 old_data=0x7ffd6529b000
+[GRAPH] calls=1280 capture=0 replay=0 direct=1280 decision_us=23934 per_call=18.7 avg_nodes=39.1 last_nodes=78
+[GRAPH] prop diff #52000 node=cache_r_l22 (reshaped) (view) op=VIEW new_ne=[0,1] old_ne=[9600,1] new_data=0x7ffd88dd5000 old_data=0x7ffd88dd5000
+[GRAPH] prop diff #54000 node=z-30 op=MUL_MAT new_ne=[2304,4] old_ne=[2304,42] new_data=0x6235448100 old_data=0x6235448100
+[GRAPH] prop diff #56000 node=attn_pregate-39 op=RESHAPE new_ne=[1536,4] old_ne=[1536,42] new_data=0x622b448100 old_data=0x622b448100
+[GRAPH] prop diff #58000 node=cache_r_l48 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd92b52c00 old_data=0x7ffd92b52c00
+[GRAPH] calls=1536 capture=0 replay=0 direct=1536 decision_us=27203 per_call=17.7 avg_nodes=38.9 last_nodes=7
+[GRAPH] prop diff #60000 node=conv_input-56 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x7ffb05866100 old_data=0x7ffb05866194
+[MKEY] r=7 i=0 j=0 n0=0x7ffb91fe0620 uid=1654 n=58
+[MKEY] r=7 i=0 j=1 n0=0x7ffb7afd0620 uid=1655 n=58
+[MKEY] r=7 i=0 j=2 n0=0x7ffb63fc0620 uid=1656 n=58
+[MKEY] r=8 i=0 j=0 n0=0x7ffc48ff2450 uid=1660 n=62
+[MKEY] r=8 i=0 j=1 n0=0x7ffc31fe2450 uid=1671 n=62
+[MKEY] r=8 i=0 j=2 n0=0x7ffba8ff2450 uid=1682 n=62
+[GRAPH] prop diff #62000 node=node_11 op=ADD new_ne=[16,320] old_ne=[0,0] new_data=0x7ffdfbac4180 old_data=(nil)
+[MKEY] r=8 i=1 j=0 n0=0x7ffc48ff6f10 uid=1661 n=54
+[MKEY] r=8 i=1 j=1 n0=0x7ffc31fe6f10 uid=1672 n=54
+[MKEY] r=8 i=1 j=2 n0=0x7ffba8ff6f10 uid=1683 n=54
+[MKEY] r=8 i=2 j=0 n0=0x7ffc48ffb6f0 uid=1662 n=75
+[MKEY] r=8 i=2 j=1 n0=0x7ffc31feb6f0 uid=1673 n=75
+[MKEY] r=8 i=2 j=2 n0=0x7ffba8ffb6f0 uid=1684 n=75
+[MKEY] r=8 i=3 j=0 n0=0x7ffc49001460 uid=1663 n=54
+[MKEY] r=8 i=3 j=1 n0=0x7ffc31ff1460 uid=1674 n=54
+[MKEY] r=8 i=3 j=2 n0=0x7ffba9001460 uid=1685 n=54
+[MKEY] r=9 i=0 j=0 n0=0x7ffcfafd0ec0 uid=1696 n=79
+[MKEY] r=9 i=0 j=1 n0=0x7ffce3fc0ec0 uid=1825 n=79
+[MKEY] r=9 i=0 j=2 n0=0x7ffcccfb0ec0 uid=1954 n=79
+[GRAPH] prop diff #64000 node=cache_r_l0 (view) op=VIEW new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd40016800 old_data=0x7ffd40016800
+[MKEY] r=9 i=1 j=0 n0=0x7ffcfafd5530 uid=1697 n=8
+[MKEY] r=9 i=1 j=1 n0=0x7ffce3fc5530 uid=1826 n=8
+[MKEY] r=9 i=1 j=2 n0=0x7ffcccfb5530 uid=1955 n=8
+[MKEY] r=9 i=2 j=0 n0=0x7ffcfafd60b0 uid=1698 n=78
+[MKEY] r=9 i=2 j=1 n0=0x7ffce3fc60b0 uid=1827 n=78
+[MKEY] r=9 i=2 j=2 n0=0x7ffcccfb60b0 uid=1956 n=78
+[MKEY] r=9 i=3 j=0 n0=0x7ffcfafda890 uid=1699 n=8
+[MKEY] r=9 i=3 j=1 n0=0x7ffce3fca890 uid=1828 n=8
+[MKEY] r=9 i=3 j=2 n0=0x7ffcccfba890 uid=1957 n=8
+[GRAPH] prop diff #66000 node=node_781 op=MUL new_ne=[128,18] old_ne=[128,18] new_data=0x6228848100 old_data=0x6228848100
+[GRAPH] prop diff #68000 node=node_1389 op=GATED_DELTA_NET new_ne=[1920,1032] old_ne=[1920,1054] new_data=0x7ffb06284100 old_data=0x7ffb06284100
+[GRAPH] prop diff #70000 node=cache_r_l26 (view) op=VIEW new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd6a54c800 old_data=0x7ffd6a54c800
+[GRAPH] calls=1792 capture=0 replay=0 direct=1792 decision_us=31050 per_call=17.3 avg_nodes=39.3 last_nodes=78
+[GRAPH] prop diff #72000 node=ffn_up-34 op=MUL_MAT new_ne=[5760,8] old_ne=[5760,30] new_data=0x7ffb05c48100 old_data=0x7ffb05c48100
+[GRAPH] prop diff #74000 node=ffn_up-43 op=MUL_MAT new_ne=[5760,8] old_ne=[5760,30] new_data=0x6237448100 old_data=0x6237448100
+[GRAPH] prop diff #76000 node=a_softplus-52 op=UNARY new_ne=[15,8] old_ne=[15,30] new_data=0x6236760100 old_data=0x6236760100
+[GRAPH] prop diff #78000 node=conv_input-61 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x622ba66110 old_data=0x622ba66168
+[GRAPH] props changed #2000: device=2 nodes=8 uid=2079 warmup=0
+[MKEY] r=10 i=0 j=0 n0=0x7ffb91fe0620 uid=2085 n=58
+[MKEY] r=10 i=0 j=1 n0=0x7ffb7afd0620 uid=2086 n=58
+[MKEY] r=10 i=0 j=2 n0=0x7ffb63fc0620 uid=2087 n=58
+[MKEY] r=11 i=0 j=0 n0=0x7ffc48ff2450 uid=2091 n=62
+[MKEY] r=11 i=0 j=1 n0=0x7ffc31fe2450 uid=2102 n=62
+[MKEY] r=11 i=0 j=2 n0=0x7ffba8ff2450 uid=2113 n=62
+[MKEY] r=11 i=1 j=0 n0=0x7ffc48ff6f10 uid=2092 n=54
+[MKEY] r=11 i=1 j=1 n0=0x7ffc31fe6f10 uid=2103 n=54
+[MKEY] r=11 i=1 j=2 n0=0x7ffba8ff6f10 uid=2114 n=54
+[MKEY] r=11 i=2 j=0 n0=0x7ffc48ffb6f0 uid=2093 n=75
+[MKEY] r=11 i=2 j=1 n0=0x7ffc31feb6f0 uid=2104 n=75
+[MKEY] r=11 i=2 j=2 n0=0x7ffba8ffb6f0 uid=2115 n=75
+[MKEY] r=11 i=3 j=0 n0=0x7ffc49001460 uid=2094 n=54
+[MKEY] r=11 i=3 j=1 n0=0x7ffc31ff1460 uid=2105 n=54
+[MKEY] r=11 i=3 j=2 n0=0x7ffba9001460 uid=2116 n=54
+[GRAPH] prop diff #80000 node=kqv_out-4 op=RESHAPE new_ne=[1536,8] old_ne=[1536,8] new_data=0x7ffdfba0a000 old_data=0x7ffdfba0a000
+[GRAPH] calls=2048 capture=5 replay=0 direct=2043 decision_us=34576 per_call=16.9 avg_nodes=39.5 last_nodes=79
+[GRAPH] calls=2304 capture=261 replay=0 direct=2043 decision_us=35316 per_call=15.3 avg_nodes=39.4 last_nodes=8
+[GRAPH] calls=2560 capture=393 replay=94 direct=2073 decision_us=36709 per_call=14.3 avg_nodes=39.6 last_nodes=44
+[GRAPH] calls=2816 capture=393 replay=350 direct=2073 decision_us=37324 per_call=13.3 avg_nodes=39.5 last_nodes=8
+[GRAPH] prop diff #82000 node=blk.2.attn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbd0886600 old_data=0x7ffbd0886600
+[GRAPH] calls=3072 capture=393 replay=576 direct=2103 decision_us=38571 per_call=12.6 avg_nodes=39.6 last_nodes=8
+[GRAPH] calls=3328 capture=393 replay=802 direct=2133 decision_us=39713 per_call=11.9 avg_nodes=39.7 last_nodes=78
+[GRAPH] calls=3584 capture=393 replay=1058 direct=2133 decision_us=40278 per_call=11.2 avg_nodes=39.7 last_nodes=8
+[GRAPH] prop diff #84000 node=node_23 op=CONCAT new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9acbf180 old_data=0x7ffd9acbf180
+[GRAPH] calls=3840 capture=393 replay=1284 direct=2163 decision_us=41317 per_call=10.8 avg_nodes=39.7 last_nodes=8
+[GRAPH] calls=4096 capture=393 replay=1540 direct=2163 decision_us=41862 per_call=10.2 avg_nodes=39.7 last_nodes=7
+[GRAPH] prop diff #86000 node=Kcur-3 op=ROPE new_ne=[128,2] old_ne=[128,2] new_data=0x7ffc1a864000 old_data=0x7ffc1a864000
+[GRAPH] calls=4352 capture=393 replay=1766 direct=2193 decision_us=42888 per_call=9.9 avg_nodes=39.8 last_nodes=7
+[GRAPH] calls=4608 capture=393 replay=1992 direct=2223 decision_us=43881 per_call=9.5 avg_nodes=39.8 last_nodes=7
+[GRAPH] calls=4864 capture=393 replay=2248 direct=2223 decision_us=44421 per_call=9.1 avg_nodes=39.8 last_nodes=8
+[GRAPH] prop diff #88000 node=node_103 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbbc5180 old_data=0x7ffdfbbc5180
+[GRAPH] calls=5120 capture=393 replay=2474 direct=2253 decision_us=45437 per_call=8.9 avg_nodes=39.8 last_nodes=8
+[GRAPH] calls=5376 capture=393 replay=2730 direct=2253 decision_us=45933 per_call=8.5 avg_nodes=39.8 last_nodes=78
+[GRAPH] prop diff #90000 node=blk.3.ffn_conv_base (view) op=VIEW new_ne=[10240,1] old_ne=[10240,1] new_data=0x7ffbf4ee4700 old_data=0x7ffbf4ee4700
+[GRAPH] calls=5632 capture=393 replay=2956 direct=2283 decision_us=46968 per_call=8.3 avg_nodes=39.9 last_nodes=8
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 34.354 ms over 64 calls (0.537 ms/call)
+[GRAPH] calls=5888 capture=393 replay=3182 direct=2313 decision_us=47980 per_call=8.1 avg_nodes=39.9 last_nodes=8
+[GRAPH] calls=6144 capture=393 replay=3438 direct=2313 decision_us=48541 per_call=7.9 avg_nodes=39.9 last_nodes=78
+[GRAPH] prop diff #92000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a8b5180 old_data=0x7ffc1a8b5180
+[GRAPH] calls=6400 capture=393 replay=3664 direct=2343 decision_us=49582 per_call=7.7 avg_nodes=39.9 last_nodes=8
+[GRAPH] calls=6656 capture=393 replay=3920 direct=2343 decision_us=50102 per_call=7.5 avg_nodes=39.8 last_nodes=44
+[GRAPH] prop diff #94000 node=node_541 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbab5180 old_data=0x7ffdfbab5180
+[GRAPH] calls=6912 capture=393 replay=4146 direct=2373 decision_us=51134 per_call=7.4 avg_nodes=39.9 last_nodes=44
+0.16.530.522 I process: inject timing: n=16 | inject_decode=3.16 ms/call
+[GRAPH] calls=7168 capture=393 replay=4372 direct=2403 decision_us=52142 per_call=7.3 avg_nodes=39.9 last_nodes=7
+[GRAPH] calls=7424 capture=393 replay=4628 direct=2403 decision_us=52692 per_call=7.1 avg_nodes=39.9 last_nodes=78
+[GRAPH] prop diff #96000 node=Vcur-2 op=RESHAPE new_ne=[128,3] old_ne=[128,3] new_data=0x7ffd9ac84000 old_data=0x7ffd9ac84000
+[GRAPH] calls=7680 capture=393 replay=4854 direct=2433 decision_us=53714 per_call=7.0 avg_nodes=39.9 last_nodes=78
+[GRAPH] calls=7936 capture=393 replay=5109 direct=2434 decision_us=54275 per_call=6.8 avg_nodes=39.9 last_nodes=62
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=35 reuse=0 rebuild=35 | build_us=4504 alloc_us=74504 setin_us=1470 enqueue_us=267873 sync_us=0
+0.16.648.322 I draft: spec timing: n=16 | draft_decode=15.44 selector=2.76 walk=0.09 ms/round
+0.16.648.348 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=8192 capture=393 replay=5336 direct=2463 decision_us=55225 per_call=6.7 avg_nodes=39.9 last_nodes=78
+[GRAPH] prop diff #98000 node=node_3 (reshaped) op=RESHAPE new_ne=[320,2] old_ne=[320,2] new_data=0x7ffc1a8b5180 old_data=0x7ffc1a8b5180
+[GRAPH] calls=8448 capture=393 replay=5562 direct=2493 decision_us=56241 per_call=6.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=8704 capture=393 replay=5818 direct=2493 decision_us=56750 per_call=6.5 avg_nodes=39.9 last_nodes=78
+[GRAPH] prop diff #100000 node=node_398 op=ADD new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a88d180 old_data=0x7ffc1a88d180
+[GRAPH] calls=8960 capture=393 replay=6044 direct=2523 decision_us=57786 per_call=6.4 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=9216 capture=393 replay=6288 direct=2535 decision_us=58520 per_call=6.3 avg_nodes=39.9 last_nodes=54
+[GRAPH] calls=9472 capture=393 replay=6526 direct=2553 decision_us=59331 per_call=6.3 avg_nodes=39.9 last_nodes=44
+[META] calls=64 sub/call=50.1 ar/call=49.1 | total=18.368 loop=15.553 dev=11.877 ar=3.671 ms/call | prologue=2.816 (15.3%)
+[GRAPH] prop diff #102000 node= (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ad75180 old_data=0x7ffd9ad75180
+[GRAPH] calls=9728 capture=393 replay=6752 direct=2583 decision_us=60341 per_call=6.2 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=9984 capture=393 replay=7008 direct=2583 decision_us=60871 per_call=6.1 avg_nodes=39.9 last_nodes=8
+[GRAPH] prop diff #104000 node=ffn_norm-3 (reshaped) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a800000 old_data=0x7ffc1a800000
+[GRAPH] calls=10240 capture=393 replay=7234 direct=2613 decision_us=61911 per_call=6.0 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=10496 capture=393 replay=7467 direct=2636 decision_us=62793 per_call=6.0 avg_nodes=40.0 last_nodes=54
+[GRAPH] calls=10752 capture=393 replay=7716 direct=2643 decision_us=63447 per_call=5.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #106000 node=cache_k_l1 (view) op=SET_ROWS new_ne=[384,2304] old_ne=[384,2304] new_data=0x7ffc19b60000 old_data=0x7ffc19b60000
+[GRAPH] calls=11008 capture=393 replay=7942 direct=2673 decision_us=64470 per_call=5.9 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=11264 capture=393 replay=8198 direct=2673 decision_us=64971 per_call=5.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #108000 node=node_519 (reshaped) (view) (cont) op=CONT new_ne=[320,2] old_ne=[320,2] new_data=0x7ffd9ac2a000 old_data=0x7ffd9ac2a000
+[GRAPH] calls=11520 capture=393 replay=8424 direct=2703 decision_us=66009 per_call=5.7 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=11776 capture=393 replay=8650 direct=2733 decision_us=66993 per_call=5.7 avg_nodes=40.0 last_nodes=79
+[GRAPH] calls=12032 capture=393 replay=8906 direct=2733 decision_us=67544 per_call=5.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #110000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffd9acdd180 old_data=0x7ffd9acdd180
+[GRAPH] calls=12288 capture=393 replay=9132 direct=2763 decision_us=68577 per_call=5.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=12544 capture=393 replay=9388 direct=2763 decision_us=69084 per_call=5.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=12800 capture=393 replay=9614 direct=2793 decision_us=70109 per_call=5.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #112000 node=attn_conv_in-0 op=ADD new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a93c180 old_data=0x7ffc1a93c180
+[GRAPH] calls=13056 capture=393 replay=9840 direct=2823 decision_us=71145 per_call=5.4 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=13312 capture=393 replay=10096 direct=2823 decision_us=71677 per_call=5.4 avg_nodes=40.0 last_nodes=8
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 68.985 ms over 128 calls (0.539 ms/call)
+[GRAPH] prop diff #114000 node= (reshaped) (view) (cont) (reshaped) op=RESHAPE new_ne=[1,320] old_ne=[1,320] new_data=0x7ffdfba0a000 old_data=0x7ffdfba0a000
+[RT] spec checkpoints: 0.018 ms/round over 32 rounds
+[GRAPH] calls=13568 capture=393 replay=10322 direct=2853 decision_us=72685 per_call=5.4 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=13824 capture=393 replay=10578 direct=2853 decision_us=73192 per_call=5.3 avg_nodes=40.0 last_nodes=44
+[RT] target decode+sync: 49.079 ms/round over 32 rounds (last n_tokens=8)
+0.17.351.201 I process: inject timing: n=32 | inject_decode=2.41 ms/call
+[GRAPH] calls=14080 capture=393 replay=10804 direct=2883 decision_us=74191 per_call=5.3 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #116000 node=blk.0.ffn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbe85ca500 old_data=0x7ffbe85ca500
+0.17.419.896 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.53 accept=0.00 ms (n_process=33)
+[GRAPH] calls=14336 capture=393 replay=11030 direct=2913 decision_us=75209 per_call=5.2 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=14592 capture=393 replay=11286 direct=2913 decision_us=75765 per_call=5.2 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #118000 node=node_442 op=REPEAT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfba8d180 old_data=0x7ffdfba8d180
+0.17.472.429 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + topk 0.71 + gate 1.06 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=67 reuse=0 rebuild=67 | build_us=8528 alloc_us=140059 setin_us=2367 enqueue_us=443899 sync_us=0
+0.17.472.515 I draft: spec timing: n=32 | draft_decode=14.70 selector=2.75 walk=0.09 ms/round
+0.17.472.534 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=14848 capture=393 replay=11512 direct=2943 decision_us=76789 per_call=5.2 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=15104 capture=393 replay=11768 direct=2943 decision_us=77298 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=15360 capture=393 replay=11994 direct=2973 decision_us=78316 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #120000 node=noise_norm-1 (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfba64000 old_data=0x7ffdfba64000
+[GRAPH] props changed #3000: device=0 nodes=54 uid=3412 warmup=0
+[GRAPH] calls=15616 capture=393 replay=12220 direct=3003 decision_us=79331 per_call=5.1 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=15872 capture=393 replay=12476 direct=3003 decision_us=79854 per_call=5.0 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #122000 node= (reshaped) op=RESHAPE new_ne=[128,8] old_ne=[128,8] new_data=0x7ffd9ac32000 old_data=0x7ffd9ac32000
+[GRAPH] calls=16128 capture=393 replay=12702 direct=3033 decision_us=80890 per_call=5.0 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=16384 capture=393 replay=12958 direct=3033 decision_us=81417 per_call=5.0 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=16640 capture=393 replay=13184 direct=3063 decision_us=82443 per_call=5.0 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #124000 node=node_166 op=MUL_MAT new_ne=[384,8] old_ne=[384,8] new_data=0x7ffdfba0a000 old_data=0x7ffdfba0a000
+[GRAPH] prop diff #126000 node=conv_input-2 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x6234866110 old_data=0x6234866100
+[GRAPH] calls=16896 capture=393 replay=13362 direct=3141 decision_us=84100 per_call=5.0 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #128000 node=ffn_swiglu-10 op=GLU new_ne=[5888,8] old_ne=[5888,4] new_data=0x6238248100 old_data=0x6238248100
+[GRAPH] prop diff #130000 node=ffn_up-19 op=MUL_MAT new_ne=[5888,8] old_ne=[5888,4] new_data=0x622aa48100 old_data=0x622aa48100
+[GRAPH] prop diff #132000 node=k_conv-28 op=VIEW new_ne=[128,5] old_ne=[128,5] new_data=0x6237084b00 old_data=0x6237084b00
+[GRAPH] prop diff #134000 node=cache_r_l37 (view) (copy of conv_input-37 (view)) op=CPY new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd8e889c00 old_data=0x7ffd8e889c00
+[GRAPH] prop diff #136000 node=node_3494 op=GET_ROWS new_ne=[30720,0] old_ne=[30720,0] new_data=0x7ffb03a66100 old_data=0x7ffb03a66100
+[GRAPH] calls=17152 capture=393 replay=13362 direct=3397 decision_us=87563 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #138000 node=k_conv-54 op=VIEW new_ne=[128,5] old_ne=[128,5] new_data=0x622ce84b00 old_data=0x622ce84b00
+[GRAPH] prop diff #140000 node=cache_s_l62 (reshaped) (view) (view) op=SCALE new_ne=[0,1] old_ne=[0,1] new_data=0x7ffd58780000 old_data=0x7ffd58780000
+[GRAPH] calls=17408 capture=530 replay=13365 direct=3513 decision_us=89735 per_call=5.2 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=17664 capture=783 replay=13368 direct=3513 decision_us=90685 per_call=5.1 avg_nodes=40.0 last_nodes=58
+[GRAPH] prop diff #142000 node=node_232 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbba6180 old_data=0x7ffdfbba6180
+[GRAPH] calls=17920 capture=783 replay=13594 direct=3543 decision_us=92001 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 103.601 ms over 192 calls (0.540 ms/call)
+[GRAPH] prop diff #144000 node=blk.4.ffn_conv_base (view) op=VIEW new_ne=[10240,1] old_ne=[10240,1] new_data=0x7ffbf92f8300 old_data=0x7ffbf92f8300
+[GRAPH] calls=18176 capture=783 replay=13820 direct=3573 decision_us=93172 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=18432 capture=783 replay=14076 direct=3573 decision_us=93944 per_call=5.1 avg_nodes=40.0 last_nodes=7
+[META] calls=128 sub/call=48.2 ar/call=47.2 | total=14.421 loop=12.382 dev=9.541 ar=2.838 ms/call | prologue=2.039 (14.1%)
+[GRAPH] calls=18688 capture=783 replay=14302 direct=3603 decision_us=95040 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=18944 capture=783 replay=14547 direct=3614 decision_us=95787 per_call=5.1 avg_nodes=40.0 last_nodes=54
+[GRAPH] prop diff #146000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a88e180 old_data=0x7ffc1a88e180
+[GRAPH] calls=19200 capture=783 replay=14784 direct=3633 decision_us=96627 per_call=5.0 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=19456 capture=783 replay=15010 direct=3663 decision_us=97658 per_call=5.0 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=19712 capture=783 replay=15266 direct=3663 decision_us=98167 per_call=5.0 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #148000 node=node_25 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfba8e180 old_data=0x7ffdfba8e180
+[GRAPH] calls=19968 capture=783 replay=15492 direct=3693 decision_us=99198 per_call=5.0 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #150000 node=Vcur-3 op=RESHAPE new_ne=[128,3] old_ne=[128,3] new_data=0x7ffd9ac32000 old_data=0x7ffd9ac32000
+[GRAPH] calls=20224 capture=783 replay=15726 direct=3715 decision_us=100104 per_call=4.9 avg_nodes=40.0 last_nodes=54
+[GRAPH] calls=20480 capture=783 replay=15974 direct=3723 decision_us=100737 per_call=4.9 avg_nodes=40.0 last_nodes=8
+0.18.345.834 I process: inject timing: n=48 | inject_decode=2.20 ms/call
+[GRAPH] calls=20736 capture=783 replay=16200 direct=3753 decision_us=101748 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=20992 capture=783 replay=16456 direct=3753 decision_us=102307 per_call=4.9 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #152000 node=node_132 (reshaped) op=RESHAPE new_ne=[320,2] old_ne=[320,2] new_data=0x7ffc1a800000 old_data=0x7ffc1a800000
+0.18.421.189 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.53 accept=0.00 ms (n_process=49)
+[GRAPH] calls=21248 capture=783 replay=16682 direct=3783 decision_us=103331 per_call=4.9 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #154000 node=node_527 op=ADD new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a88e180 old_data=0x7ffc1a88e180
+[GRAPH] calls=21504 capture=783 replay=16908 direct=3813 decision_us=104363 per_call=4.9 avg_nodes=40.1 last_nodes=16
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=99 reuse=0 rebuild=99 | build_us=12603 alloc_us=207603 setin_us=3388 enqueue_us=622432 sync_us=0
+0.18.474.912 I draft: spec timing: n=48 | draft_decode=14.53 selector=2.75 walk=0.09 ms/round
+0.18.474.930 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=21760 capture=783 replay=17164 direct=3813 decision_us=104909 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=22016 capture=783 replay=17390 direct=3843 decision_us=105926 per_call=4.8 avg_nodes=40.1 last_nodes=8
+[GRAPH] calls=22272 capture=783 replay=17646 direct=3843 decision_us=106455 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #156000 node= (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ad2e180 old_data=0x7ffd9ad2e180
+[GRAPH] calls=22528 capture=783 replay=17872 direct=3873 decision_us=107486 per_call=4.8 avg_nodes=40.0 last_nodes=8
+0.18.613.123 I slot print_timing: id  0 | task 0 | n_gen =    250, tg =  82.83 t/s, tg_3s =  83.16 t/s
+[GRAPH] prop diff #158000 node=ffn_norm-4 (reshaped) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a828000 old_data=0x7ffc1a828000
+[GRAPH] calls=22784 capture=783 replay=18087 direct=3914 decision_us=108683 per_call=4.8 avg_nodes=40.1 last_nodes=8
+[GRAPH] prop diff #160000 node=state_predelta-8 op=RESHAPE new_ne=[128,128] old_ne=[128,128] new_data=0x6228848100 old_data=0x6228848100
+[GRAPH] props changed #4000: device=1 nodes=78 uid=4687 warmup=1
+[GRAPH] prop diff #162000 node=v_conv_predelta-16 op=VIEW new_ne=[128,18] old_ne=[128,18] new_data=0x7ffb04e85900 old_data=0x7ffb04e85900
+[GRAPH] prop diff #164000 node=cache_r_l25 (view) (copy of conv_input-25 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd69da3400 old_data=0x7ffd69da3400
+[GRAPH] prop diff #166000 node=norm-33 op=RMS_NORM new_ne=[5120,6] old_ne=[5120,8] new_data=0x6231800000 old_data=0x6231800000
+[GRAPH] prop diff #168000 node=v_conv_predelta-42 op=VIEW new_ne=[128,18] old_ne=[128,18] new_data=0x6237a85900 old_data=0x6237a85900
+[GRAPH] calls=23040 capture=783 replay=18087 direct=4170 decision_us=112301 per_call=4.9 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #170000 node=Kcur-51 op=ROPE new_ne=[256,1] old_ne=[256,1] new_data=0x622c248100 old_data=0x622c248100
+[GRAPH] prop diff #172000 node=qkv_mixed_transposed-60 op=TRANSPOSE new_ne=[6,3200] old_ne=[8,3200] new_data=0x622a666100 old_data=0x622a666100
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 138.260 ms over 256 calls (0.540 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=54 reuse=48 rebuild=6 | build_us=11161 alloc_us=193744 setin_us=1777 enqueue_us=1404150 sync_us=0
+0.18.755.223 I slot print_timing: id  0 | task 0 | prompt eval time =     598.12 ms /    76 tokens (    7.87 ms per token,   127.06 tokens per second)
+0.18.755.230 I slot print_timing: id  0 | task 0 |        eval time =    3148.14 ms /   256 tokens (   12.35 ms per token,    81.00 tokens per second)
+0.18.755.232 I slot print_timing: id  0 | task 0 |       total time =    3746.26 ms /   332 tokens
+0.18.755.248 I slot print_timing: id  0 | task 0 |    graphs reused =         48
+0.18.755.256 I slot print_timing: id  0 | task 0 | draft acceptance = 0.57465 (  204 accepted /   355 generated), mean len =  5.00
+0.18.755.355 I slot      release: id  0 | task 0 | stop processing: n_tokens = 331, truncated = 0
+0.19.250.884 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.425 (> 0.100 thold), f_keep = 0.136
+0.19.385.312 I slot launch_slot_: id  0 | task 55 | processing task, is_child = 0
+[GRAPH] prop diff #174000 node=cache_v_l3 (view) op=VIEW new_ne=[256,2] old_ne=[256,2] new_data=0x7ffed7840000 old_data=0x7ffed7840000
+[GRAPH] prop diff #176000 node=cache_r_l12 (view) (copy of conv_input-12 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd64ad9600 old_data=0x7ffd64ad9600
+[GRAPH] prop diff #178000 node=norm-21 op=RMS_NORM new_ne=[5120,42] old_ne=[5120,8] new_data=0x6228848100 old_data=0x6228848100
+[GRAPH] calls=23296 capture=783 replay=18087 direct=4426 decision_us=115904 per_call=5.0 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #180000 node=attn_output-29 op=VIEW new_ne=[128,15] old_ne=[128,15] new_data=0x6238484100 old_data=0x6238484100
+[GRAPH] prop diff #182000 node=cache_r_l38 (view) (copy of conv_input-38 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd8f19e600 old_data=0x7ffd8f19e600
+[GRAPH] prop diff #184000 node=cache_r_l46 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd5239a800 old_data=0x7ffd5239a800
+[GRAPH] prop diff #186000 node=cache_k_l55 (view) op=SET_ROWS new_ne=[256,8192] old_ne=[256,8192] new_data=0x7ffe1aa41b00 old_data=0x7ffe1aa41b00
+[GRAPH] prop diff #188000 node=node_47 op=MUL_MAT new_ne=[384,42] old_ne=[384,30] new_data=0x7ffc1a800000 old_data=0x7ffc1a800000
+[GRAPH] calls=23552 capture=783 replay=18087 direct=4682 decision_us=119561 per_call=5.1 avg_nodes=40.0 last_nodes=58
+[GRAPH] prop diff #190000 node=cache_r_l8 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd83221a00 old_data=0x7ffd83221a00
+[GRAPH] prop diff #192000 node=conv_states-16 op=GET_ROWS new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffb02648100 old_data=0x7ffb02648100
+[GRAPH] prop diff #194000 node=q_conv_predelta-25 op=SCALE new_ne=[128,6] old_ne=[128,6] new_data=0x6229548100 old_data=0x6229548100
+[GRAPH] prop diff #196000 node=cache_s_l33 (reshaped) (view) op=VIEW new_ne=[0,1] old_ne=[0,1] new_data=0x7ffd4d125000 old_data=0x7ffd4d125000
+[GRAPH] prop diff #198000 node=conv_states-42 op=GET_ROWS new_ne=[11520,1] old_ne=[11520,1] new_data=0x6235248100 old_data=0x6235248100
+[GRAPH] calls=23808 capture=783 replay=18087 direct=4938 decision_us=123068 per_call=5.2 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #200000 node=node_3956 op=UNARY new_ne=[128,15] old_ne=[128,15] new_data=0x7ffb05c48100 old_data=0x7ffb05c48100
+[GRAPH] props changed #5000: device=2 nodes=8 uid=5679 warmup=0
+[GRAPH] prop diff #202000 node=cache_k_l59 (view) op=VIEW new_ne=[256,1] old_ne=[256,1] new_data=0x7ffedc4c1b00 old_data=0x7ffedc4c1b00
+[GRAPH] prop diff #204000 node= (reshaped) (view) op=VIEW new_ne=[256,6] old_ne=[256,6] new_data=0x6235848100 old_data=0x6235848100
+[GRAPH] prop diff #206000 node=node_994 op=GATED_DELTA_NET new_ne=[1920,1028] old_ne=[1920,1066] new_data=0x622c484100 old_data=0x622c484100
+[GRAPH] calls=24064 capture=783 replay=18087 direct=5194 decision_us=126514 per_call=5.3 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #208000 node=node_1602 op=MUL_MAT new_ne=[18,4] old_ne=[18,42] new_data=0x7ffb03148100 old_data=0x7ffb03148100
+[GRAPH] prop diff #210000 node=conv_input-29 (view) op=VIEW new_ne=[3,3200] old_ne=[3,3200] new_data=0x6235c66100 old_data=0x6235c66194
+[GRAPH] prop diff #212000 node=attn_post_norm-37 op=MUL new_ne=[5120,4] old_ne=[5120,42] new_data=0x6233e48100 old_data=0x6233e48100
+[GRAPH] prop diff #214000 node=node_3628 op=MUL_MAT new_ne=[18,4] old_ne=[18,42] new_data=0x6235d48100 old_data=0x6235d48100
+[GRAPH] prop diff #216000 node=Kcur-55 (reshaped) op=RESHAPE new_ne=[256,8] old_ne=[256,84] new_data=0x622c248100 old_data=0x622c248100
+[GRAPH] calls=24320 capture=783 replay=18087 direct=5450 decision_us=129895 per_call=5.3 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #218000 node=result_output op=MUL_MAT new_ne=[82773,1] old_ne=[248320,0] new_data=0x7ffb00a28000 old_data=0x7ffb00a28000
+[GRAPH] prop diff #220000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[0,0] new_data=0x7ffd9ac28000 old_data=(nil)
+[GRAPH] prop diff #222000 node=conv_input-8 (view) op=VIEW new_ne=[3,3200] old_ne=[3,3200] new_data=0x6229c66110 old_data=0x6229c661e0
+[GRAPH] prop diff #224000 node=conv_input-16 op=CONCAT new_ne=[11,3840] old_ne=[63,3840] new_data=0x7ffb03a66100 old_data=0x7ffb03a66100
+[GRAPH] prop diff #226000 node=a_softplus-25 op=UNARY new_ne=[18,8] old_ne=[18,60] new_data=0x6229d60100 old_data=0x6229d60100
+[GRAPH] prop diff #228000 node=q_conv-33 op=VIEW new_ne=[128,5] old_ne=[128,5] new_data=0x7ffb05884100 old_data=0x7ffb05884100
+[GRAPH] calls=24576 capture=783 replay=18087 direct=5706 decision_us=133694 per_call=5.4 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #230000 node=conv_input-42 op=CONCAT new_ne=[11,3840] old_ne=[63,3840] new_data=0x6236666100 old_data=0x6236666100
+[GRAPH] prop diff #232000 node=ffn_gate-50 op=MUL_MAT new_ne=[5760,8] old_ne=[5760,60] new_data=0x622a648100 old_data=0x622a648100
+[GRAPH] prop diff #234000 node=attn_pregate-59 op=RESHAPE new_ne=[1536,8] old_ne=[1536,60] new_data=0x7ffb05c48100 old_data=0x7ffb05c48100
+[GRAPH] prop diff #236000 node=node_436 op=FLASH_ATTN_EXT new_ne=[128,12] old_ne=[128,12] new_data=0x7ffd9ac64000 old_data=0x7ffd9ac64000
+[GRAPH] calls=24832 capture=829 replay=18087 direct=5916 decision_us=136762 per_call=5.5 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=25088 capture=1085 replay=18087 direct=5916 decision_us=137481 per_call=5.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=25344 capture=1176 replay=18222 direct=5946 decision_us=138777 per_call=5.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=25600 capture=1176 replay=18478 direct=5946 decision_us=139542 per_call=5.5 avg_nodes=40.0 last_nodes=58
+[GRAPH] prop diff #238000 node=node_191 op=MUL_MAT new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a932180 old_data=0x7ffc1a932180
+[GRAPH] calls=25856 capture=1176 replay=18704 direct=5976 decision_us=140862 per_call=5.4 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #240000 node=noise_norm-4 (reshaped) (view) op=VIEW new_ne=[5120,7] old_ne=[5120,7] new_data=0x7ffc1a864000 old_data=0x7ffc1a864000
+[GRAPH] props changed #6000: device=0 nodes=75 uid=6668 warmup=0
+[GRAPH] calls=26112 capture=1176 replay=18930 direct=6006 decision_us=141979 per_call=5.4 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=26368 capture=1176 replay=19186 direct=6006 decision_us=142522 per_call=5.4 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=26624 capture=1176 replay=19412 direct=6036 decision_us=143546 per_call=5.4 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=26880 capture=1176 replay=19659 direct=6045 decision_us=144227 per_call=5.4 avg_nodes=40.0 last_nodes=75
+[GRAPH] prop diff #242000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbb05180 old_data=0x7ffdfbb05180
+[RT] spec checkpoints: 0.019 ms/round over 64 rounds
+[GRAPH] calls=27136 capture=1176 replay=19894 direct=6066 decision_us=145058 per_call=5.3 avg_nodes=40.0 last_nodes=8
+[RT] target decode+sync: 50.182 ms/round over 64 rounds (last n_tokens=8)
+0.20.358.709 I process: inject timing: n=64 | inject_decode=2.42 ms/call
+[GRAPH] prop diff #244000 node=ffn_gate-4 op=MUL_MAT new_ne=[5888,8] old_ne=[5888,8] new_data=0x7ffc1a97c000 old_data=0x7ffc1a97c000
+[GRAPH] calls=27392 capture=1176 replay=20120 direct=6096 decision_us=146050 per_call=5.3 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=27648 capture=1176 replay=20376 direct=6096 decision_us=146578 per_call=5.3 avg_nodes=40.0 last_nodes=78
+[META] calls=192 sub/call=48.2 ar/call=47.2 | total=14.499 loop=12.230 dev=9.593 ar=2.633 ms/call | prologue=2.269 (15.7%)
+[GRAPH] calls=27904 capture=1176 replay=20602 direct=6126 decision_us=147592 per_call=5.3 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #246000 node=node_261 (reshaped) op=RESHAPE new_ne=[320,2] old_ne=[320,2] new_data=0x7ffdfba00000 old_data=0x7ffdfba00000
+[GRAPH] calls=28160 capture=1176 replay=20838 direct=6146 decision_us=148464 per_call=5.3 avg_nodes=40.0 last_nodes=75
+[GRAPH] calls=28416 capture=1176 replay=21084 direct=6156 decision_us=149156 per_call=5.2 avg_nodes=40.0 last_nodes=78
+0.20.508.763 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=67)
+[GRAPH] calls=28672 capture=1176 replay=21310 direct=6186 decision_us=150176 per_call=5.2 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=28928 capture=1176 replay=21566 direct=6186 decision_us=150730 per_call=5.2 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #248000 node=node_11 op=ADD new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfbac4180 old_data=0x7ffdfbac4180
+[GRAPH] calls=29184 capture=1176 replay=21792 direct=6216 decision_us=151776 per_call=5.2 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #250000 node= (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ac8d180 old_data=0x7ffd9ac8d180
+[GRAPH] calls=29440 capture=1176 replay=22018 direct=6246 decision_us=152794 per_call=5.2 avg_nodes=40.0 last_nodes=16
+0.20.636.072 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + topk 0.73 + gate 1.05 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=134 reuse=0 rebuild=134 | build_us=16838 alloc_us=280035 setin_us=5701 enqueue_us=818799 sync_us=0
+0.20.636.171 I draft: spec timing: n=64 | draft_decode=14.47 selector=2.75 walk=0.09 ms/round
+0.20.636.188 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=29696 capture=1176 replay=22274 direct=6246 decision_us=153384 per_call=5.2 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=29952 capture=1176 replay=22500 direct=6276 decision_us=154424 per_call=5.2 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=30208 capture=1176 replay=22756 direct=6276 decision_us=154964 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #252000 node=node_166 op=MUL_MAT new_ne=[384,8] old_ne=[384,8] new_data=0x7ffc1a80a000 old_data=0x7ffc1a80a000
+[GRAPH] calls=30464 capture=1176 replay=22982 direct=6306 decision_us=155992 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #254000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfbb0a180 old_data=0x7ffdfbb0a180
+[GRAPH] calls=30720 capture=1176 replay=23208 direct=6336 decision_us=157015 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=30976 capture=1176 replay=23464 direct=6336 decision_us=157551 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=31232 capture=1176 replay=23690 direct=6366 decision_us=158585 per_call=5.1 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=31488 capture=1176 replay=23946 direct=6366 decision_us=159105 per_call=5.1 avg_nodes=40.0 last_nodes=8
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 34.615 ms over 320 calls (0.108 ms/call)
+[GRAPH] prop diff #256000 node=blk.1.ffn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbec26a900 old_data=0x7ffbec26a900
+[GRAPH] calls=31744 capture=1176 replay=24172 direct=6396 decision_us=160165 per_call=5.0 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #258000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a8b4000 old_data=0x7ffc1a8b4000
+[GRAPH] calls=32000 capture=1176 replay=24398 direct=6426 decision_us=161224 per_call=5.0 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=32256 capture=1176 replay=24654 direct=6426 decision_us=161785 per_call=5.0 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=32512 capture=1176 replay=24880 direct=6456 decision_us=162806 per_call=5.0 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=32768 capture=1176 replay=25136 direct=6456 decision_us=163318 per_call=5.0 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #260000 node=attn_conv_in-2 op=ADD new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbb05180 old_data=0x7ffdfbb05180
+[GRAPH] calls=33024 capture=1176 replay=25362 direct=6486 decision_us=164368 per_call=5.0 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=33280 capture=1176 replay=25588 direct=6516 decision_us=165420 per_call=5.0 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=33536 capture=1176 replay=25844 direct=6516 decision_us=165973 per_call=4.9 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #262000 node=Kcur-0 (view) op=VIEW new_ne=[384,8] old_ne=[384,8] new_data=0x7ffd9ac95180 old_data=0x7ffd9ac95180
+[GRAPH] calls=33792 capture=1176 replay=26070 direct=6546 decision_us=167033 per_call=4.9 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=34048 capture=1176 replay=26326 direct=6546 decision_us=167573 per_call=4.9 avg_nodes=40.0 last_nodes=8
+0.21.194.203 I process: inject timing: n=80 | inject_decode=2.29 ms/call
+[GRAPH] prop diff #264000 node=node_390 (reshaped) (view) op=VIEW new_ne=[320,2] old_ne=[320,2] new_data=0x7ffc1a828a00 old_data=0x7ffc1a828a00
+[GRAPH] calls=34304 capture=1176 replay=26552 direct=6576 decision_us=168610 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=34560 capture=1176 replay=26778 direct=6606 decision_us=169606 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=34816 capture=1176 replay=27034 direct=6606 decision_us=170139 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #266000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a88d180 old_data=0x7ffc1a88d180
+[GRAPH] calls=35072 capture=1176 replay=27260 direct=6636 decision_us=171212 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=35328 capture=1176 replay=27516 direct=6636 decision_us=171758 per_call=4.9 avg_nodes=40.0 last_nodes=5
+0.21.349.027 I common_speculative_timing_report: spec overhead per round | process=0.07 draft=0.00 accept=0.00 ms (n_process=83)
+[GRAPH] prop diff #268000 node=node_498 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ad2d180 old_data=0x7ffd9ad2d180
+[GRAPH] calls=35584 capture=1176 replay=27742 direct=6666 decision_us=172893 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=35840 capture=1176 replay=27968 direct=6696 decision_us=173922 per_call=4.9 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=36096 capture=1176 replay=28224 direct=6696 decision_us=174483 per_call=4.8 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #270000 node=node_232 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a9a5180 old_data=0x7ffc1a9a5180
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=166 reuse=0 rebuild=166 | build_us=20848 alloc_us=347904 setin_us=6597 enqueue_us=997643 sync_us=0
+0.21.479.209 I draft: spec timing: n=80 | draft_decode=14.41 selector=2.75 walk=0.09 ms/round
+0.21.479.231 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=36352 capture=1176 replay=28450 direct=6726 decision_us=175540 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 69.235 ms over 384 calls (0.180 ms/call)
+[GRAPH] calls=36608 capture=1176 replay=28698 direct=6734 decision_us=176226 per_call=4.8 avg_nodes=40.0 last_nodes=75
+[GRAPH] prop diff #272000 node=Vcur-4 (view) op=VIEW new_ne=[384,8] old_ne=[384,8] new_data=0x7ffdfba84000 old_data=0x7ffdfba84000
+[GRAPH] calls=36864 capture=1176 replay=28932 direct=6756 decision_us=177118 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[META] calls=256 sub/call=48.2 ar/call=47.2 | total=12.981 loop=11.033 dev=8.535 ar=2.493 ms/call | prologue=1.948 (15.0%)
+[GRAPH] calls=37120 capture=1176 replay=29158 direct=6786 decision_us=178145 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=37376 capture=1176 replay=29414 direct=6786 decision_us=178693 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #274000 node=node_261 (reshaped) (view) (cont) (reshaped) op=RESHAPE new_ne=[1,320] old_ne=[1,320] new_data=0x7ffd9ac64000 old_data=0x7ffd9ac64000
+[GRAPH] calls=37632 capture=1176 replay=29640 direct=6816 decision_us=179742 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=37888 capture=1176 replay=29877 direct=6835 decision_us=180585 per_call=4.8 avg_nodes=40.0 last_nodes=75
+[GRAPH] prop diff #276000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfbade180 old_data=0x7ffdfbadd180
+[GRAPH] prop diff #278000 node=cache_s_l5 (view) (copy of  (view)) op=CPY new_ne=[245760,1] old_ne=[245760,1] new_data=0x7ffd42295000 old_data=0x7ffd42295000
+[GRAPH] prop diff #280000 node=cache_r_l14 (view) op=VIEW new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd65a71400 old_data=0x7ffd65a71400
+[GRAPH] prop diff #282000 node=l_out-22 op=ADD new_ne=[5120,8] old_ne=[5120,4] new_data=0x6226200000 old_data=0x6226200000
+[GRAPH] props changed #7000: device=1 nodes=78 uid=8023 warmup=0
+[GRAPH] prop diff #284000 node=attn_residual-31 op=ADD new_ne=[5120,8] old_ne=[5120,4] new_data=0x7ffb02648100 old_data=0x7ffb02648100
+[GRAPH] prop diff #286000 node=node_3153 op=MUL_MAT new_ne=[15,8] old_ne=[15,4] new_data=0x6235d48100 old_data=0x6235d48100
+[GRAPH] calls=38144 capture=1176 replay=29877 direct=7091 decision_us=184002 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #288000 node=conv_input-49 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x622ba66114 old_data=0x622ba66104
+[GRAPH] prop diff #290000 node=cache_r_l57 (view) (copy of conv_input-57 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd566bba00 old_data=0x7ffd566bba00
+[GRAPH] prop diff #292000 node=node_320 op=MUL_MAT new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a8de180 old_data=0x7ffc1a8de180
+[GRAPH] calls=38400 capture=1254 replay=29880 direct=7266 decision_us=186724 per_call=4.9 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=38656 capture=1510 replay=29880 direct=7266 decision_us=187435 per_call=4.8 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=38912 capture=1566 replay=30050 direct=7296 decision_us=188747 per_call=4.9 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #294000 node=noise_norm-0 (reshaped) (view) op=VIEW new_ne=[5120,7] old_ne=[5120,7] new_data=0x7ffc1a88e180 old_data=0x7ffc1a88e180
+[GRAPH] calls=39168 capture=1566 replay=30276 direct=7326 decision_us=189995 per_call=4.9 avg_nodes=40.0 last_nodes=54
+[GRAPH] calls=39424 capture=1566 replay=30532 direct=7326 decision_us=190570 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #296000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbade180 old_data=0x7ffdfbade180
+[GRAPH] calls=39680 capture=1566 replay=30758 direct=7356 decision_us=191617 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=39936 capture=1566 replay=31014 direct=7356 decision_us=192157 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=40192 capture=1566 replay=31240 direct=7386 decision_us=193173 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #298000 node=ffn_gate-0 op=MUL_MAT new_ne=[5632,8] old_ne=[5632,8] new_data=0x7ffc1a9ee180 old_data=0x7ffc1a9ee180
+[RT] spec checkpoints: 0.022 ms/round over 96 rounds
+[GRAPH] calls=40448 capture=1566 replay=31466 direct=7416 decision_us=194206 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=40704 capture=1566 replay=31722 direct=7416 decision_us=194733 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[RT] target decode+sync: 33.536 ms/round over 96 rounds (last n_tokens=8)
+0.22.143.857 I process: inject timing: n=96 | inject_decode=2.23 ms/call
+[GRAPH] prop diff #300000 node=node_390 (reshaped) op=RESHAPE new_ne=[320,2] old_ne=[320,2] new_data=0x7ffdfba28000 old_data=0x7ffdfba28000
+[GRAPH] calls=40960 capture=1566 replay=31948 direct=7446 decision_us=195758 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=41216 capture=1566 replay=32204 direct=7446 decision_us=196309 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=41472 capture=1566 replay=32430 direct=7476 decision_us=197355 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #302000 node=node_140 op=ADD new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfba8e180 old_data=0x7ffdfba8e180
+[GRAPH] calls=41728 capture=1566 replay=32656 direct=7506 decision_us=198397 per_call=4.8 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=41984 capture=1566 replay=32912 direct=7506 decision_us=198956 per_call=4.7 avg_nodes=40.0 last_nodes=8
+0.22.297.006 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=99)
+[GRAPH] prop diff #304000 node= (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ac8e180 old_data=0x7ffd9ac8e180
+[GRAPH] calls=42240 capture=1566 replay=33138 direct=7536 decision_us=200002 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=42496 capture=1566 replay=33394 direct=7536 decision_us=200547 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=42752 capture=1566 replay=33620 direct=7566 decision_us=201566 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #306000 node=node_295 op=MUL_MAT new_ne=[384,8] old_ne=[384,8] new_data=0x7ffc1a884000 old_data=0x7ffc1a884000
+0.22.417.784 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + topk 0.70 + gate 1.05 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=198 reuse=0 rebuild=198 | build_us=24888 alloc_us=416933 setin_us=7621 enqueue_us=1178485 sync_us=0
+0.22.417.865 I draft: spec timing: n=96 | draft_decode=14.39 selector=2.74 walk=0.08 ms/round
+0.22.417.885 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=43008 capture=1566 replay=33846 direct=7596 decision_us=202595 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=43264 capture=1566 replay=34102 direct=7596 decision_us=203120 per_call=4.7 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #308000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfbae6000 old_data=0x7ffdfbae6000
+[GRAPH] calls=43520 capture=1566 replay=34328 direct=7626 decision_us=204158 per_call=4.7 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=43776 capture=1566 replay=34584 direct=7626 decision_us=204694 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=44032 capture=1566 replay=34810 direct=7656 decision_us=205741 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #310000 node=blk.2.ffn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbf0c9a200 old_data=0x7ffbf0c9a200
+[GRAPH] calls=44288 capture=1566 replay=35036 direct=7686 decision_us=206846 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=44544 capture=1566 replay=35292 direct=7686 decision_us=207417 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=44800 capture=1566 replay=35518 direct=7716 decision_us=208469 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=45056 capture=1566 replay=35774 direct=7716 decision_us=209042 per_call=4.6 avg_nodes=40.0 last_nodes=5
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 104.200 ms over 448 calls (0.233 ms/call)
+[GRAPH] prop diff #312000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a8e3180 old_data=0x7ffc1a8e3180
+[GRAPH] calls=45312 capture=1566 replay=36000 direct=7746 decision_us=210095 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #314000 node=attn_conv_in-3 op=ADD new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbb06180 old_data=0x7ffdfbb06180
+[GRAPH] calls=45568 capture=1566 replay=36226 direct=7776 decision_us=211158 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=45824 capture=1566 replay=36482 direct=7776 decision_us=211699 per_call=4.6 avg_nodes=40.0 last_nodes=44
+[META] calls=320 sub/call=47.8 ar/call=46.8 | total=12.363 loop=10.538 dev=8.137 ar=2.396 ms/call | prologue=1.825 (14.8%)
+[GRAPH] calls=46080 capture=1566 replay=36708 direct=7806 decision_us=212707 per_call=4.6 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=46336 capture=1566 replay=36957 direct=7813 decision_us=213362 per_call=4.6 avg_nodes=40.0 last_nodes=75
+[GRAPH] prop diff #316000 node=Kcur-1 (view) op=VIEW new_ne=[256,8] old_ne=[256,8] new_data=0x7ffd9ac64000 old_data=0x7ffd9ac64000
+[GRAPH] calls=46592 capture=1566 replay=37190 direct=7836 decision_us=214275 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #318000 node=node_519 (reshaped) (view) op=VIEW new_ne=[320,2] old_ne=[320,2] new_data=0x7ffc1a800a00 old_data=0x7ffc1a800a00
+[GRAPH] calls=46848 capture=1566 replay=37416 direct=7866 decision_us=215347 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=47104 capture=1566 replay=37672 direct=7866 decision_us=215904 per_call=4.6 avg_nodes=40.0 last_nodes=78
+0.22.917.945 I slot print_timing: id  0 | task 55 | n_gen =    205, tg =  67.17 t/s, tg_3s =  67.50 t/s
+[GRAPH] calls=47360 capture=1566 replay=37898 direct=7896 decision_us=216946 per_call=4.6 avg_nodes=40.0 last_nodes=78
+0.22.967.827 I process: inject timing: n=112 | inject_decode=2.18 ms/call
+[GRAPH] prop diff #320000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a88e180 old_data=0x7ffc1a88e180
+[GRAPH] calls=47616 capture=1566 replay=38136 direct=7914 decision_us=217828 per_call=4.6 avg_nodes=40.0 last_nodes=54
+[GRAPH] calls=47872 capture=1566 replay=38380 direct=7926 decision_us=218574 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #322000 node=node_627 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ad09000 old_data=0x7ffd9ad09000
+[GRAPH] calls=48128 capture=1566 replay=38606 direct=7956 decision_us=219629 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=48384 capture=1566 replay=38862 direct=7956 decision_us=220194 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=48640 capture=1566 replay=39088 direct=7986 decision_us=221232 per_call=4.5 avg_nodes=40.0 last_nodes=44
+0.23.122.556 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=115)
+[GRAPH] props changed #8000: device=2 nodes=75 uid=9290 warmup=0
+[GRAPH] prop diff #324000 node=node_361 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a97e180 old_data=0x7ffc1a97e180
+[GRAPH] calls=48896 capture=1566 replay=39315 direct=8015 decision_us=222259 per_call=4.5 avg_nodes=40.1 last_nodes=54
+[GRAPH] calls=49152 capture=1566 replay=39570 direct=8016 decision_us=222828 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=49408 capture=1566 replay=39796 direct=8046 decision_us=223867 per_call=4.5 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=49664 capture=1566 replay=40052 direct=8046 decision_us=224420 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #326000 node=Vcur-0 (view) op=VIEW new_ne=[384,8] old_ne=[384,8] new_data=0x7ffdfba8e180 old_data=0x7ffdfba8e180
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=230 reuse=0 rebuild=230 | build_us=29326 alloc_us=485172 setin_us=8605 enqueue_us=1365572 sync_us=0
+0.23.248.573 I draft: spec timing: n=112 | draft_decode=14.43 selector=2.74 walk=0.08 ms/round
+0.23.248.599 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=49920 capture=1566 replay=40278 direct=8076 decision_us=225506 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #328000 node=node_390 (reshaped) (view) (cont) (reshaped) op=RESHAPE new_ne=[1,320] old_ne=[1,320] new_data=0x7ffd9ac84000 old_data=0x7ffd9ac84000
+[GRAPH] calls=50176 capture=1566 replay=40504 direct=8106 decision_us=226587 per_call=4.5 avg_nodes=40.1 last_nodes=78
+[GRAPH] calls=50432 capture=1566 replay=40760 direct=8106 decision_us=227160 per_call=4.5 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=50688 capture=1566 replay=40986 direct=8136 decision_us=228197 per_call=4.5 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=50944 capture=1566 replay=41242 direct=8136 decision_us=228758 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #330000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9acde180 old_data=0x7ffd9acde180
+[GRAPH] calls=51200 capture=1566 replay=41468 direct=8166 decision_us=229791 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #332000 node=node_543 op=MUL_MAT new_ne=[1536,8] old_ne=[1536,8] new_data=0x7ffc1a832000 old_data=0x7ffc1a832000
+[GRAPH] calls=51456 capture=1566 replay=41694 direct=8196 decision_us=230841 per_call=4.5 avg_nodes=40.1 last_nodes=8
+[GRAPH] calls=51712 capture=1566 replay=41950 direct=8196 decision_us=231390 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=51968 capture=1566 replay=42176 direct=8226 decision_us=232427 per_call=4.5 avg_nodes=40.1 last_nodes=8
+[GRAPH] calls=52224 capture=1566 replay=42432 direct=8226 decision_us=232995 per_call=4.5 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #334000 node=node_223 op=REPEAT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffdfbb2e180 old_data=0x7ffdfbb2e180
+[GRAPH] calls=52480 capture=1566 replay=42658 direct=8256 decision_us=234047 per_call=4.5 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #336000 node=node_602 op=ADD new_ne=[16,320] old_ne=[16,320] new_data=0x7ffd9ac69000 old_data=0x7ffd9ac69000
+[GRAPH] calls=52736 capture=1566 replay=42884 direct=8286 decision_us=235104 per_call=4.5 avg_nodes=40.1 last_nodes=8
+[GRAPH] calls=52992 capture=1566 replay=43140 direct=8286 decision_us=235643 per_call=4.4 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=53248 capture=1566 replay=43366 direct=8316 decision_us=236693 per_call=4.4 avg_nodes=40.1 last_nodes=7
+[GRAPH] calls=53504 capture=1566 replay=43622 direct=8316 decision_us=237234 per_call=4.4 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #338000 node=blk.2.attn_conv_base (view) op=VIEW new_ne=[10240,1] old_ne=[10240,1] new_data=0x7ffbd0890600 old_data=0x7ffbd0890600
+[GRAPH] calls=53760 capture=1566 replay=43848 direct=8346 decision_us=238308 per_call=4.4 avg_nodes=40.1 last_nodes=78
+[RT] spec checkpoints: 0.022 ms/round over 128 rounds
+[GRAPH] prop diff #340000 node=cache_r_l0 (view) (copy of conv_input-0 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd60012c00 old_data=0x7ffd60012c00
+[GRAPH] calls=54016 capture=1566 replay=44034 direct=8416 decision_us=239871 per_call=4.4 avg_nodes=40.1 last_nodes=8
+[GRAPH] prop diff #342000 node=ffn_up-8 op=MUL_MAT new_ne=[5888,7] old_ne=[5888,8] new_data=0x7ffb04848100 old_data=0x7ffb04848100
+[GRAPH] prop diff #344000 node=node_1389 op=GATED_DELTA_NET new_ne=[1920,1031] old_ne=[1920,1032] new_data=0x6237a84100 old_data=0x6237a84100
+[GRAPH] prop diff #346000 node=cache_r_l26 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd8a6d7c00 old_data=0x7ffd8a6d7c00
+[GRAPH] prop diff #348000 node=conv_input-34 (view) op=VIEW new_ne=[3,3200] old_ne=[3,3200] new_data=0x7ffb04466108 old_data=0x7ffb0446610c
+[GRAPH] prop diff #350000 node=Kcur-43 (reshaped) op=RESHAPE new_ne=[256,7] old_ne=[256,8] new_data=0x6236e48100 old_data=0x6236e48100
+[GRAPH] calls=54272 capture=1566 replay=44034 direct=8672 decision_us=243447 per_call=4.5 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #352000 node=a_softplus-52 op=UNARY new_ne=[15,7] old_ne=[15,8] new_data=0x622b160100 old_data=0x622b160100
+[GRAPH] prop diff #354000 node=q_conv-60 op=VIEW new_ne=[128,6] old_ne=[128,6] new_data=0x7ffb06c84100 old_data=0x7ffb06c84100
+[RT] target decode+sync: 32.918 ms/round over 128 rounds (last n_tokens=7)
+0.23.890.004 I process: inject timing: n=128 | inject_decode=2.15 ms/call
+[GRAPH] prop diff #356000 node=node_541 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9acb6180 old_data=0x7ffd9acb6180
+[GRAPH] prop diff #358000 node=Kcur-7 (reshaped) op=RESHAPE new_ne=[256,3] old_ne=[256,8] new_data=0x7ffb04248100 old_data=0x7ffb04248100
+[GRAPH] prop diff #360000 node=conv_input-16 (view) op=VIEW new_ne=[3,3200] old_ne=[3,3200] new_data=0x6235266100 old_data=0x6235266110
+[GRAPH] calls=54528 capture=1566 replay=44037 direct=8925 decision_us=247074 per_call=4.5 avg_nodes=40.1 last_nodes=78
+[GRAPH] prop diff #362000 node=ffn_swiglu-24 op=GLU new_ne=[5760,3] old_ne=[5760,8] new_data=0x6238c48100 old_data=0x6238c48100
+[GRAPH] prop diff #364000 node=a_softplus-33 op=UNARY new_ne=[15,3] old_ne=[15,8] new_data=0x6235360100 old_data=0x6235360100
+[GRAPH] props changed #9000: device=0 nodes=78 uid=10291 warmup=1
+[GRAPH] prop diff #366000 node=conv_input-42 (view) op=VIEW new_ne=[3,3200] old_ne=[3,3200] new_data=0x622b066100 old_data=0x622b066110
+[GRAPH] prop diff #368000 node=conv_input-50 op=CONCAT new_ne=[6,3200] old_ne=[11,3200] new_data=0x7ffb05866100 old_data=0x7ffb05866100
+[GRAPH] prop diff #370000 node=node_4600 op=MUL_MAT new_ne=[64,24] old_ne=[64,64] new_data=0x6237648100 old_data=0x6237648100
+[GRAPH] calls=54784 capture=1566 replay=44037 direct=9181 decision_us=250308 per_call=4.6 avg_nodes=40.0 last_nodes=5
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 138.989 ms over 512 calls (0.271 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=129 reuse=116 rebuild=13 | build_us=24410 alloc_us=424372 setin_us=4212 enqueue_us=3093990 sync_us=0
+0.24.035.699 I slot print_timing: id  0 | task 55 | prompt eval time =     495.70 ms /   106 tokens (    4.68 ms per token,   213.84 tokens per second)
+0.24.035.706 I slot print_timing: id  0 | task 55 |        eval time =    4154.62 ms /   256 tokens (   16.29 ms per token,    61.38 tokens per second)
+0.24.035.707 I slot print_timing: id  0 | task 55 |       total time =    4650.32 ms /   362 tokens
+0.24.035.723 I slot print_timing: id  0 | task 55 |    graphs reused =        116
+0.24.035.732 I slot print_timing: id  0 | task 55 | draft acceptance = 0.36747 (  183 accepted /   498 generated), mean len =  3.54
+0.24.035.800 I slot      release: id  0 | task 55 | stop processing: n_tokens = 361, truncated = 0
+0.24.077.923 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.536 (> 0.100 thold), f_keep = 0.125
+0.24.210.104 I slot launch_slot_: id  0 | task 131 | processing task, is_child = 0
+[GRAPH] prop diff #372000 node=Vcur-3 op=RESHAPE new_ne=[256,1] old_ne=[256,1] new_data=0x6229648100 old_data=0x6229648100
+[GRAPH] prop diff #374000 node=cache_r_l12 (reshaped) (view) (view) op=SCALE new_ne=[9600,1] old_ne=[0,1] new_data=0x7ffd84ad0000 old_data=0x7ffd84ad0000
+[GRAPH] prop diff #376000 node=z-20 (reshaped) op=RESHAPE new_ne=[128,15] old_ne=[128,15] new_data=0x6234a48100 old_data=0x6234a48100
+[GRAPH] prop diff #378000 node=cache_s_l29 (reshaped) op=RESHAPE new_ne=[294912,8] old_ne=[294912,8] new_data=0x7ffd8b6b5000 old_data=0x7ffd8b6b5000
+[GRAPH] prop diff #380000 node=cache_r_l37 (view) (copy of conv_input-37 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd4e9e6200 old_data=0x7ffd4e9e6200
+[GRAPH] calls=55040 capture=1566 replay=44037 direct=9437 decision_us=253782 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #382000 node=z-46 (reshaped) op=RESHAPE new_ne=[128,15] old_ne=[128,15] new_data=0x622a848100 old_data=0x622a848100
+[GRAPH] prop diff #384000 node=beta_sigmoid-54 op=UNARY new_ne=[1,15] old_ne=[1,15] new_data=0x7ffb04f78100 old_data=0x7ffb04f78100
+[GRAPH] prop diff #386000 node=Kcur_normed-63 op=MUL new_ne=[256,2] old_ne=[256,2] new_data=0x7ffb06a48100 old_data=0x7ffb06a48100
+[META] calls=384 sub/call=47.9 ar/call=46.9 | total=12.324 loop=10.478 dev=8.100 ar=2.374 ms/call | prologue=1.845 (15.0%)
+[GRAPH] prop diff #388000 node=Kcur-7 (reshaped) op=RESHAPE new_ne=[256,1] old_ne=[256,1] new_data=0x6235648100 old_data=0x6235648100
+[GRAPH] prop diff #390000 node=v_conv_predelta-16 op=VIEW new_ne=[128,15] old_ne=[128,15] new_data=0x622b085500 old_data=0x622b085500
+[GRAPH] calls=55296 capture=1566 replay=44037 direct=9693 decision_us=257189 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #392000 node=cache_s_l24 (view) op=VIEW new_ne=[786432,0] old_ne=[786432,0] new_data=0x7ffd498fa000 old_data=0x7ffd498fa000
+[GRAPH] prop diff #394000 node=conv_states_reshaped-33 op=RESHAPE new_ne=[3,3200] old_ne=[3,3200] new_data=0x6234848100 old_data=0x6234848100
+[GRAPH] prop diff #396000 node=linear_attn_out-41 (reshaped) op=RESHAPE new_ne=[5120,38] old_ne=[5120,3] new_data=0x6229248100 old_data=0x6229248100
+[GRAPH] prop diff #398000 node=cache_s_l50 (view) op=VIEW new_ne=[786432,0] old_ne=[786432,0] new_data=0x7ffd73e30000 old_data=0x7ffd73e30000
+[GRAPH] prop diff #400000 node= (reshaped) op=RESHAPE new_ne=[256,6] old_ne=[256,6] new_data=0x622ca48100 old_data=0x622ca48100
+[GRAPH] calls=55552 capture=1566 replay=44037 direct=9949 decision_us=260505 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #402000 node= (view) op=VIEW new_ne=[245760,1] old_ne=[245760,1] new_data=0x7ffb0588b900 old_data=0x7ffb058d2d00
+[GRAPH] props changed #10000: device=1 nodes=8 uid=11548 warmup=0
+[GRAPH] prop diff #404000 node=node_900 op=MUL_MAT new_ne=[256,4] old_ne=[256,42] new_data=0x7ffb03e48100 old_data=0x7ffb03e48100
+[GRAPH] prop diff #406000 node=cache_r_l20 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd67cd5800 old_data=0x7ffd67cd5800
+[GRAPH] prop diff #408000 node=ffn_out-28 op=MUL_MAT new_ne=[5120,4] old_ne=[5120,42] new_data=0x6231800000 old_data=0x6231800000
+[GRAPH] prop diff #410000 node=gate-37 op=MUL new_ne=[15,4] old_ne=[15,42] new_data=0x6235d60100 old_data=0x6235d60100
+[GRAPH] calls=55808 capture=1566 replay=44037 direct=10205 decision_us=263852 per_call=4.7 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #412000 node=cache_r_l46 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd9239a800 old_data=0x7ffd9239a800
+[GRAPH] prop diff #414000 node=conv_input-54 (view) op=VIEW new_ne=[3,3200] old_ne=[3,3200] new_data=0x7ffb05866100 old_data=0x7ffb0586618c
+[GRAPH] prop diff #416000 node= (reshaped) op=RESHAPE new_ne=[256,1] old_ne=[256,1] new_data=0x6238048100 old_data=0x6238048100
+[GRAPH] prop diff #418000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a869000 old_data=0x7ffc1a869000
+0.24.725.612 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.61 accept=0.00 ms (n_process=132)
+[GRAPH] prop diff #420000 node=norm-7 op=RMS_NORM new_ne=[256,6] old_ne=[256,6] new_data=0x7ffb03e48100 old_data=0x7ffb03e48100
+[GRAPH] calls=56064 capture=1566 replay=44037 direct=10461 decision_us=267568 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #422000 node=cache_r_l16 (view) op=VIEW new_ne=[30720,0] old_ne=[30720,0] new_data=0x7ffd663de000 old_data=0x7ffd663de000
+[GRAPH] prop diff #424000 node=final_output-24 op=RESHAPE new_ne=[2304,8] old_ne=[2304,38] new_data=0x7ffb03048100 old_data=0x7ffb03048100
+[GRAPH] prop diff #426000 node=node_2602 op=GET_ROWS new_ne=[245760,1] old_ne=[245760,1] new_data=0x6234848100 old_data=0x6234848100
+[GRAPH] prop diff #428000 node=cache_r_l42 (view) op=VIEW new_ne=[30720,0] old_ne=[30720,0] new_data=0x7ffd90aa3000 old_data=0x7ffd90aa3000
+[GRAPH] prop diff #430000 node=final_output-50 op=RESHAPE new_ne=[2304,8] old_ne=[2304,38] new_data=0x6235c48100 old_data=0x6235c48100
+[GRAPH] calls=56320 capture=1566 replay=44037 direct=10717 decision_us=270900 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #432000 node=attn_gated-59 op=MUL new_ne=[1536,8] old_ne=[1536,38] new_data=0x622ca48100 old_data=0x622ca48100
+[GRAPH] prop diff #434000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a892180 old_data=0x7ffc1a892180
+[GRAPH] calls=56576 capture=1730 replay=44037 direct=10809 decision_us=272749 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=56832 capture=1959 replay=44037 direct=10836 decision_us=273978 per_call=4.8 avg_nodes=40.0 last_nodes=75
+[GRAPH] calls=57088 capture=1959 replay=44290 direct=10839 decision_us=274881 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #436000 node=blk.0.ffn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbc85ca500 old_data=0x7ffbc85ca500
+[GRAPH] calls=57344 capture=1959 replay=44516 direct=10869 decision_us=276237 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=57600 capture=1959 replay=44772 direct=10869 decision_us=277022 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #438000 node=node_496 op=CONCAT new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a905180 old_data=0x7ffc1a905180
+0.25.073.321 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + topk 0.74 + gate 1.05 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=265 reuse=0 rebuild=265 | build_us=33800 alloc_us=556980 setin_us=10960 enqueue_us=1571496 sync_us=0
+0.25.073.433 I draft: spec timing: n=128 | draft_decode=14.52 selector=2.75 walk=0.09 ms/round
+0.25.073.455 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=57856 capture=1959 replay=44998 direct=10899 decision_us=278121 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=58112 capture=1959 replay=45224 direct=10929 decision_us=279158 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=58368 capture=1959 replay=45480 direct=10929 decision_us=279721 per_call=4.8 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #440000 node=cache_v_l1 (view) op=VIEW new_ne=[128,3] old_ne=[128,3] new_data=0x7ffc19d10000 old_data=0x7ffc19d10000
+[GRAPH] calls=58624 capture=1959 replay=45706 direct=10959 decision_us=280810 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=58880 capture=1959 replay=45962 direct=10959 decision_us=281337 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #442000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffd9ac2a000 old_data=0x7ffd9ac2a000
+[GRAPH] calls=59136 capture=1959 replay=46188 direct=10989 decision_us=282372 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] props changed #11000: device=2 nodes=54 uid=12546 warmup=0
+[GRAPH] calls=59392 capture=1959 replay=46414 direct=11019 decision_us=283442 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=59648 capture=1959 replay=46670 direct=11019 decision_us=284026 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #444000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9acdd180 old_data=0x7ffd9acdd180
+[GRAPH] calls=59904 capture=1959 replay=46896 direct=11049 decision_us=285093 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=60160 capture=1959 replay=47152 direct=11049 decision_us=285635 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=60416 capture=1959 replay=47378 direct=11079 decision_us=286650 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #446000 node= (reshaped) op=RESHAPE new_ne=[128,2] old_ne=[128,2] new_data=0x7ffc1a88d180 old_data=0x7ffc1a88d180
+[GRAPH] calls=60672 capture=1959 replay=47604 direct=11109 decision_us=287692 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=60928 capture=1959 replay=47860 direct=11109 decision_us=288281 per_call=4.7 avg_nodes=40.0 last_nodes=44
+0.25.476.097 I process: inject timing: n=144 | inject_decode=2.21 ms/call
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 34.736 ms over 576 calls (0.060 ms/call)
+[GRAPH] prop diff #448000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfba00000 old_data=0x7ffdfba00000
+[GRAPH] calls=61184 capture=1959 replay=48086 direct=11139 decision_us=289349 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=61440 capture=1959 replay=48342 direct=11139 decision_us=289908 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=61696 capture=1959 replay=48568 direct=11169 decision_us=290952 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #450000 node= (reshaped) (view) (cont) op=CONT new_ne=[320,2] old_ne=[320,2] new_data=0x7ffd9ac8d180 old_data=0x7ffd9ac8d180
+[GRAPH] calls=61952 capture=1959 replay=48794 direct=11199 decision_us=292023 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=62208 capture=1959 replay=49050 direct=11199 decision_us=292608 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #452000 node=node_449 op=MUL_MAT new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbb05180 old_data=0x7ffdfbb05180
+[GRAPH] calls=62464 capture=1959 replay=49276 direct=11229 decision_us=293715 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=62720 capture=1959 replay=49532 direct=11229 decision_us=294292 per_call=4.7 avg_nodes=40.0 last_nodes=7
+0.25.718.251 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=148)
+[GRAPH] calls=62976 capture=1959 replay=49758 direct=11259 decision_us=295330 per_call=4.7 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #454000 node=noise_norm-1 (reshaped) (view) op=VIEW new_ne=[5120,7] old_ne=[5120,7] new_data=0x7ffdfba64000 old_data=0x7ffdfba64000
+[GRAPH] calls=63232 capture=1959 replay=49984 direct=11289 decision_us=296388 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=63488 capture=1959 replay=50240 direct=11289 decision_us=296963 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #456000 node=node_551 op=MUL new_ne=[128,2] old_ne=[128,2] new_data=0x7ffd9ac32000 old_data=0x7ffd9ac32000
+[GRAPH] calls=63744 capture=1959 replay=50466 direct=11319 decision_us=298007 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=64000 capture=1959 replay=50718 direct=11323 decision_us=298646 per_call=4.7 avg_nodes=40.0 last_nodes=54
+[GRAPH] calls=64256 capture=1959 replay=50948 direct=11349 decision_us=299621 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[META] calls=448 sub/call=47.9 ar/call=46.9 | total=12.413 loop=10.535 dev=8.172 ar=2.358 ms/call | prologue=1.878 (15.1%)
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 69.356 ms over 640 calls (0.108 ms/call)
+[GRAPH] prop diff #458000 node=cache_v_l2 (view) (permuted) op=PERMUTE new_ne=[128,256] old_ne=[128,256] new_data=0x7ffbfdf50000 old_data=0x7ffbfdf50000
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=297 reuse=0 rebuild=297 | build_us=37981 alloc_us=625315 setin_us=11903 enqueue_us=1761997 sync_us=0
+0.25.937.802 I draft: spec timing: n=144 | draft_decode=14.56 selector=2.75 walk=0.09 ms/round
+0.25.937.825 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=64512 capture=1959 replay=51174 direct=11379 decision_us=300681 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=64768 capture=1959 replay=51430 direct=11379 decision_us=301239 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #460000 node=ffn_swiglu-4 op=GLU new_ne=[5888,8] old_ne=[5888,8] new_data=0x7ffdfbc8c000 old_data=0x7ffdfbc8c000
+[GRAPH] calls=65024 capture=1959 replay=51656 direct=11409 decision_us=302294 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=65280 capture=1959 replay=51897 direct=11424 decision_us=303108 per_call=4.6 avg_nodes=40.0 last_nodes=75
+[GRAPH] calls=65536 capture=1959 replay=52138 direct=11439 decision_us=303911 per_call=4.6 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #462000 node=node_365 op=FILL new_ne=[5120,1] old_ne=[5120,1] new_data=0x7ffd9ac32000 old_data=0x7ffd9ac32000
+[GRAPH] calls=65792 capture=1959 replay=52364 direct=11469 decision_us=304974 per_call=4.6 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=66048 capture=1959 replay=52620 direct=11469 decision_us=305532 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=66304 capture=1959 replay=52846 direct=11499 decision_us=306574 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #464000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a90a180 old_data=0x7ffc1a90a180
+[GRAPH] calls=66560 capture=1959 replay=53076 direct=11525 decision_us=307554 per_call=4.6 avg_nodes=40.0 last_nodes=75
+[GRAPH] calls=66816 capture=1959 replay=53328 direct=11529 decision_us=308188 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #466000 node= (reshaped) (view) (cont) (reshaped) op=RESHAPE new_ne=[1,320] old_ne=[1,320] new_data=0x7ffdfba0a000 old_data=0x7ffdfba0a000
+[GRAPH] prop diff #468000 node=q_conv-4 op=VIEW new_ne=[128,5] old_ne=[128,5] new_data=0x622a684100 old_data=0x622a684100
+[GRAPH] prop diff #470000 node=cache_r_l12 (view) (copy of conv_input-12 (view)) op=CPY new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd44ad0000 old_data=0x7ffd44ad0000
+[GRAPH] calls=67072 capture=1959 replay=53469 direct=11644 decision_us=310241 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #472000 node=cache_r_l21 (reshaped) (view) op=VIEW new_ne=[0,1] old_ne=[0,1] new_data=0x7ffd6847b000 old_data=0x7ffd6847b000
+[GRAPH] prop diff #474000 node=z-29 op=MUL_MAT new_ne=[1920,8] old_ne=[1920,4] new_data=0x7ffb03c48100 old_data=0x7ffb03c48100
+[GRAPH] prop diff #476000 node=cache_r_l38 (view) (copy of conv_input-38 (view)) op=CPY new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd6f006000 old_data=0x7ffd6f006000
+[GRAPH] prop diff #478000 node=Qcur_reshaped-47 op=VIEW new_ne=[256,6] old_ne=[256,6] new_data=0x6229c48100 old_data=0x6229c48100
+[GRAPH] prop diff #480000 node=ffn_up-55 op=MUL_MAT new_ne=[5760,8] old_ne=[5760,4] new_data=0x7ffb06648100 old_data=0x7ffb06648100
+[GRAPH] calls=67328 capture=1959 replay=53469 direct=11900 decision_us=313588 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #482000 node=node_32 op=MUL_MAT new_ne=[384,8] old_ne=[384,8] new_data=0x7ffdfba8e180 old_data=0x7ffdfba8e180
+[RT] spec checkpoints: 0.021 ms/round over 160 rounds
+[GRAPH] calls=67584 capture=2133 replay=53472 direct=11979 decision_us=315343 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[RT] target decode+sync: 49.737 ms/round over 160 rounds (last n_tokens=8)
+0.26.468.739 I process: inject timing: n=160 | inject_decode=2.19 ms/call
+[GRAPH] prop diff #484000 node=cache_k_l3 (view) op=VIEW new_ne=[128,3] old_ne=[128,3] new_data=0x7ffbff100000 old_data=0x7ffbff100000
+[GRAPH] props changed #12000: device=0 nodes=54 uid=13738 warmup=0
+[GRAPH] calls=67840 capture=2349 replay=53482 direct=12009 decision_us=316665 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=68096 capture=2349 replay=53738 direct=12009 decision_us=317467 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=68352 capture=2349 replay=53964 direct=12039 decision_us=318784 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=68608 capture=2349 replay=54220 direct=12039 decision_us=319509 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #486000 node=node_187 op=ADD new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a88e180 old_data=0x7ffc1a88e180
+[GRAPH] calls=68864 capture=2349 replay=54446 direct=12069 decision_us=320587 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #488000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a893180 old_data=0x7ffc1a893180
+[GRAPH] calls=69120 capture=2349 replay=54672 direct=12099 decision_us=321656 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=69376 capture=2349 replay=54928 direct=12099 decision_us=322231 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 104.370 ms over 704 calls (0.148 ms/call)
+0.26.706.374 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.56 accept=0.00 ms (n_process=164)
+[GRAPH] calls=69632 capture=2349 replay=55154 direct=12129 decision_us=323276 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=69888 capture=2349 replay=55410 direct=12129 decision_us=323848 per_call=4.6 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #490000 node=blk.1.ffn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbcc814a00 old_data=0x7ffbcc814a00
+[GRAPH] calls=70144 capture=2349 replay=55636 direct=12159 decision_us=324935 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #492000 node=node_625 op=CONCAT new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffc1a8e1000 old_data=0x7ffc1a8e1000
+[GRAPH] calls=70400 capture=2349 replay=55862 direct=12189 decision_us=325988 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=70656 capture=2349 replay=56118 direct=12189 decision_us=326571 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=70912 capture=2349 replay=56344 direct=12219 decision_us=327617 per_call=4.6 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=71168 capture=2349 replay=56600 direct=12219 decision_us=328175 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #494000 node=cache_v_l2 (view) op=VIEW new_ne=[128,2] old_ne=[128,2] new_data=0x7ffc19fe0000 old_data=0x7ffc19fe0000
+0.26.925.647 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.06 + topk 0.73 + gate 1.05 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=329 reuse=0 rebuild=329 | build_us=42306 alloc_us=696225 setin_us=13008 enqueue_us=1955359 sync_us=0
+0.26.925.731 I draft: spec timing: n=160 | draft_decode=14.61 selector=2.75 walk=0.09 ms/round
+0.26.925.754 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=71424 capture=2349 replay=56826 direct=12249 decision_us=329255 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=71680 capture=2349 replay=57052 direct=12279 decision_us=330310 per_call=4.6 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=71936 capture=2349 replay=57308 direct=12279 decision_us=330880 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #496000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffd9acfe180 old_data=0x7ffd9acfe180
+[GRAPH] calls=72192 capture=2349 replay=57534 direct=12309 decision_us=331948 per_call=4.6 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=72448 capture=2349 replay=57790 direct=12309 decision_us=332507 per_call=4.6 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #498000 node= (view) (cont) (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9acde180 old_data=0x7ffd9acde180
+[GRAPH] prop diff #500000 node=cache_r_l6 (view) (copy of conv_input-6 (view)) op=CPY new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd628a7c00 old_data=0x7ffd628a7c00
+[GRAPH] prop diff #502000 node=attn_post_norm-14 op=MUL new_ne=[5120,7] old_ne=[5120,8] new_data=0x7ffb00000000 old_data=0x7ffb00000000
+[GRAPH] prop diff #504000 node=attn_post_norm-23 op=MUL new_ne=[5120,7] old_ne=[5120,8] new_data=0x6231800000 old_data=0x6231800000
+[GRAPH] prop diff #506000 node=alpha-32 op=RESHAPE new_ne=[15,7] old_ne=[15,8] new_data=0x6235348100 old_data=0x6235348100
+[GRAPH] calls=72704 capture=2349 replay=57801 direct=12554 decision_us=335881 per_call=4.6 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #508000 node=cache_r_l41 (view) op=VIEW new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd90163400 old_data=0x7ffd90163400
+[GRAPH] prop diff #510000 node=linear_attn_qkv_mixed-49 op=RESHAPE new_ne=[3200,7] old_ne=[3200,8] new_data=0x7ffb04466100 old_data=0x7ffb04466100
+[GRAPH] prop diff #512000 node=alpha-58 op=RESHAPE new_ne=[15,7] old_ne=[15,8] new_data=0x622b148100 old_data=0x622b148100
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 139.243 ms over 768 calls (0.181 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=172 reuse=153 rebuild=19 | build_us=35560 alloc_us=623330 setin_us=5709 enqueue_us=4280210 sync_us=0
+0.27.215.657 I slot print_timing: id  0 | task 131 | prompt eval time =     495.95 ms /    84 tokens (    5.90 ms per token,   169.37 tokens per second)
+0.27.215.669 I slot print_timing: id  0 | task 131 |        eval time =    2509.54 ms /   256 tokens (    9.84 ms per token,   101.61 tokens per second)
+0.27.215.670 I slot print_timing: id  0 | task 131 |       total time =    3005.49 ms /   340 tokens
+0.27.215.688 I slot print_timing: id  0 | task 131 |    graphs reused =        153
+0.27.215.697 I slot print_timing: id  0 | task 131 | draft acceptance = 0.77061 (  215 accepted /   279 generated), mean len =  6.38
+0.27.215.766 I slot      release: id  0 | task 131 | stop processing: n_tokens = 339, truncated = 0
+0.27.260.222 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.248
+0.27.388.501 I slot launch_slot_: id  0 | task 175 | processing task, is_child = 0
+[GRAPH] prop diff #514000 node=conv_states_reshaped-2 op=RESHAPE new_ne=[3,3200] old_ne=[3,3200] new_data=0x6227e48100 old_data=0x6227e48100
+[GRAPH] prop diff #516000 node=l_out-9 op=ADD new_ne=[5120,42] old_ne=[5120,8] new_data=0x7ffb00000000 old_data=0x7ffb00000000
+[GRAPH] calls=72960 capture=2349 replay=57801 direct=12810 decision_us=339321 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #518000 node=l_out-18 op=ADD new_ne=[5120,42] old_ne=[5120,8] new_data=0x6233448100 old_data=0x6233448100
+[GRAPH] prop diff #520000 node=cache_r_l28 (view) op=VIEW new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd8ae90000 old_data=0x7ffd8ae90000
+[GRAPH] prop diff #522000 node=conv_input-36 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x7ffb04e6619c old_data=0x7ffb04e66114
+[GRAPH] prop diff #524000 node=node_3558 op=MUL new_ne=[128,18] old_ne=[128,18] new_data=0x6229c48100 old_data=0x6229c48100
+[GRAPH] props changed #13000: device=1 nodes=78 uid=14832 warmup=1
+[GRAPH] prop diff #526000 node=node_4166 op=MUL_MAT new_ne=[15,42] old_ne=[15,8] new_data=0x7ffb04f48100 old_data=0x7ffb04f48100
+[GRAPH] calls=73216 capture=2349 replay=57801 direct=13066 decision_us=342802 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #528000 node=conv_input-62 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x623706619c old_data=0x6237066114
+[GRAPH] prop diff #530000 node=gate-6 op=MUL new_ne=[15,38] old_ne=[15,7] new_data=0x6228960100 old_data=0x6228960100
+[GRAPH] prop diff #532000 node=node_1150 op=RMS_NORM new_ne=[128,5] old_ne=[128,5] new_data=0x7ffb02948100 old_data=0x7ffb02948100
+[GRAPH] prop diff #534000 node=norm-23 op=RMS_NORM new_ne=[256,6] old_ne=[256,6] new_data=0x7ffb04848100 old_data=0x7ffb04848100
+[GRAPH] prop diff #536000 node=cache_r_l32 (view) op=VIEW new_ne=[30720,0] old_ne=[30720,0] new_data=0x7ffd6c79e000 old_data=0x7ffd6c79e000
+[GRAPH] calls=73472 capture=2349 replay=57801 direct=13322 decision_us=346229 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #538000 node=final_output-40 op=RESHAPE new_ne=[2304,38] old_ne=[2304,7] new_data=0x7ffb03a48100 old_data=0x7ffb03a48100
+[GRAPH] prop diff #540000 node=node_3838 op=GET_ROWS new_ne=[245760,1] old_ne=[245760,1] new_data=0x6235c48100 old_data=0x6235c48100
+[GRAPH] prop diff #542000 node=cache_r_l58 (view) op=VIEW new_ne=[30720,0] old_ne=[30720,0] new_data=0x7ffd96e63000 old_data=0x7ffd96e63000
+[META] calls=512 sub/call=48.0 ar/call=47.0 | total=12.625 loop=10.687 dev=8.328 ar=2.355 ms/call | prologue=1.939 (15.4%)
+[GRAPH] prop diff #544000 node=state_predelta-1 op=RESHAPE new_ne=[128,128] old_ne=[128,128] new_data=0x7ffb01c48100 old_data=0x7ffb01c48100
+[GRAPH] prop diff #546000 node=conv_input-10 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x6235266108 old_data=0x62352661a0
+[GRAPH] calls=73728 capture=2349 replay=57801 direct=13578 decision_us=349643 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #548000 node=ffn_gate-18 op=MUL_MAT new_ne=[5760,4] old_ne=[5760,42] new_data=0x7ffb02648100 old_data=0x7ffb02648100
+[GRAPH] prop diff #550000 node=ffn_gate-27 op=MUL_MAT new_ne=[5760,4] old_ne=[5760,42] new_data=0x6234848100 old_data=0x6234848100
+[GRAPH] prop diff #552000 node=node_2840 op=ADD new_ne=[15,4] old_ne=[15,42] new_data=0x6235d60100 old_data=0x6235d60100
+[GRAPH] prop diff #554000 node=cache_r_l45 (view) (copy of conv_input-45 (view)) op=CPY new_ne=[11520,1] old_ne=[11520,1] new_data=0x7ffd91a53400 old_data=0x7ffd91a53400
+[GRAPH] prop diff #556000 node=qkv_mixed_transposed-53 op=TRANSPOSE new_ne=[4,3200] old_ne=[42,3200] new_data=0x7ffb04466100 old_data=0x7ffb04466100
+[GRAPH] calls=73984 capture=2349 replay=57801 direct=13834 decision_us=352923 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #558000 node=node_4866 op=ADD new_ne=[15,4] old_ne=[15,42] new_data=0x622b160100 old_data=0x622b160100
+[GRAPH] prop diff #560000 node=ffn_norm-3 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfba00000 old_data=0x7ffdfba00000
+[GRAPH] prop diff #562000 node=qkv_mixed_transposed-6 op=TRANSPOSE new_ne=[8,3840] old_ne=[38,3840] new_data=0x6233466100 old_data=0x6233466100
+[GRAPH] props changed #14000: device=2 nodes=44 uid=16114 warmup=0
+[GRAPH] prop diff #564000 node=attn_post_norm-14 op=MUL new_ne=[5120,8] old_ne=[5120,38] new_data=0x6226200000 old_data=0x6226200000
+[GRAPH] prop diff #566000 node=node_1842 op=MUL_MAT new_ne=[64,192] old_ne=[64,912] new_data=0x7ffb04848100 old_data=0x7ffb04848100
+[GRAPH] calls=74240 capture=2349 replay=57801 direct=14090 decision_us=356617 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #568000 node=cache_s_l32 (reshaped) (view) op=VIEW new_ne=[0,1] old_ne=[0,1] new_data=0x7ffd6c7cb000 old_data=0x7ffd6c7cb000
+[GRAPH] prop diff #570000 node=conv_states-41 op=GET_ROWS new_ne=[11520,1] old_ne=[11520,1] new_data=0x6229c48100 old_data=0x6229c48100
+[GRAPH] prop diff #572000 node=node_3870 op=UNARY new_ne=[128,15] old_ne=[128,15] new_data=0x6237448100 old_data=0x6237448100
+[GRAPH] prop diff #574000 node=cache_s_l58 (reshaped) (view) op=VIEW new_ne=[0,1] old_ne=[0,1] new_data=0x7ffd96e90000 old_data=0x7ffd96e90000
+0.28.034.508 I process: inject timing: n=176 | inject_decode=2.21 ms/call
+[GRAPH] prop diff #576000 node= (view) (cont) op=CONT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a8dd180 old_data=0x7ffc1a8dd180
+[GRAPH] calls=74496 capture=2349 replay=57801 direct=14346 decision_us=360106 per_call=4.8 avg_nodes=40.0 last_nodes=54
+[GRAPH] calls=74752 capture=2599 replay=57801 direct=14352 decision_us=360892 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #578000 node=ffn_conv_in-4 op=ADD new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ad54000 old_data=0x7ffd9ad54000
+[GRAPH] calls=75008 capture=2742 replay=57884 direct=14382 decision_us=362311 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=75264 capture=2742 replay=58140 direct=14382 decision_us=363111 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=75520 capture=2742 replay=58366 direct=14412 decision_us=364471 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #580000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffc1a932180 old_data=0x7ffc1a932180
+[GRAPH] calls=75776 capture=2742 replay=58592 direct=14442 decision_us=365737 per_call=4.8 avg_nodes=40.0 last_nodes=79
+[GRAPH] calls=76032 capture=2742 replay=58848 direct=14442 decision_us=366306 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=76288 capture=2742 replay=59074 direct=14472 decision_us=367347 per_call=4.8 avg_nodes=40.0 last_nodes=44
+[GRAPH] calls=76544 capture=2742 replay=59330 direct=14472 decision_us=367914 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #582000 node=cache_v_l0 (view) op=SET_ROWS new_ne=[384,2304] old_ne=[384,2304] new_data=0x7ffc199b0000 old_data=0x7ffc199b0000
+[GRAPH] calls=76800 capture=2742 replay=59556 direct=14502 decision_us=368965 per_call=4.8 avg_nodes=40.0 last_nodes=8
+0.28.511.283 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=182)
+[GRAPH] prop diff #584000 node=node_442 op=REPEAT new_ne=[16,320] old_ne=[16,320] new_data=0x7ffd9ac8d180 old_data=0x7ffd9ac8d180
+[GRAPH] calls=77056 capture=2742 replay=59782 direct=14532 decision_us=370008 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=77312 capture=2742 replay=60038 direct=14532 decision_us=370559 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=77568 capture=2742 replay=60264 direct=14562 decision_us=371614 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=77824 capture=2742 replay=60520 direct=14562 decision_us=372196 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #586000 node=noise_norm-1 (reshaped) op=RESHAPE new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffd9ac64000 old_data=0x7ffd9ac64000
+[GRAPH] calls=78080 capture=2742 replay=60746 direct=14592 decision_us=373249 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] prop diff #588000 node= (reshaped) op=RESHAPE new_ne=[128,12] old_ne=[128,12] new_data=0x7ffc1a832000 old_data=0x7ffc1a832000
+[GRAPH] calls=78336 capture=2742 replay=60972 direct=14622 decision_us=374295 per_call=4.8 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=78592 capture=2742 replay=61228 direct=14622 decision_us=374862 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[RT] common_sampler_sample: llama_synchronize = 0.010 ms/call | sampling cumulative = 233.525 ms over 832 calls (0.281 ms/call)
+[GRAPH] calls=78848 capture=2742 replay=61454 direct=14652 decision_us=375906 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=79104 capture=2742 replay=61710 direct=14652 decision_us=376459 per_call=4.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #590000 node=blk.1.ffn_conv_base (view) op=VIEW new_ne=[10240,1] old_ne=[10240,1] new_data=0x7ffbcc80aa00 old_data=0x7ffbcc80aa00
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=364 reuse=0 rebuild=364 | build_us=46807 alloc_us=768938 setin_us=15325 enqueue_us=2158389 sync_us=0
+0.28.892.886 I draft: spec timing: n=176 | draft_decode=14.66 selector=2.75 walk=0.09 ms/round
+0.28.892.912 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[GRAPH] calls=79360 capture=2742 replay=61936 direct=14682 decision_us=377503 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #592000 node= (view) op=VIEW new_ne=[16,320] old_ne=[16,320] new_data=0x7ffd9ac64000 old_data=0x7ffd9ac64000
+[GRAPH] calls=79616 capture=2742 replay=62162 direct=14712 decision_us=378550 per_call=4.8 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=79872 capture=2742 replay=62418 direct=14712 decision_us=379130 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=80128 capture=2742 replay=62644 direct=14742 decision_us=380168 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] calls=80384 capture=2742 replay=62900 direct=14742 decision_us=380730 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[GRAPH] prop diff #594000 node=blk.2.attn_conv_base (view) (reshaped) op=RESHAPE new_ne=[16,320] old_ne=[16,320] new_data=0x7ffbd0890600 old_data=0x7ffbd0890600
+[GRAPH] calls=80640 capture=2742 replay=63126 direct=14772 decision_us=381807 per_call=4.7 avg_nodes=40.0 last_nodes=44
+[RT] spec checkpoints: 0.022 ms/round over 192 rounds
+[GRAPH] calls=80896 capture=2742 replay=63352 direct=14802 decision_us=382856 per_call=4.7 avg_nodes=40.0 last_nodes=7
+[GRAPH] calls=81152 capture=2742 replay=63608 direct=14802 decision_us=383412 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[RT] target decode+sync: 46.107 ms/round over 192 rounds (last n_tokens=8)
+0.29.226.976 I process: inject timing: n=192 | inject_decode=2.20 ms/call
+[GRAPH] prop diff #596000 node=node_17 op=MUL new_ne=[5120,8] old_ne=[5120,8] new_data=0x7ffdfbb3c180 old_data=0x7ffdfbb3c180
+[GRAPH] calls=81408 capture=2742 replay=63834 direct=14832 decision_us=384447 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=81664 capture=2742 replay=64089 direct=14833 decision_us=385052 per_call=4.7 avg_nodes=40.0 last_nodes=62
+[GRAPH] prop diff #598000 node=node_417 op=MUL new_ne=[128,12] old_ne=[128,12] new_data=0x7ffd9ac8d180 old_data=0x7ffd9ac8d180
+[GRAPH] calls=81920 capture=2742 replay=64316 direct=14862 decision_us=386048 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82176 capture=2742 replay=64542 direct=14892 decision_us=387099 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82432 capture=2742 replay=64798 direct=14892 decision_us=387666 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] prop diff #600000 node=conv_input-1 (view) op=VIEW new_ne=[3,3840] old_ne=[3,3840] new_data=0x6229266100 old_data=0x6229266104
+[GRAPH] prop diff #602000 node=cache_r_l9 (view) (copy of conv_input-9 (view)) op=CPY new_ne=[9600,1] old_ne=[9600,1] new_data=0x7ffd43b7ba00 old_data=0x7ffd43b7ba00
+[GRAPH] prop diff #604000 node=node_1471 op=MUL_MAT new_ne=[15,1] old_ne=[15,4] new_data=0x6229348100 old_data=0x6229348100
+[GRAPH] props changed #15000: device=0 nodes=78 uid=17044 warmup=0
+[GRAPH] prop diff #606000 node=k_conv-26 op=VIEW new_ne=[128,5] old_ne=[128,5] new_data=0x7ffb05884b00 old_data=0x7ffb05884b00
+[GRAPH] calls=82688 capture=2742 replay=64875 direct=15071 decision_us=390214 per_call=4.7 avg_nodes=40.0 last_nodes=8
+[GRAPH] prop diff #608000 node=Qcur-35 op=ROPE new_ne=[256,6] old_ne=[256,6] new_data=0x7ffb05248100 old_data=0x7ffb05248100
+[GRAPH] prop diff #610000 node=conv_states_reshaped-44 op=RESHAPE new_ne=[3,3200] old_ne=[3,3200] new_data=0x6235248100 old_data=0x6235248100
+[GRAPH] prop diff #612000 node=linear_attn_out-52 (reshaped) op=RESHAPE new_ne=[5120,1] old_ne=[5120,4] new_data=0x6229c48100 old_data=0x6229c48100
+[GRAPH] prop diff #614000 node=cache_s_l61 (view) op=VIEW new_ne=[786432,0] old_ne=[786432,0] new_data=0x7ffd78126000 old_data=0x7ffd78126000
+[META] calls=576 sub/call=48.0 ar/call=47.0 | total=12.617 loop=10.669 dev=8.329 ar=2.336 ms/call | prologue=1.948 (15.4%)
+[RT] common_sampler_sample: llama_synchronize = 0.009 ms/call | sampling cumulative = 470.214 ms over 896 calls (0.525 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=196 reuse=172 rebuild=24 | build_us=44841 alloc_us=792446 setin_us=6570 enqueue_us=5061119 sync_us=0
+0.29.619.119 I slot print_timing: id  0 | task 175 | prompt eval time =     499.01 ms /    84 tokens (    5.94 ms per token,   168.33 tokens per second)
+0.29.619.126 I slot print_timing: id  0 | task 175 |        eval time =    1731.57 ms /   128 tokens (   13.63 ms per token,    73.34 tokens per second)
+0.29.619.127 I slot print_timing: id  0 | task 175 |       total time =    2230.58 ms /   212 tokens
+0.29.619.144 I slot print_timing: id  0 | task 175 |    graphs reused =        172
+0.29.619.153 I slot print_timing: id  0 | task 175 | draft acceptance = 0.75714 (  106 accepted /   140 generated), mean len =  6.30
+0.29.619.221 I slot      release: id  0 | task 175 | stop processing: n_tokens = 211, truncated = 0
+0.29.776.669 I srv    operator(): operator(): cleaning up before exit...
+0.29.792.383 W ~llama_context:  CUDA_Host compute buffer size of   5.8612 MiB, does not match expectation of   1.5334 MiB

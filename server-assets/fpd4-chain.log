@@ -1,0 +1,36 @@
+CHAIN4_START 18:04:21
+MACHINE_IDLE 18:04:22
+LIB_MD5_BASE=281ab75d34e2326c3f79a9c8e67b20d1
+LIB_MD5_CUDA=8fc530e2fb48eee720d6a6af25b17dd5
+===ARM tp1 CARDS=0,1,2 18:04:22===
+ARM_tp1_RC=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=97.03
+P60_DONE TAG=tp1 STATUS=OK
+META_tp1=[META] calls=832 sub/call=47.6 ar/call=46.6 | total=10.902 loop=9.648 dev=6.890 ar=2.754 ms/call | prologue=1.254 (11.5%)
+AR_tp1=[AR] timed=20292 skip=15806 ar_us_sum=1092700 ar_us_avg=53.8
+tp1 p1 pred_n=512 pred_ms=5266.68 tps=97.03 draft_n=642 draft_acc=419 prompt_n=76
+tp1 p2 pred_n=512 pred_ms=6474.066 tps=78.93 draft_n=843 draft_acc=390 prompt_n=106
+tp1 p3 pred_n=306 pred_ms=2700.725 tps=112.93 draft_n=336 draft_acc=258 prompt_n=84
+===ARM tp2 CARDS=0,1,2,3 18:05:02===
+ARM_tp2_RC=0
+greedy: content_len=157 reasoning_len=177 sha256=ccc284e4ec4f2ac562b26b291999b6776e10b687c1ec9720283e5075a95cb8ff
+MEDIAN_TG=68.66
+P60_DONE TAG=tp2 STATUS=OK
+META_tp2=[META] calls=960 sub/call=47.5 ar/call=46.5 | total=13.295 loop=12.148 dev=9.032 ar=3.112 ms/call | prologue=1.147 (8.6%)
+AR_tp2=[AR] timed=26113 skip=14859 ar_us_sum=2223400 ar_us_avg=85.1
+tp2 p1 pred_n=512 pred_ms=7442.968 tps=68.66 draft_n=847 draft_acc=389 prompt_n=76
+tp2 p2 pred_n=512 pred_ms=7734.742 tps=66.07 draft_n=903 draft_acc=381 prompt_n=106
+tp2 p3 pred_n=292 pred_ms=3011.892 tps=96.62 draft_n=336 draft_acc=244 prompt_n=84
+===ARM tp3 CARDS=0,1,2,3,4,5 18:05:45===
+ARM_tp3_RC=0
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=67.31
+P60_DONE TAG=tp3 STATUS=OK
+META_tp3=[META] calls=896 sub/call=47.5 ar/call=46.5 | total=21.129 loop=19.800 dev=15.208 ar=4.588 ms/call | prologue=1.329 (6.3%)
+AR_tp3=[AR] timed=41236 skip=0 ar_us_sum=5161286 ar_us_avg=125.2
+tp3 p1 pred_n=512 pred_ms=7591.272 tps=67.31 draft_n=713 draft_acc=409 prompt_n=76
+tp3 p2 pred_n=512 pred_ms=9218.172 tps=55.43 draft_n=889 draft_acc=382 prompt_n=106
+tp3 p3 pred_n=258 pred_ms=3108.403 tps=82.68 draft_n=287 draft_acc=217 prompt_n=84
+CHAIN4_END 18:06:31
+FPD4_DONE

@@ -1,0 +1,30 @@
+M1B_START 18:13:19
+IDLE 18:13:19
+LIB_BASE=281ab75d34e2326c3f79a9c8e67b20d1 LIB_CUDA=8fc530e2fb48eee720d6a6af25b17dd5
+DRAFT_MD5=958589e393740557f3c1bb5d51720f83 DRAFT_SIZE=1143006816
+===ARM m1n7 n_max=7 18:13:23===
+RC_m1n7=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=97.88
+P60_DONE TAG=m1n7 STATUS=OK
+META_m1n7=[META] calls=832 sub/call=47.6 ar/call=46.6 | total=9.924 loop=8.806 dev=6.551 ar=2.250 ms/call | prologue=1.118 (11.3%)
+GRAPH_m1n7=[GRAPH] calls=124160 capture=2838 replay=103977 direct=17345 decision_us=414678 per_call=3.3 avg_nodes=40.1 last_nodes=8
+SPECT_m1n7=0.31.262.632 I draft: spec timing: n=256 | draft_decode=13.87 selector=2.91 walk=0.07 ms/round
+0.33.966.857 I draft: spec timing: n=272 | draft_decode=13.90 selector=2.92 walk=0.07 ms/round
+m1n7 p1 pred_n=512 pred_ms=5220.529 tps=97.88 draft_n=642 draft_acc=419 prompt_n=76
+m1n7 p2 pred_n=512 pred_ms=6448.69 tps=79.24 draft_n=843 draft_acc=390 prompt_n=106
+m1n7 p3 pred_n=306 pred_ms=2678.218 tps=113.88 draft_n=336 draft_acc=258 prompt_n=84
+===ARM m1n3 n_max=3 18:14:03===
+RC_m1n3=0
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=72.30
+P60_DONE TAG=m1n3 STATUS=OK
+META_m1n3=[META] calls=1344 sub/call=47.4 ar/call=46.4 | total=8.408 loop=7.517 dev=5.319 ar=2.194 ms/call | prologue=0.891 (10.6%)
+GRAPH_m1n3=[GRAPH] calls=196096 capture=2826 replay=172432 direct=20838 decision_us=547390 per_call=2.8 avg_nodes=36.0 last_nodes=66
+SPECT_m1n3=0.37.424.322 I draft: spec timing: n=432 | draft_decode=13.19 selector=2.01 walk=0.03 ms/round
+0.38.315.522 I draft: spec timing: n=448 | draft_decode=13.18 selector=2.01 walk=0.03 ms/round
+m1n3 p1 pred_n=512 pred_ms=7068.092 tps=72.30 draft_n=471 draft_acc=354 prompt_n=76
+m1n3 p2 pred_n=512 pred_ms=7698.751 tps=66.37 draft_n=519 draft_acc=337 prompt_n=106
+m1n3 p3 pred_n=305 pred_ms=3792.64 tps=80.16 draft_n=255 draft_acc=219 prompt_n=84
+M1B_END 18:14:46
+M1B_DONE

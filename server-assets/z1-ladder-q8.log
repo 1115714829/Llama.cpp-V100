@@ -1,0 +1,42 @@
+PREFLIGHT tag=q8 depths=256,384,512,768,1024,1536,2048,3072,4096,6144,8192 reps=8 kv=q8_0 cvd=0,1,2 time=17:35:30 srv=0 bench=0 fa=0
+gpu mem before:
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+ggml_cuda_init: found 3 CUDA devices (Total VRAM: 46080 MiB):
+  Device 0: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 1: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 2: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+[RT] llama_decode entered: n_tokens=1
+[RT] ctx::decode entered: n_tokens=1
+[RT] llama_decode entered: n_tokens=256
+[RT] ctx::decode entered: n_tokens=256
+[RT] llama_decode entered: n_tokens=1
+[RT] ctx::decode entered: n_tokens=1
+| model                          |       size |     params | backend    | ngl | n_ubatch | type_k | type_v |     sm |  fa | ts           |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | -------: | -----: | -----: | -----: | --: | ------------ | --------------: | -------------------: |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |     tg32 @ d256 |         46.84 ± 3.02 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |     tg32 @ d384 |         46.57 ± 2.15 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |     tg32 @ d512 |         46.85 ± 2.19 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |     tg32 @ d768 |         46.71 ± 2.26 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d1024 |         46.70 ± 2.17 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d1536 |         46.65 ± 2.16 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d2048 |         46.58 ± 2.13 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d3072 |         46.54 ± 2.16 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d4096 |         46.26 ± 2.28 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d6144 |         45.77 ± 2.34 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d8192 |         45.08 ± 2.74 |
+
+build: unknown (0)
+BENCH_RC=0
+gpu mem after:
+0, 0 MiB
+1, 0 MiB
+2, 0 MiB
+3, 0 MiB
+4, 0 MiB
+5, 0 MiB
+LADDER_DONE tag=q8 time=17:41:12

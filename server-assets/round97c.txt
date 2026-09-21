@@ -1,0 +1,45 @@
+===ARM tp3a CARDS=0,1,2 PORT=8141===
+ARM_RC=0
+prompt1: tg=98.64 tok/s  AL=5.55
+prompt2: tg=80.25 tok/s  AL=4.22
+prompt3: tg=114.03 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=98.64
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=294 reuse=270 rebuild=24 | build_us=43208 alloc_us=648186 setin_us=9890 enqueue_us=5975508 sync_us=0
+tp3a p1 pred_n=512 pred_ms=5180.663 tps=98.64 draft_n=642 draft_acc=419 prompt_n=76
+tp3a p2 pred_n=512 pred_ms=6367.754 tps=80.25 draft_n=843 draft_acc=390 prompt_n=106
+tp3a p3 pred_n=306 pred_ms=2674.727 tps=114.03 draft_n=336 draft_acc=258 prompt_n=84
+===ARM tp2a CARDS=0,1 PORT=8142===
+ARM_RC=0
+prompt1: tg=83.72 tok/s  AL=4.87
+prompt2: tg=83.07 tok/s  AL=4.64
+prompt3: tg=115.30 tok/s  AL=6.67
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=83.72
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=283 reuse=260 rebuild=23 | build_us=40396 alloc_us=565359 setin_us=8151 enqueue_us=4512853 sync_us=0
+tp2a p1 pred_n=512 pred_ms=6103.717 tps=83.72 draft_n=730 draft_acc=406 prompt_n=76
+tp2a p2 pred_n=483 pred_ms=5802.523 tps=83.07 draft_n=728 draft_acc=379 prompt_n=106
+tp2a p3 pred_n=288 pred_ms=2489.187 tps=115.30 draft_n=301 draft_acc=244 prompt_n=84
+===ARM tp2b CARDS=0,1 PORT=8143===
+ARM_RC=0
+prompt1: tg=83.39 tok/s  AL=4.87
+prompt2: tg=83.05 tok/s  AL=4.64
+prompt3: tg=114.62 tok/s  AL=6.67
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=83.39
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=283 reuse=260 rebuild=23 | build_us=41354 alloc_us=573497 setin_us=9209 enqueue_us=4521537 sync_us=0
+tp2b p1 pred_n=512 pred_ms=6127.646 tps=83.39 draft_n=730 draft_acc=406 prompt_n=76
+tp2b p2 pred_n=483 pred_ms=5804.059 tps=83.05 draft_n=728 draft_acc=379 prompt_n=106
+tp2b p3 pred_n=288 pred_ms=2503.824 tps=114.62 draft_n=301 draft_acc=244 prompt_n=84
+===ARM tp3b CARDS=0,1,2 PORT=8144===
+ARM_RC=0
+prompt1: tg=99.06 tok/s  AL=5.55
+prompt2: tg=80.63 tok/s  AL=4.22
+prompt3: tg=114.46 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=99.06
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=294 reuse=270 rebuild=24 | build_us=43226 alloc_us=651964 setin_us=10059 enqueue_us=6000451 sync_us=0
+tp3b p1 pred_n=512 pred_ms=5158.604 tps=99.06 draft_n=642 draft_acc=419 prompt_n=76
+tp3b p2 pred_n=512 pred_ms=6337.564 tps=80.63 draft_n=843 draft_acc=390 prompt_n=106
+tp3b p3 pred_n=306 pred_ms=2664.735 tps=114.46 draft_n=336 draft_acc=258 prompt_n=84
+ROUND97C_DONE

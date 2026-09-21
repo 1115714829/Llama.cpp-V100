@@ -1,0 +1,95 @@
+CHAIN2_START 17:40:18
+WAIT_CHAIN1 i=1 17:40:18
+WAIT_CHAIN1 i=2 17:40:48
+WAIT_CHAIN1 i=3 17:41:18
+WAIT_CHAIN1 i=4 17:41:48
+WAIT_CHAIN1 i=5 17:42:18
+WAIT_CHAIN1 i=6 17:42:48
+WAIT_CHAIN1 i=7 17:43:18
+WAIT_CHAIN1 i=8 17:43:49
+WAIT_CHAIN1 i=9 17:44:19
+WAIT_CHAIN1 i=10 17:44:49
+WAIT_CHAIN1 i=11 17:45:19
+WAIT_CHAIN1 i=12 17:45:49
+WAIT_CHAIN1 i=13 17:46:19
+WAIT_CHAIN1 i=14 17:46:49
+WAIT_CHAIN1 i=15 17:47:19
+CHAIN1_SEEN=1
+IDLE_WAIT i=1 idle=1 17:47:49
+IDLE_WAIT i=2 idle=2 17:48:09
+ARM_ATTR_RC=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=63.98
+P60_DONE TAG=attr STATUS=OK
+===META===
+[META] calls=512 sub/call=48.0 ar/call=47.0 | total=21.387 loop=19.852 dev=17.522 ar=2.326 ms/call | prologue=1.535 (7.2%)
+[META] calls=576 sub/call=48.0 ar/call=47.0 | total=21.283 loop=19.743 dev=17.435 ar=2.304 ms/call | prologue=1.540 (7.2%)
+===GRAPHCOUNTERS===
+[GRAPH] calls=81664 capture=2742 replay=64089 direct=14833 decision_us=477330 per_call=5.8 avg_nodes=40.0 last_nodes=62
+[GRAPH] calls=81920 capture=2742 replay=64316 direct=14862 decision_us=478208 per_call=5.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82176 capture=2742 replay=64542 direct=14892 decision_us=479171 per_call=5.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82432 capture=2742 replay=64798 direct=14892 decision_us=479604 per_call=5.8 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82688 capture=2742 replay=64875 direct=15071 decision_us=484326 per_call=5.9 avg_nodes=40.0 last_nodes=8
+===PROPDIFF===
+[GRAPH] prop diff #0 node=norm-0 op=RMS_NORM new_ne=[5120,2] old_ne=[0,0] new_data=0x7ffec1248100 old_data=(nil)
+[GRAPH] prop diff #1 node=attn_norm-0 op=MUL new_ne=[5120,2] old_ne=[0,0] new_data=0x7ffec1248100 old_data=(nil)
+[GRAPH] prop diff #2 node=cache_r_l0 (reshaped) op=RESHAPE new_ne=[9600,8] old_ne=[0,0] new_data=0x7ffda0000000 old_data=(nil)
+[GRAPH] prop diff #2000 node=node_685 op=GATED_DELTA_NET new_ne=[1920,1026] old_ne=[0,0] new_data=0x1000d284100 old_data=(nil)
+[GRAPH] prop diff #4000 node=cache_r_l17 (view) op=VIEW new_ne=[11520,1] old_ne=[0,0] new_data=0x7ffda6ba1800 old_data=(nil)
+[GRAPH] prop diff #6000 node=conv_input-25 (view) op=VIEW new_ne=[3,3200] old_ne=[0,0] new_data=0x7ffc83066100 old_data=(nil)
+[GRAPH] prop diff #8000 node=node_2711 op=GATED_DELTA_NET new_ne=[1920,1026] old_ne=[0,0] new_data=0x7ffec5884100 old_data=(nil)
+[GRAPH] prop diff #10000 node=node_3319 op=MUL_MAT new_ne=[15,2] old_ne=[0,0] new_data=0x7ffc82748100 old_data=(nil)
+===DIRECTPROBE===
+[DIRECT_PROBE] changes=321536 nodes_updated_without_memcmp=272770 fields: data=83958 src_data=84579 src_ptr=72026 ne=242082 nb=263670 op=50730 type=1212 view=55812 op_params=44184 flags=50730 src_ne=264291 src_nb=287181 buffer=50730 name=50730 extra=0 other=0 src_data_j=[83259,23058,1059,621,432,432,0,0,0,0] src_ne_j=[225255,86487,4734,4728,3456,432,0,0,0,0] src_nb_j=[248145,85836,4083,4728,3456,432,0,0,0,0] top5=[attn_norm-0=72 cache_r_l0 (reshaped) (view)=30 cache_r_l0 (reshaped) (view) (view)=30 cache_r_l0 (reshaped)=9 node_484=1]
+[DIRECT_PROBE] changes=323584 nodes_updated_without_memcmp=278201 fields: data=84062 src_data=84683 src_ptr=72534 ne=243274 nb=265030 op=50730 type=1212 view=55916 op_params=44288 flags=50730 src_ne=265643 src_nb=288701 buffer=50730 name=50730 extra=0 other=0 src_data_j=[83363,23058,1059,621,432,432,0,0,0,0] src_ne_j=[226364,86892,4754,4754,3476,432,0,0,0,0] src_nb_j=[249422,86241,4103,4754,3476,432,0,0,0,0] top5=[attn_norm-0=75 cache_r_l0 (reshaped) (view)=30 cache_r_l0 (reshaped) (view) (view)=30 cache_r_l0 (reshaped)=9 gate-8=1]
+[DIRECT_PROBE] changes=325632 nodes_updated_without_memcmp=278862 fields: data=84192 src_data=84813 src_ptr=72534 ne=244888 nb=266852 op=50730 type=1212 view=56046 op_params=44418 flags=50730 src_ne=267457 src_nb=290723 buffer=50730 name=50730 extra=0 other=0 src_data_j=[83493,23058,1059,621,432,432,0,0,0,0] src_ne_j=[227841,87460,4781,4790,3503,432,0,0,0,0] src_nb_j=[251107,86809,4130,4790,3503,432,0,0,0,0] top5=[attn_norm-0=75 cache_r_l0 (reshaped) (view)=30 cache_r_l0 (reshaped) (view) (view)=30 cache_r_l0 (reshaped)=9 node_1612=1]
+[DIRECT_PROBE] changes=327680 nodes_updated_without_memcmp=279522 fields: data=84323 src_data=84944 src_ptr=72534 ne=246502 nb=268674 op=50730 type=1212 view=56177 op_params=44549 flags=50730 src_ne=269270 src_nb=292744 buffer=50730 name=50730 extra=0 other=0 src_data_j=[83624,23058,1059,621,432,432,0,0,0,0] src_ne_j=[229318,88027,4807,4825,3529,432,0,0,0,0] src_nb_j=[252792,87376,4156,4825,3529,432,0,0,0,0] top5=[attn_norm-0=75 cache_r_l0 (reshaped) (view)=30 cache_r_l0 (reshaped) (view) (view)=30 cache_r_l0 (reshaped)=9 norm-32=1]
+[DIRECT_PROBE] changes=329728 nodes_updated_without_memcmp=280182 fields: data=84453 src_data=85074 src_ptr=72534 ne=248116 nb=270496 op=50730 type=1212 view=56307 op_params=44679 flags=50730 src_ne=271084 src_nb=294766 buffer=50730 name=50730 extra=0 other=0 src_data_j=[83754,23058,1059,621,432,432,0,0,0,0] src_ne_j=[230795,88594,4833,4860,3555,432,0,0,0,0] src_nb_j=[254477,87943,4182,4860,3555,432,0,0,0,0] top5=[attn_norm-0=75 cache_r_l0 (reshaped) (view)=30 cache_r_l0 (reshaped) (view) (view)=30 cache_r_l0 (reshaped)=9 ffn_up-43=1]
+[DIRECT_PROBE] changes=331776 nodes_updated_without_memcmp=280862 fields: data=84588 src_data=85209 src_ptr=72534 ne=249716 nb=272312 op=50730 type=1212 view=56442 op_params=44814 flags=50730 src_ne=272889 src_nb=296787 buffer=50730 name=50730 extra=0 other=0 src_data_j=[83889,23058,1059,621,432,432,0,0,0,0] src_ne_j=[232272,89147,4860,4895,3582,432,0,0,0,0] src_nb_j=[256170,88496,4209,4895,3582,432,0,0,0,0] top5=[attn_norm-0=75 cache_r_l0 (reshaped) (view)=30 cache_r_l0 (reshaped) (view) (view)=30 cache_r_l0 (reshaped)=9 node_4286=1]
+===OPTIMING===
+[OP] SCALE                  calls=3393    total=-22612.349 ms   0.0% avg= -6.664 ms
+[OP] CPY                    calls=6642    total=-210023.900 ms   0.3% avg=-31.621 ms
+[OP] CONT                   calls=11583   total=   93.682 ms  -0.0% avg=  0.008 ms
+[OP] RESHAPE                calls=48735   total=-23519862.325 ms  29.4% avg=-482.607 ms
+[OP] VIEW                   calls=34982   total=-17456919.927 ms  21.8% avg=-499.026 ms
+[OP] TRANSPOSE              calls=3249    total=-3135596.764 ms   3.9% avg=-965.096 ms
+[OP] GET_ROWS               calls=6831    total=-125066.711 ms   0.2% avg=-18.309 ms
+[OP] SET_ROWS               calls=120     total=    0.618 ms  -0.0% avg=  0.005 ms
+[OP] ROPE                   calls=1250    total=    7.694 ms  -0.0% avg=  0.006 ms
+[OP] FILL                   calls=4992    total=   42.439 ms  -0.0% avg=  0.009 ms
+[OP] GLU                    calls=4521    total=-4406.638 ms   0.0% avg= -0.975 ms
+[GRAPH] prop diff #608000 node=Qcur-35 op=ROPE new_ne=[256,6] old_ne=[256,6] new_data=0x7ffb25248100 old_data=0x7ffb25248100
+[OP] graphs=15282 nodes=724152 gpu_total=-5252.331 ms/ubatch
+[OP] ADD                    calls=20130   total=-4679632.757 ms   5.8% avg=-232.471 ms
+[OP] MUL                    calls=26652   total=-15504175.670 ms  19.3% avg=-581.727 ms
+[OP] REPEAT                 calls=552     total=    4.997 ms  -0.0% avg=  0.009 ms
+[OP] CONCAT                 calls=8304    total=   79.512 ms  -0.0% avg=  0.010 ms
+[OP] RMS_NORM               calls=17463   total=-15264674.779 ms  19.0% avg=-874.115 ms
+[OP] MUL_MAT                calls=28758   total=-68881.925 ms   0.1% avg= -2.395 ms
+[OP] SCALE                  calls=3456    total=-39298.604 ms   0.0% avg=-11.371 ms
+[OP] CPY                    calls=6768    total=-210331.634 ms   0.3% avg=-31.077 ms
+[OP] CONT                   calls=11583   total=   93.682 ms  -0.0% avg=  0.008 ms
+[OP] RESHAPE                calls=49128   total=-23601363.830 ms  29.4% avg=-480.406 ms
+[OP] VIEW                   calls=35325   total=-17510911.555 ms  21.8% avg=-495.709 ms
+[OP] TRANSPOSE              calls=3312    total=-3251161.549 ms   4.1% avg=-981.631 ms
+[OP] GET_ROWS               calls=6960    total=-125156.626 ms   0.2% avg=-17.982 ms
+[OP] SET_ROWS               calls=126     total=    0.652 ms  -0.0% avg=  0.005 ms
+[OP] ROPE                   calls=1278    total=    7.863 ms  -0.0% avg=  0.006 ms
+[OP] FILL                   calls=4992    total=   42.439 ms  -0.0% avg=  0.009 ms
+[OP] GLU                    calls=4608    total=-10765.005 ms   0.0% avg= -2.336 ms
+ARM_MTP4_RC=0
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=83.55
+P60_DONE TAG=mtp4 STATUS=OK
+===MTP4SPEC===
+        spec='--spec-type draft-mtp --spec-draft-n-max 4'  n_predict=256  ctx=8192  libdir=/root/libdir-instr
+===TIMINGS_ATTR===
+attr p1 pred_n=256 pred_ms=3985.48 tps=63.98 draft_n=355 draft_acc=204 prompt_n=76
+attr p2 pred_n=256 pred_ms=5252.954 tps=48.54 draft_n=498 draft_acc=183 prompt_n=106
+attr p3 pred_n=256 pred_ms=3173.874 tps=80.34 draft_n=279 draft_acc=215 prompt_n=84
+===TIMINGS_MTP4===
+mtp4 p1 pred_n=256 pred_ms=3615.791 tps=70.52 draft_n=349 draft_acc=167 prompt_n=76
+mtp4 p2 pred_n=256 pred_ms=3052.155 tps=83.55 draft_n=308 draft_acc=178 prompt_n=106
+mtp4 p3 pred_n=256 pred_ms=2499.045 tps=102.04 draft_n=233 draft_acc=196 prompt_n=84
+CHAIN2_END 17:49:22
+FPD2_DONE

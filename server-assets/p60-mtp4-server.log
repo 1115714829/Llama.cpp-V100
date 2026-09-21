@@ -1,0 +1,120 @@
+0.00.000.267 I srv  llama_server: initializing ...
+0.00.397.273 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.399.155 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.399.245 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.03.438.111 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.03.661.681 I common_speculative_init_result: creating MTP draft context against the target model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.03.738.186 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 8192, kv_unified = 'false'
+0.03.738.432 W set_sampler: backend sampling not supported with SPLIT_MODE_TENSOR; using CPU
+0.03.738.436 W spec common_specu: backend offload failed for seq_id=0; using CPU sampler
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.03.804.766 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.03.804.800 I srv  llama_server: model loaded
+0.03.804.809 I srv  llama_server: listening on http://127.0.0.1:8152
+0.15.009.474 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.15.009.559 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+[RT] llama_decode entered: n_tokens=42
+[RT] ctx::decode entered: n_tokens=42
+[RT] process_ubatch entered: n_tokens=42
+[RT] common_sampler_sample: llama_synchronize = 0.354 ms/call | sampling cumulative = 16.402 ms over 64 calls (0.256 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.515 ms/call | sampling cumulative = 39.743 ms over 128 calls (0.310 ms/call)
+[RT] spec checkpoints: 0.011 ms/round over 32 rounds
+[RT] target decode+sync: 39.341 ms/round over 32 rounds (last n_tokens=5)
+[RT] common_sampler_sample: llama_synchronize = 0.493 ms/call | sampling cumulative = 62.098 ms over 192 calls (0.323 ms/call)
+0.16.737.598 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.24 accept=0.00 ms (n_process=33)
+[RT] common_sampler_sample: llama_synchronize = 0.481 ms/call | sampling cumulative = 83.896 ms over 256 calls (0.328 ms/call)
+0.17.317.669 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.24 accept=0.00 ms (n_process=49)
+[RT] common_sampler_sample: llama_synchronize = 0.492 ms/call | sampling cumulative = 106.246 ms over 320 calls (0.332 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.369 ms/call | sampling cumulative = 80.206 ms over 384 calls (0.209 ms/call)
+[RT] spec checkpoints: 0.011 ms/round over 64 rounds
+[RT] target decode+sync: 25.589 ms/round over 64 rounds (last n_tokens=5)
+0.17.907.034 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.24 accept=0.00 ms (n_process=65)
+[RT] common_sampler_sample: llama_synchronize = 0.362 ms/call | sampling cumulative = 97.456 ms over 448 calls (0.218 ms/call)
+0.18.495.751 I slot print_timing: id  0 | task 0 | n_gen =    209, tg =  68.84 t/s, tg_3s =  69.17 t/s
+[RT] common_sampler_sample: llama_synchronize = 0.395 ms/call | sampling cumulative = 157.078 ms over 512 calls (0.307 ms/call)
+0.18.653.103 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.25 accept=0.00 ms (n_process=81)
+[RT] common_sampler_sample: llama_synchronize = 0.393 ms/call | sampling cumulative = 174.698 ms over 576 calls (0.303 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=91 reuse=85 rebuild=6 | build_us=9874 alloc_us=153021 setin_us=2314 enqueue_us=1661017 sync_us=0
+0.19.089.963 I slot print_timing: id  0 | task 0 | prompt eval time =     464.56 ms /    76 tokens (    6.11 ms per token,   163.60 tokens per second)
+0.19.089.969 I slot print_timing: id  0 | task 0 |        eval time =    3615.79 ms /   256 tokens (   14.18 ms per token,    70.52 tokens per second)
+0.19.089.971 I slot print_timing: id  0 | task 0 |       total time =    4080.35 ms /   332 tokens
+0.19.090.012 I slot print_timing: id  0 | task 0 |    graphs reused =         85
+0.19.090.018 I slot print_timing: id  0 | task 0 | draft acceptance = 0.47851 (  167 accepted /   349 generated), mean len =  2.90
+0.19.090.097 I slot      release: id  0 | task 0 | stop processing: n_tokens = 331, truncated = 0
+0.19.247.565 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.425 (> 0.100 thold), f_keep = 0.136
+0.19.388.337 I slot launch_slot_: id  0 | task 92 | processing task, is_child = 0
+[RT] spec checkpoints: 0.011 ms/round over 96 rounds
+[RT] target decode+sync: 43.501 ms/round over 96 rounds (last n_tokens=5)
+[RT] common_sampler_sample: llama_synchronize = 0.374 ms/call | sampling cumulative = 191.895 ms over 640 calls (0.300 ms/call)
+0.20.121.633 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=99)
+[RT] common_sampler_sample: llama_synchronize = 0.357 ms/call | sampling cumulative = 26.151 ms over 704 calls (0.037 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.413 ms/call | sampling cumulative = 226.657 ms over 768 calls (0.295 ms/call)
+0.20.716.308 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=115)
+[RT] common_sampler_sample: llama_synchronize = 0.368 ms/call | sampling cumulative = 58.589 ms over 832 calls (0.070 ms/call)
+[RT] spec checkpoints: 0.011 ms/round over 128 rounds
+[RT] target decode+sync: 25.564 ms/round over 128 rounds (last n_tokens=5)
+0.21.311.843 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=131)
+[RT] common_sampler_sample: llama_synchronize = 0.378 ms/call | sampling cumulative = 260.317 ms over 896 calls (0.291 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.418 ms/call | sampling cumulative = 279.511 ms over 960 calls (0.291 ms/call)
+0.22.006.741 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=147)
+[RT] common_sampler_sample: llama_synchronize = 0.394 ms/call | sampling cumulative = 106.559 ms over 1024 calls (0.104 ms/call)
+[RT] spec checkpoints: 0.012 ms/round over 160 rounds
+[RT] target decode+sync: 28.726 ms/round over 160 rounds (last n_tokens=5)
+[RT] common_sampler_sample: llama_synchronize = 0.507 ms/call | sampling cumulative = 117.408 ms over 1088 calls (0.108 ms/call)
+0.22.590.065 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=163)
+[RT] common_sampler_sample: llama_synchronize = 0.417 ms/call | sampling cumulative = 132.488 ms over 1152 calls (0.115 ms/call)
+0.22.850.637 I slot print_timing: id  0 | task 92 | n_gen =    251, tg =  82.94 t/s, tg_3s =  83.27 t/s
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=171 reuse=160 rebuild=11 | build_us=18049 alloc_us=278576 setin_us=4364 enqueue_us=3022062 sync_us=0
+0.22.888.570 I slot print_timing: id  0 | task 92 | prompt eval time =     448.02 ms /   106 tokens (    4.23 ms per token,   236.59 tokens per second)
+0.22.888.576 I slot print_timing: id  0 | task 92 |        eval time =    3052.16 ms /   256 tokens (   11.97 ms per token,    83.55 tokens per second)
+0.22.888.578 I slot print_timing: id  0 | task 92 |       total time =    3500.18 ms /   362 tokens
+0.22.888.613 I slot print_timing: id  0 | task 92 |    graphs reused =        160
+0.22.888.619 I slot print_timing: id  0 | task 92 | draft acceptance = 0.57792 (  178 accepted /   308 generated), mean len =  3.31
+0.22.888.670 I slot      release: id  0 | task 92 | stop processing: n_tokens = 361, truncated = 0
+0.23.488.974 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.536 (> 0.100 thold), f_keep = 0.125
+0.23.619.209 I slot launch_slot_: id  0 | task 173 | processing task, is_child = 0
+[RT] common_sampler_sample: llama_synchronize = 0.318 ms/call | sampling cumulative = 12.916 ms over 1216 calls (0.011 ms/call)
+0.24.380.885 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.25 accept=0.00 ms (n_process=180)
+[RT] common_sampler_sample: llama_synchronize = 0.435 ms/call | sampling cumulative = 373.592 ms over 1280 calls (0.292 ms/call)
+[RT] spec checkpoints: 0.011 ms/round over 192 rounds
+[RT] target decode+sync: 36.616 ms/round over 192 rounds (last n_tokens=5)
+[RT] common_sampler_sample: llama_synchronize = 0.346 ms/call | sampling cumulative = 45.362 ms over 1344 calls (0.034 ms/call)
+0.24.973.902 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.25 accept=0.00 ms (n_process=196)
+[RT] common_sampler_sample: llama_synchronize = 0.345 ms/call | sampling cumulative = 404.654 ms over 1408 calls (0.287 ms/call)
+[RT] common_sampler_sample: llama_synchronize = 0.345 ms/call | sampling cumulative = 82.045 ms over 1472 calls (0.056 ms/call)
+0.25.577.563 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.25 accept=0.00 ms (n_process=212)
+[RT] common_sampler_sample: llama_synchronize = 0.327 ms/call | sampling cumulative = 435.474 ms over 1536 calls (0.284 ms/call)
+[RT] spec checkpoints: 0.012 ms/round over 224 rounds
+[RT] target decode+sync: 28.639 ms/round over 224 rounds (last n_tokens=5)
+[RT] common_sampler_sample: llama_synchronize = 0.336 ms/call | sampling cumulative = 450.610 ms over 1600 calls (0.282 ms/call)
+0.26.286.965 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.25 accept=0.00 ms (n_process=228)
+[RT] common_sampler_sample: llama_synchronize = 0.347 ms/call | sampling cumulative = 138.333 ms over 1664 calls (0.083 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=233 reuse=216 rebuild=17 | build_us=27873 alloc_us=433161 setin_us=6007 enqueue_us=4241301 sync_us=0
+0.26.542.237 I slot print_timing: id  0 | task 173 | prompt eval time =     423.93 ms /    84 tokens (    5.05 ms per token,   198.15 tokens per second)
+0.26.542.243 I slot print_timing: id  0 | task 173 |        eval time =    2499.05 ms /   256 tokens (    9.80 ms per token,   102.04 tokens per second)
+0.26.542.245 I slot print_timing: id  0 | task 173 |       total time =    2922.97 ms /   340 tokens
+0.26.542.260 I slot print_timing: id  0 | task 173 |    graphs reused =        216
+0.26.542.266 I slot print_timing: id  0 | task 173 | draft acceptance = 0.84120 (  196 accepted /   233 generated), mean len =  4.32
+0.26.542.314 I slot      release: id  0 | task 173 | stop processing: n_tokens = 339, truncated = 0
+0.26.585.825 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.248
+0.26.719.462 I slot launch_slot_: id  0 | task 236 | processing task, is_child = 0
+[RT] common_sampler_sample: llama_synchronize = 0.361 ms/call | sampling cumulative = 115.781 ms over 1728 calls (0.067 ms/call)
+0.27.728.930 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=246)
+[RT] common_sampler_sample: llama_synchronize = 0.423 ms/call | sampling cumulative = 502.086 ms over 1792 calls (0.280 ms/call)
+[RT] spec checkpoints: 0.011 ms/round over 256 rounds
+[RT] target decode+sync: 39.027 ms/round over 256 rounds (last n_tokens=5)
+[RT] common_sampler_sample: llama_synchronize = 0.356 ms/call | sampling cumulative = 518.148 ms over 1856 calls (0.279 ms/call)
+0.28.520.713 I common_speculative_timing_report: spec overhead per round | process=0.04 draft=0.00 accept=0.00 ms (n_process=262)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=268 reuse=246 rebuild=22 | build_us=36122 alloc_us=564737 setin_us=6967 enqueue_us=5029958 sync_us=0
+0.28.912.190 I slot print_timing: id  0 | task 236 | prompt eval time =     427.18 ms /    84 tokens (    5.09 ms per token,   196.64 tokens per second)
+0.28.912.195 I slot print_timing: id  0 | task 236 |        eval time =    1765.51 ms /   128 tokens (   13.90 ms per token,    71.93 tokens per second)
+0.28.912.197 I slot print_timing: id  0 | task 236 |       total time =    2192.69 ms /   212 tokens
+0.28.912.233 I slot print_timing: id  0 | task 236 |    graphs reused =        246
+0.28.912.238 I slot print_timing: id  0 | task 236 | draft acceptance = 0.76613 (   95 accepted /   124 generated), mean len =  4.06
+0.28.912.289 I slot      release: id  0 | task 236 | stop processing: n_tokens = 211, truncated = 0
+0.29.052.023 I srv    operator(): operator(): cleaning up before exit...

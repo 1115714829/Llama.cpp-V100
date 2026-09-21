@@ -1,0 +1,8 @@
+libs:   fff659c1c2a4d8b78618928b17e0dd38 libllama.so.0.4.1
+        ea4f0af6de9135a8af25e61dda4ecf52 libggml-cuda.so.0.24.0
+prompt1: tg=98.88 tok/s  AL=5.55
+prompt2: tg=80.70 tok/s  AL=4.22
+prompt3: tg=116.04 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=98.88
+FINAL_DONE

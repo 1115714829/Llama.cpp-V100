@@ -1,0 +1,80 @@
+CHAIN3_START 17:51:51
+WAIT_IDLE i=1 17:51:51
+WAIT_IDLE i=2 17:52:21
+WAIT_IDLE i=3 17:52:51
+WAIT_IDLE i=4 17:53:21
+WAIT_IDLE i=5 17:53:51
+WAIT_IDLE i=6 17:54:21
+WAIT_IDLE i=7 17:54:51
+WAIT_IDLE i=8 17:55:21
+WAIT_IDLE i=9 17:55:51
+WAIT_IDLE i=10 17:56:21
+WAIT_IDLE i=11 17:56:51
+WAIT_IDLE i=12 17:57:21
+WAIT_IDLE i=13 17:57:51
+WAIT_IDLE i=14 17:58:22
+WAIT_IDLE i=15 17:58:52
+WAIT_IDLE i=16 17:59:22
+MACHINE_IDLE 17:59:52
+META_MD5_BEFORE=d1f0a4c94371916b64c85287a01f40d6 UPLOAD=6f0e2bf8a2a413a6c8d11e63622ba92b
+META_SWAPPED
+META_MD5_AFTER=6f0e2bf8a2a413a6c8d11e63622ba92b
+BUILD_RC=0 ERRORS=0 TARGETS=115
+BUILD_TAIL=[100%] Built target llama-app
+LIB_MD5_BASE=281ab75d34e2326c3f79a9c8e67b20d1
+LIB_MD5_CUDA=8fc530e2fb48eee720d6a6af25b17dd5
+MARK_RCACHE=1
+ARM_C0_RC=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=83.14
+P60_DONE TAG=n6c0 STATUS=OK
+ARM_C1_RC=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=81.00
+P60_DONE TAG=n6c1 STATUS=OK
+===C1_META===
+[META] calls=512 sub/call=48.0 ar/call=47.0 | total=12.625 loop=10.687 dev=8.328 ar=2.355 ms/call | prologue=1.939 (15.4%)
+[META] calls=576 sub/call=48.0 ar/call=47.0 | total=12.617 loop=10.669 dev=8.329 ar=2.336 ms/call | prologue=1.948 (15.4%)
+===C1_GRAPH===
+[GRAPH] calls=82176 capture=2742 replay=64542 direct=14892 decision_us=387099 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82432 capture=2742 replay=64798 direct=14892 decision_us=387666 per_call=4.7 avg_nodes=40.0 last_nodes=78
+[GRAPH] calls=82688 capture=2742 replay=64875 direct=15071 decision_us=390214 per_call=4.7 avg_nodes=40.0 last_nodes=8
+===C1_MKEY===
+[MKEY] r=0 i=0 j=0 n0=0x7ffda0ff0ec0 uid=22 n=79
+[MKEY] r=0 i=0 j=1 n0=0x7ffd08330ec0 uid=151 n=79
+[MKEY] r=0 i=0 j=2 n0=0x7ffcf1320ec0 uid=280 n=79
+[MKEY] r=1 i=0 j=0 n0=0x7ffc48ff2450 uid=430 n=62
+[MKEY] r=1 i=0 j=1 n0=0x7ffc31fe2450 uid=441 n=62
+[MKEY] r=1 i=0 j=2 n0=0x7ffba8ff2450 uid=452 n=62
+[MKEY] r=2 i=0 j=0 n0=0x7ffda0ff0ec0 uid=475 n=79
+[MKEY] r=2 i=0 j=1 n0=0x7ffd28ff0ec0 uid=604 n=79
+[MKEY] r=2 i=0 j=2 n0=0x7ffd11fe0ec0 uid=733 n=79
+[MKEY] r=3 i=0 j=0 n0=0x7ffb91fe0620 uid=864 n=58
+[MKEY] r=3 i=0 j=1 n0=0x7ffb7afd0620 uid=865 n=58
+[MKEY] r=3 i=0 j=2 n0=0x7ffb63fc0620 uid=866 n=58
+[MKEY] r=4 i=0 j=0 n0=0x7ffcfafd0ec0 uid=870 n=79
+[MKEY] r=4 i=0 j=1 n0=0x7ffce3fc0ec0 uid=999 n=79
+[MKEY] r=4 i=0 j=2 n0=0x7ffcccfb0ec0 uid=1128 n=79
+[MKEY] r=5 i=0 j=0 n0=0x7ffc48ff0620 uid=1259 n=58
+[MKEY] r=5 i=0 j=1 n0=0x7ffc31fe0620 uid=1260 n=58
+[MKEY] r=5 i=0 j=2 n0=0x7ffba8ff0620 uid=1261 n=58
+[MKEY] r=6 i=0 j=0 n0=0x7ffda0ff0ec0 uid=1265 n=79
+[MKEY] r=6 i=0 j=1 n0=0x7ffd28ff0ec0 uid=1394 n=79
+ARM_MTP_RC=0
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=83.45
+P60_DONE TAG=n6mtp STATUS=OK
+===TIMINGS_C0===
+n6c0 p1 pred_n=256 pred_ms=3067.233 tps=83.14 draft_n=355 draft_acc=204 prompt_n=76
+n6c0 p2 pred_n=256 pred_ms=3970.362 tps=64.23 draft_n=498 draft_acc=183 prompt_n=106
+n6c0 p3 pred_n=256 pred_ms=2391.738 tps=106.62 draft_n=279 draft_acc=215 prompt_n=84
+===TIMINGS_C1===
+n6c1 p1 pred_n=256 pred_ms=3148.142 tps=81.00 draft_n=355 draft_acc=204 prompt_n=76
+n6c1 p2 pred_n=256 pred_ms=4154.619 tps=61.38 draft_n=498 draft_acc=183 prompt_n=106
+n6c1 p3 pred_n=256 pred_ms=2509.542 tps=101.61 draft_n=279 draft_acc=215 prompt_n=84
+===TIMINGS_MTP===
+n6mtp p1 pred_n=256 pred_ms=3620.277 tps=70.44 draft_n=349 draft_acc=167 prompt_n=76
+n6mtp p2 pred_n=256 pred_ms=3055.549 tps=83.45 draft_n=308 draft_acc=178 prompt_n=106
+n6mtp p3 pred_n=256 pred_ms=2519.119 tps=101.23 draft_n=233 draft_acc=196 prompt_n=84
+CHAIN3_END 18:02:01
+FPD3_DONE

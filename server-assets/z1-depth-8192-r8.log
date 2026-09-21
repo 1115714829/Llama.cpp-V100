@@ -1,0 +1,36 @@
+PREFLIGHT depth=8192 reps=8 tag=8192-r8 time=17:29:22 srv=0 bench=0 fa=0
+gpu mem before:
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 1 MiB
+4, 1 MiB
+5, 0 MiB
+BENCH_CMD: /root/libdir-instr/llama-bench -m Qwen3.8-27B-Q8_0.gguf -ngl 999 -sm tensor -ts 1/1/1 -p 0 -n 32 -d 8192 -ctk q8_0 -ctv q8_0 -fa 1 -ub 2048 -r 8 -o md
+ggml_cuda_init: found 6 CUDA devices (Total VRAM: 92160 MiB):
+  Device 0: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 1: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 2: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 3: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 4: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+  Device 5: Tesla V100-SXM2-16GB, compute capability 7.0, VMM: yes, VRAM: 15360 MiB
+[RT] llama_decode entered: n_tokens=1
+[RT] ctx::decode entered: n_tokens=1
+[RT] llama_decode entered: n_tokens=2048
+[RT] ctx::decode entered: n_tokens=2048
+[RT] llama_decode entered: n_tokens=2048
+[RT] ctx::decode entered: n_tokens=2048
+| model                          |       size |     params | backend    | ngl | n_ubatch | type_k | type_v |     sm |  fa | ts           |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | -------: | -----: | -----: | -----: | --: | ------------ | --------------: | -------------------: |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | CUDA       | 999 |     2048 |   q8_0 |   q8_0 | tensor |   1 | 1.00/1.00/1.00 |    tg32 @ d8192 |         41.43 ± 2.86 |
+
+build: unknown (0)
+BENCH_RC=0
+gpu mem after:
+0, 1 MiB
+1, 1 MiB
+2, 1 MiB
+3, 1 MiB
+4, 1 MiB
+5, 0 MiB
+DEPTH_DONE depth=8192 reps=8 tag=8192-r8 time=17:33:52

@@ -1,0 +1,21 @@
+===ARM la1 L=/root/libdir-nccl===
+ARM_RC=0
+prompt1: tg=75.08 tok/s  AL=4.90
+prompt2: tg=66.26 tok/s  AL=3.90
+prompt3: tg=93.60 tok/s  AL=6.13
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=75.08
+===ARM lb1 L=/root/libdir-instr===
+ARM_RC=0
+prompt1: tg=78.49 tok/s  AL=4.90
+prompt2: tg=68.66 tok/s  AL=3.90
+prompt3: tg=96.29 tok/s  AL=6.13
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=78.49
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=153 reuse=128 rebuild=25 | build_us=43869 alloc_us=665168 setin_us=4820 enqueue_us=4121106 sync_us=0
+===ARM lb2 L=/root/libdir-instr===
+ARM_RC=137
+===ARM la2 L=/root/libdir-nccl===
+ARM_RC=1
+P60_DONE TAG=la2 STATUS=LAUNCH_FAILED
+LIB_AB_DONE

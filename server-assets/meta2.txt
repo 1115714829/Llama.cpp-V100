@@ -1,0 +1,9 @@
+ARM_RC=0
+[META] calls=64 sub/call=51.8 ar/call=50.8 | total=29.125 loop=25.781 dev=21.882 ar=3.894 ms/call | prologue=3.344 (11.5%)
+[META] calls=128 sub/call=49.9 ar/call=48.9 | total=21.503 loop=18.780 dev=15.726 ar=3.050 ms/call | prologue=2.722 (12.7%)
+[META] calls=192 sub/call=49.3 ar/call=48.3 | total=18.543 loop=16.087 dev=13.313 ar=2.770 ms/call | prologue=2.456 (13.2%)
+[GRAPH] prop diff #404000 node=k_conv_predelta-49 op=SCALE new_ne=[128,6] old_ne=[128,6] new_data=0x622ad48100 old_data=0x622ad48100
+[GRAPH] prop diff #406000 node=node_4457 op=GET_ROWS new_ne=[786432,0] old_ne=[786432,0] new_data=0x7ffb04748100 old_data=0x7ffb04748100
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=108 reuse=0 rebuild=108 | build_us=12389 alloc_us=189924 setin_us=6883 enqueue_us=764656 sync_us=0
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=72 reuse=51 rebuild=21 | build_us=36231 alloc_us=550912 setin_us=2476 enqueue_us=2559727 sync_us=0
+META2_DONE

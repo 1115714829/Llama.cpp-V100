@@ -1,0 +1,17 @@
+A2_BUILD_START
+A2_RC=0
+error lines: 0
+147
+[100%] Linking CXX executable ../bin/test-batch-alloc
+[100%] Built target test-batch-alloc
+a3b0cca3a2f8e5f9450a8e0a1f0baf42  /root/libdir-instr/libggml-cuda.so.0.24.0
+06adb036efd0abaa7d08f9588c408bd5  /root/libdir-instr/libllama.so.0.4.1
+prompt1: tg=98.89 tok/s  AL=5.55
+prompt2: tg=80.35 tok/s  AL=4.22
+prompt3: tg=112.80 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=98.89
+--- round probes ---
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=556 reuse=0 rebuild=556 | build_us=69368 alloc_us=1044291 setin_us=20990 enqueue_us=3176778 sync_us=0
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=294 reuse=270 rebuild=24 | build_us=42739 alloc_us=641263 setin_us=9875 enqueue_us=5800758 sync_us=0
+A2_DONE

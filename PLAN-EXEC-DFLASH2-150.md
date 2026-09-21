@@ -9,7 +9,7 @@
 | P0 计划落盘 | **完成** | 本文件 + `PLAN-GRAPH.md` 指针 |
 | M1 draft 差分臂 | **第 1 次作废**（漏 `--model-draft`）；**第 2 次完成：`draft_decode` 与 n_max 无关**（见 §1.3） | `/tmp/m1-chain.log`（作废）、`/tmp/m1b-chain.log`（有效） |
 | M2 派发数普查 | 待跑 | — |
-| M3 注入图定位 | 待做 | — |
+| M3 draft 路径定位 | **完成**（见 §1.4：**draft 每轮两次 decode** + 每轮 10-15 次整设备同步） | 子代理侦察 file:line |
 | 线 A 注入图定长化 | 待做 | — |
 | 线 B draft 13.8 -> 2.6 ms | 待做 | — |
 | 线 C alloc/派发 early-out | 待做 | — |
@@ -63,6 +63,32 @@
    「隐状态搬运 / draft `llama_decode` / selector I-O / 其余」，据此决定改哪一段。**在拿到这个拆分之前不动代码。**
 
 **同时更新的判据**：`selector` 2.91 (n7) vs 2.01 (n3) 说明它随 n_max 轻微变化；`walk` 0.03-0.07 可忽略。
+
+### 1.4 M3 侦察结果（只读代码，file:line 已核实）—— 13.9 ms 的机制找到了
+**发现 1：draft 每轮发两次 `llama_decode`**，而 `draft_decode=13.9 ms` **只计了第二次**：
+- `common/speculative.cpp:1418` —— **注入前向**（1 token，`batch_inject`），在 `process()` 内，计在 `inj_us`（未并入 `draft_decode`）；
+- `common/speculative.cpp:1482` —— **噪声块前向**（n_block token），这才是 `st_dec` 计的那 13.9 ms。
+=> 每轮 draft **两次全量权重流**（0.38 GB/卡 => 每次应约 0.87 ms；两次 1.7 ms，仍远小于实测总量）。
+
+**发现 2：每轮有 10-15 次「整设备同步」**，每次都在 meta 后端上扇出到 3 张卡（`ggml-backend-meta.cpp:1981-1986`）：
+| 位置 | 内容 | 每轮次数 |
+|---|---|---|
+| `speculative.cpp:1394` | `llama_get_embeddings_layer_inp(ctx_tgt, ...)` -> `llama-context.cpp:4046` 内部 `ctx->synchronize()` | **n_extract 次** |
+| `speculative.cpp:1175` | `llama_get_embeddings_nextn(ctx_dft)` -> `llama-context.cpp:4034` 同步 | 1 |
+| `speculative.cpp:1189-1192` | `llama_get_logits_ith(ctx_dft, i)` -> `llama-context.cpp:3982` **每次一个同步** | **n_block 次（=8）** |
+=> 合计约 **1 + n_extract + 1 + n_block ~ 10-15 次同步/轮**。同步之间没有重叠 => 这正是「13.9 ms 无法用算力解释」的来源。
+
+**发现 3：所有这些都是跨设备 D2H**（`llama-context.cpp:1961/2042/2306` + `ggml-backend-meta.cpp:1940-1979` 按 simple backend 循环拷贝），
+而 logits 的 D2H **本来只排队了一次**（`llama-context.cpp:1961`，`n_outputs*n_vocab`）—— 也就是说 **n_block 次同步里只有一次是必要的**。
+
+### 1.5 由此得到的三条候选改动（按证据强度排序，需先用分段探针确认再动手）
+| 编号 | 改动 | 落点 | 预期 |
+|---|---|---|---|
+| **B-1** | **把 n_block 次 `llama_get_logits_ith` 合并成一次读取**（D2H 已排队一次，改成同步一次 + 主机侧索引） | `common/speculative.cpp:1189-1192` | 去掉 (n_block-1) 次整设备同步 |
+| **B-2** | **合并两次 draft 前向**（注入行作为 position 0 并入噪声块批，一次 decode） | `speculative.cpp:1418` + `:1482` | 每轮少一次全量 draft 权重流 + 少一次同步 |
+| **B-3** | **减少 `:1394` 的 n_extract 次 ctx_tgt 同步**（已 async 拷到 pinned host，改成等待一次事件） | `speculative.cpp:1393-1402` + `llama-context.cpp:2282/2306` | 去掉 (n_extract-1) 次同步 |
+探针插入点（env 门控，`LLAMA_SPEC_TIMING` 的脚手架已存在）：`(a)` `:1393-1402`、`(b)` `:1479-1483` 与 `:1417-1425`、`(c)` `:1493-1496`、`(d)` `:1643-1647`。
+**纪律**：先只加探针（零行为影响），拿到「搬运 / 两次前向 / selector / 其余」的四段拆分，再按比例决定先做 B-1/B-2/B-3 中的哪一条。
 
 ## 2. 阶段 0
 ### P0 计划落盘 —— 完成（本文件）

@@ -1,0 +1,21 @@
+G4_REBUILD_START
+G4_RC=0
+error lines: 0
+[100%] Built target llama-app
+a3b0cca3a2f8e5f9450a8e0a1f0baf42  /root/libdir-instr/libggml-cuda.so.0.24.0
+marker: 1
+===ARM-A-baseline-with-timing===
+prompt1: tg=98.12 tok/s  AL=5.55
+prompt2: tg=80.07 tok/s  AL=4.22
+prompt3: tg=114.52 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=98.12
+[AR] timed=20193 skip=15906 ar_us_sum=1070533 ar_us_avg=53.0
+===ARM-B-device-AR-GRID4-with-timing===
+prompt1: tg=94.45 tok/s  AL=5.38
+prompt2: tg=77.90 tok/s  AL=4.26
+prompt3: tg=115.15 tok/s  AL=6.67
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=94.45
+[AR] timed=14645 skip=20798 ar_us_sum=900376 ar_us_avg=61.5
+G4AB_DONE

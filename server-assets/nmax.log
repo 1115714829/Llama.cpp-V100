@@ -1,0 +1,22 @@
+===== ARM n_max=3 =====
+prompt1: tg=74.46 tok/s  AL=3.25
+prompt2: tg=68.13 tok/s  AL=2.95
+prompt3: tg=81.84 tok/s  AL=3.58
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=74.46
+4.52.900.846 I draft: spec timing: n=448 | draft_decode=12.44 selector=1.86 walk=0.03 ms/round
+===== ARM n_max=5 =====
+prompt1: tg=84.83 tok/s  AL=4.36
+prompt2: tg=78.19 tok/s  AL=3.73
+prompt3: tg=106.58 tok/s  AL=5.35
+greedy: content_len=160 reasoning_len=174 sha256=e8d24719f5d26f41ae759be0e77c768d6530d97472343c7b0faf48a0d190c34c
+MEDIAN_TG=84.83
+4.50.215.727 I draft: spec timing: n=336 | draft_decode=13.30 selector=2.23 walk=0.05 ms/round
+===== ARM n_max=7 =====
+prompt1: tg=100.27 tok/s  AL=5.55
+prompt2: tg=81.39 tok/s  AL=4.22
+prompt3: tg=116.74 tok/s  AL=6.38
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=100.27
+4.47.597.400 I draft: spec timing: n=272 | draft_decode=13.37 selector=2.66 walk=0.07 ms/round
+NMAX_DONE

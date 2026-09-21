@@ -1,0 +1,17 @@
+===ARM dirA PORT=8181===
+ARM_RC=0
+prompt1: tg=99.97 tok/s  AL=5.55
+MEDIAN_TG=99.97
+[GRAPH] calls=124160 capture=2838 replay=103977 direct=17345 decision_us=354106 per_call=2.9 avg_nodes=40.1 last_nodes=8
+[META] calls=832 sub/call=47.6 ar/call=46.6 | total=10.136 loop=9.015 dev=6.808 ar=2.202 ms/call | prologue=1.122 (11.1%)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=556 reuse=0 rebuild=556 | build_us=67859 alloc_us=1009216 setin_us=18365 enqueue_us=3110092 sync_us=0
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=294 reuse=270 rebuild=24 | build_us=40917 alloc_us=619735 setin_us=9133 enqueue_us=5539926 sync_us=0
+===ARM dirB PORT=8182===
+ARM_RC=0
+prompt1: tg=99.18 tok/s  AL=5.55
+MEDIAN_TG=99.18
+[GRAPH] calls=124160 capture=2838 replay=103977 direct=17345 decision_us=423495 per_call=3.4 avg_nodes=40.1 last_nodes=8
+[META] calls=832 sub/call=47.6 ar/call=46.6 | total=10.563 loop=9.411 dev=7.209 ar=2.199 ms/call | prologue=1.151 (10.9%)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=556 reuse=0 rebuild=556 | build_us=66434 alloc_us=1031255 setin_us=21064 enqueue_us=3036858 sync_us=0
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=294 reuse=270 rebuild=24 | build_us=41568 alloc_us=628399 setin_us=8971 enqueue_us=5967235 sync_us=0
+DIRECT_AB_DONE

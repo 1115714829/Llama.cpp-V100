@@ -1,0 +1,29 @@
+===ARM tp01 CARDS=0,1===
+prompt1: tg=60.55 tok/s  AL=3.65
+prompt2: tg=56.52 tok/s  AL=3.33
+prompt3: tg=105.99 tok/s  AL=6.37
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=60.55
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=172 reuse=146 rebuild=26 | build_us=45498 alloc_us=647701 setin_us=5182 enqueue_us=3432002 sync_us=0
+===ARM tp012 CARDS=0,1,2===
+prompt1: tg=78.49 tok/s  AL=4.90
+prompt2: tg=67.51 tok/s  AL=3.90
+prompt3: tg=93.82 tok/s  AL=6.13
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=78.49
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=153 reuse=128 rebuild=25 | build_us=45489 alloc_us=708492 setin_us=5517 enqueue_us=4193632 sync_us=0
+===ARM tp0123 CARDS=0,1,2,3===
+prompt1: tg=54.48 tok/s  AL=3.80
+prompt2: tg=59.98 tok/s  AL=4.22
+prompt3: tg=84.12 tok/s  AL=5.79
+greedy: content_len=157 reasoning_len=177 sha256=ccc284e4ec4f2ac562b26b291999b6776e10b687c1ec9720283e5075a95cb8ff
+MEDIAN_TG=59.98
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=164 reuse=137 rebuild=27 | build_us=48062 alloc_us=821945 setin_us=5679 enqueue_us=5945284 sync_us=0
+===ARM tp012345 CARDS=0,1,2,3,4,5===
+prompt1: tg=41.40 tok/s  AL=3.90
+prompt2: tg=48.76 tok/s  AL=4.52
+prompt3: tg=65.42 tok/s  AL=6.16
+greedy: content_len=160 reasoning_len=171 sha256=69207026ca43b19f5df2871a658d9f88bf3c583387a39d4a5ecceb8b21eaa147
+MEDIAN_TG=48.76
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=154 reuse=130 rebuild=24 | build_us=43099 alloc_us=818419 setin_us=6409 enqueue_us=9544908 sync_us=0
+TP_SWEEP_DONE

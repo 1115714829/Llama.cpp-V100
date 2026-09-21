@@ -1,0 +1,610 @@
+0.00.000.244 I srv  llama_server: initializing ...
+0.00.440.583 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.442.447 I srv    load_model: loading model '/root/llm/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf'
+0.00.442.527 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.214.948 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.214.962 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.214.979 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.214.985 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.214.992 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.215.014 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.215.021 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.215.027 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.215.034 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.215.040 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.215.047 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.215.054 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.215.062 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.215.069 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.215.088 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.03.878.477 I cmn          init: llama threadpool init, n_threads = 88
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.04.131.924 I common_speculative_init_result: capping draft context ubatch from 512 to 64 (block draft)
+0.04.131.932 I common_speculative_init_result: loading draft model '/root/llm/models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf'
+0.04.854.434 W model has unused tensor selector_predecessor.weight (size = 35758080 bytes) -- ignoring
+0.04.854.447 W model has unused tensor selector_successor.weight (size = 35758080 bytes) -- ignoring
+0.05.067.171 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 8192, kv_unified = 'false'
+0.05.330.186 I common_speculative_impl_draft_dflash: adding speculative implementation 'draft-dflash'
+0.05.330.210 I common_speculative_impl_draft_dflash: - n_max=7, n_min=0, p_min=0.00
+0.05.330.211 I common_speculative_impl_draft_dflash: - block_size=8, mask_token_id=248070, n_extract=5, sample_from_anchor=true
+[RT] llama_decode entered: n_tokens=2
+[RT] ctx::decode entered: n_tokens=2
+[RT] process_ubatch entered: n_tokens=2
+0.05.401.488 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.05.401.549 I srv  llama_server: model loaded
+0.05.401.558 I srv  llama_server: listening on http://127.0.0.1:8172
+0.15.010.868 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.15.011.026 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+[RT] llama_decode entered: n_tokens=42
+[RT] ctx::decode entered: n_tokens=42
+[RT] process_ubatch entered: n_tokens=42
+[AR] calls=256 tensors=1024 bytes=428605440 avg_tensors=4.0 avg_bytes=1674240
+[AR] timed=252 skip=0 ar_us_sum=71612 ar_us_avg=284.2
+[AR] calls=512 tensors=2048 bytes=816250880 avg_tensors=4.0 avg_bytes=1594240
+[AR] timed=508 skip=0 ar_us_sum=116105 ar_us_avg=228.6
+[AR] calls=768 tensors=3072 bytes=980746240 avg_tensors=4.0 avg_bytes=1277013
+[AR] timed=760 skip=0 ar_us_sum=159550 ar_us_avg=209.9
+[AR] calls=1024 tensors=4096 bytes=1148518400 avg_tensors=4.0 avg_bytes=1121600
+[AR] timed=912 skip=70 ar_us_sum=176058 ar_us_avg=193.0
+[AR] calls=1280 tensors=5120 bytes=1316290560 avg_tensors=4.0 avg_bytes=1028352
+[AR] timed=1034 skip=170 ar_us_sum=185284 ar_us_avg=179.2
+[AR] calls=1536 tensors=6144 bytes=1484062720 avg_tensors=4.0 avg_bytes=966187
+[AR] timed=1162 skip=267 ar_us_sum=194202 ar_us_avg=167.1
+[AR] calls=1792 tensors=7168 bytes=1651834880 avg_tensors=4.0 avg_bytes=921783
+[AR] timed=1289 skip=369 ar_us_sum=203018 ar_us_avg=157.5
+[AR] calls=2048 tensors=8192 bytes=1819607040 avg_tensors=4.0 avg_bytes=888480
+[AR] timed=1415 skip=471 ar_us_sum=211527 ar_us_avg=149.5
+[AR] calls=2304 tensors=9216 bytes=1987379200 avg_tensors=4.0 avg_bytes=862578
+[AR] timed=1546 skip=563 ar_us_sum=220064 ar_us_avg=142.3
+0.16.724.029 I process: inject timing: n=16 | inject_decode=3.98 ms/call
+[AR] calls=2560 tensors=10240 bytes=2155151360 avg_tensors=4.0 avg_bytes=841856
+[AR] timed=1680 skip=651 ar_us_sum=229289 ar_us_avg=136.5
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=35 reuse=0 rebuild=35 | build_us=4614 alloc_us=70655 setin_us=1689 enqueue_us=311310 sync_us=0
+0.16.850.649 I draft: spec timing: n=16 | draft_decode=18.84 selector=2.72 walk=0.06 ms/round
+0.16.850.689 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 34.178 ms over 64 calls (0.534 ms/call)
+[AR] calls=2816 tensors=11264 bytes=2322923520 avg_tensors=4.0 avg_bytes=824902
+[AR] timed=1813 skip=740 ar_us_sum=238448 ar_us_avg=131.5
+[AR] calls=3072 tensors=12288 bytes=2490695680 avg_tensors=4.0 avg_bytes=810773
+[AR] timed=1941 skip=834 ar_us_sum=247484 ar_us_avg=127.5
+[META] calls=64 sub/call=50.1 ar/call=49.1 | total=21.828 loop=19.456 dev=15.755 ar=3.697 ms/call | prologue=2.372 (10.9%)
+[AR] calls=3328 tensors=13312 bytes=2658467840 avg_tensors=4.0 avg_bytes=798818
+[AR] timed=2077 skip=923 ar_us_sum=257015 ar_us_avg=123.7
+[AR] calls=3584 tensors=14336 bytes=2826240000 avg_tensors=4.0 avg_bytes=788571
+[AR] timed=2209 skip=1020 ar_us_sum=266177 ar_us_avg=120.5
+[AR] calls=3840 tensors=15360 bytes=2994012160 avg_tensors=4.0 avg_bytes=779691
+[AR] timed=2333 skip=1124 ar_us_sum=274436 ar_us_avg=117.6
+[AR] calls=4096 tensors=16384 bytes=3161784320 avg_tensors=4.0 avg_bytes=771920
+[AR] timed=2463 skip=1217 ar_us_sum=283090 ar_us_avg=114.9
+[AR] calls=4352 tensors=17408 bytes=3329556480 avg_tensors=4.0 avg_bytes=765064
+[AR] timed=2595 skip=1307 ar_us_sum=292216 ar_us_avg=112.6
+[RT] spec checkpoints: 0.020 ms/round over 32 rounds
+[RT] target decode+sync: 53.129 ms/round over 32 rounds (last n_tokens=8)
+0.17.583.577 I process: inject timing: n=32 | inject_decode=2.78 ms/call
+[AR] calls=4608 tensors=18432 bytes=3497328640 avg_tensors=4.0 avg_bytes=758969
+[AR] timed=2726 skip=1398 ar_us_sum=301267 ar_us_avg=110.5
+0.17.661.225 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.62 accept=0.00 ms (n_process=33)
+0.17.720.304 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.76 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=67 reuse=0 rebuild=67 | build_us=8782 alloc_us=132948 setin_us=2736 enqueue_us=537939 sync_us=0
+0.17.720.372 I draft: spec timing: n=32 | draft_decode=17.96 selector=2.71 walk=0.06 ms/round
+0.17.720.414 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=4864 tensors=19456 bytes=3665100800 avg_tensors=4.0 avg_bytes=753516
+[AR] timed=2875 skip=1471 ar_us_sum=311573 ar_us_avg=108.4
+[AR] calls=5120 tensors=20480 bytes=3832872960 avg_tensors=4.0 avg_bytes=748608
+[AR] timed=3007 skip=1565 ar_us_sum=320796 ar_us_avg=106.7
+[AR] calls=5376 tensors=21504 bytes=4000645120 avg_tensors=4.0 avg_bytes=744168
+[AR] timed=3133 skip=1668 ar_us_sum=329575 ar_us_avg=105.2
+[AR] calls=5632 tensors=22528 bytes=4168417280 avg_tensors=4.0 avg_bytes=740131
+[AR] timed=3256 skip=1772 ar_us_sum=337743 ar_us_avg=103.7
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 68.767 ms over 128 calls (0.537 ms/call)
+[AR] calls=5888 tensors=23552 bytes=4336189440 avg_tensors=4.0 avg_bytes=736445
+[AR] timed=3395 skip=1856 ar_us_sum=347254 ar_us_avg=102.3
+[META] calls=128 sub/call=48.2 ar/call=47.2 | total=15.954 loop=14.441 dev=11.112 ar=3.324 ms/call | prologue=1.513 (9.5%)
+[AR] calls=6144 tensors=24576 bytes=4503961600 avg_tensors=4.0 avg_bytes=733067
+[AR] timed=3533 skip=1940 ar_us_sum=356774 ar_us_avg=101.0
+[AR] calls=6400 tensors=25600 bytes=4671733760 avg_tensors=4.0 avg_bytes=729958
+[AR] timed=3667 skip=2028 ar_us_sum=366074 ar_us_avg=99.8
+[AR] calls=6656 tensors=26624 bytes=4839505920 avg_tensors=4.0 avg_bytes=727089
+[AR] timed=3804 skip=2113 ar_us_sum=375711 ar_us_avg=98.8
+0.18.461.425 I process: inject timing: n=48 | inject_decode=2.39 ms/call
+0.18.542.619 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.63 accept=0.00 ms (n_process=49)
+[AR] calls=6912 tensors=27648 bytes=5007278080 avg_tensors=4.0 avg_bytes=724433
+[AR] timed=3938 skip=2206 ar_us_sum=385122 ar_us_avg=97.8
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=99 reuse=0 rebuild=99 | build_us=13176 alloc_us=196018 setin_us=3996 enqueue_us=765624 sync_us=0
+0.18.599.784 I draft: spec timing: n=48 | draft_decode=17.71 selector=2.71 walk=0.06 ms/round
+0.18.599.821 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+0.18.729.593 I slot print_timing: id  0 | task 0 | n_gen =    187, tg =  61.43 t/s, tg_3s =  61.76 t/s
+[AR] calls=7168 tensors=28672 bytes=5175050240 avg_tensors=4.0 avg_bytes=721966
+[AR] timed=4135 skip=2256 ar_us_sum=408323 ar_us_avg=98.7
+[AR] calls=7424 tensors=29696 bytes=5342822400 avg_tensors=4.0 avg_bytes=719669
+[AR] timed=4322 skip=2307 ar_us_sum=437742 ar_us_avg=101.3
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 103.208 ms over 192 calls (0.538 ms/call)
+[AR] calls=7680 tensors=30720 bytes=5510594560 avg_tensors=4.0 avg_bytes=717525
+[AR] timed=4462 skip=2390 ar_us_sum=447469 ar_us_avg=100.3
+[AR] calls=7936 tensors=31744 bytes=5678366720 avg_tensors=4.0 avg_bytes=715520
+[AR] timed=4606 skip=2468 ar_us_sum=457466 ar_us_avg=99.3
+[AR] calls=8192 tensors=32768 bytes=5846138880 avg_tensors=4.0 avg_bytes=713640
+[AR] timed=4742 skip=2554 ar_us_sum=466892 ar_us_avg=98.5
+[AR] calls=8448 tensors=33792 bytes=6013911040 avg_tensors=4.0 avg_bytes=711874
+[AR] timed=4868 skip=2650 ar_us_sum=475639 ar_us_avg=97.7
+[AR] calls=8704 tensors=34816 bytes=6181683200 avg_tensors=4.0 avg_bytes=710212
+[AR] timed=4995 skip=2750 ar_us_sum=484451 ar_us_avg=97.0
+[RT] spec checkpoints: 0.022 ms/round over 64 rounds
+[RT] target decode+sync: 36.648 ms/round over 64 rounds (last n_tokens=8)
+0.19.535.745 I process: inject timing: n=64 | inject_decode=2.19 ms/call
+[META] calls=192 sub/call=47.6 ar/call=46.6 | total=15.091 loop=13.783 dev=10.572 ar=3.207 ms/call | prologue=1.308 (8.7%)
+[AR] calls=8960 tensors=35840 bytes=6349455360 avg_tensors=4.0 avg_bytes=708645
+[AR] timed=5119 skip=2855 ar_us_sum=493121 ar_us_avg=96.3
+0.19.610.470 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.61 accept=0.00 ms (n_process=65)
+[AR] calls=9216 tensors=36864 bytes=6517227520 avg_tensors=4.0 avg_bytes=707164
+[AR] timed=5242 skip=2959 ar_us_sum=501000 ar_us_avg=95.6
+0.19.666.325 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.78 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=131 reuse=0 rebuild=131 | build_us=17394 alloc_us=258590 setin_us=5170 enqueue_us=995809 sync_us=0
+0.19.666.394 I draft: spec timing: n=64 | draft_decode=17.61 selector=2.71 walk=0.06 ms/round
+0.19.666.422 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=9472 tensors=37888 bytes=6684999680 avg_tensors=4.0 avg_bytes=705764
+[AR] timed=5376 skip=3047 ar_us_sum=510231 ar_us_avg=94.9
+[AR] calls=9728 tensors=38912 bytes=6852771840 avg_tensors=4.0 avg_bytes=704438
+[AR] timed=5511 skip=3134 ar_us_sum=519499 ar_us_avg=94.3
+[AR] calls=9984 tensors=39936 bytes=7020544000 avg_tensors=4.0 avg_bytes=703179
+[AR] timed=5639 skip=3228 ar_us_sum=528348 ar_us_avg=93.7
+[AR] calls=10240 tensors=40960 bytes=7188316160 avg_tensors=4.0 avg_bytes=701984
+[AR] timed=5765 skip=3324 ar_us_sum=537138 ar_us_avg=93.2
+[AR] calls=10496 tensors=41984 bytes=7356088320 avg_tensors=4.0 avg_bytes=700847
+[AR] timed=5895 skip=3423 ar_us_sum=546312 ar_us_avg=92.7
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 137.728 ms over 256 calls (0.538 ms/call)
+[AR] calls=10752 tensors=43008 bytes=7523860480 avg_tensors=4.0 avg_bytes=699764
+[AR] timed=6029 skip=3517 ar_us_sum=555726 ar_us_avg=92.2
+[AR] calls=11008 tensors=44032 bytes=7691632640 avg_tensors=4.0 avg_bytes=698731
+[AR] timed=6155 skip=3617 ar_us_sum=563769 ar_us_avg=91.6
+0.20.406.343 I process: inject timing: n=80 | inject_decode=2.07 ms/call
+[AR] calls=11264 tensors=45056 bytes=7859404800 avg_tensors=4.0 avg_bytes=697745
+[AR] timed=6288 skip=3706 ar_us_sum=572912 ar_us_avg=91.1
+0.20.482.297 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.62 accept=0.00 ms (n_process=81)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=163 reuse=0 rebuild=163 | build_us=21544 alloc_us=321027 setin_us=6298 enqueue_us=1220613 sync_us=0
+0.20.534.934 I draft: spec timing: n=80 | draft_decode=17.49 selector=2.71 walk=0.06 ms/round
+0.20.534.976 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=11520 tensors=46080 bytes=8027176960 avg_tensors=4.0 avg_bytes=696804
+[AR] timed=6419 skip=3797 ar_us_sum=581968 ar_us_avg=90.7
+[AR] calls=11776 tensors=47104 bytes=8194949120 avg_tensors=4.0 avg_bytes=695903
+[AR] timed=6550 skip=3888 ar_us_sum=591048 ar_us_avg=90.2
+[META] calls=256 sub/call=47.8 ar/call=46.8 | total=13.868 loop=12.726 dev=9.562 ar=3.160 ms/call | prologue=1.142 (8.2%)
+[AR] calls=12032 tensors=48128 bytes=8362721280 avg_tensors=4.0 avg_bytes=695040
+[AR] timed=6676 skip=3984 ar_us_sum=599780 ar_us_avg=89.8
+[AR] calls=12288 tensors=49152 bytes=8530493440 avg_tensors=4.0 avg_bytes=694213
+[AR] timed=6802 skip=4086 ar_us_sum=608602 ar_us_avg=89.5
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 171.955 ms over 320 calls (0.537 ms/call)
+[AR] calls=12544 tensors=50176 bytes=8698265600 avg_tensors=4.0 avg_bytes=693420
+[AR] timed=6930 skip=4188 ar_us_sum=617491 ar_us_avg=89.1
+[AR] calls=12800 tensors=51200 bytes=8866037760 avg_tensors=4.0 avg_bytes=692659
+[AR] timed=7055 skip=4288 ar_us_sum=625488 ar_us_avg=88.7
+[AR] calls=13056 tensors=52224 bytes=9033809920 avg_tensors=4.0 avg_bytes=691928
+[AR] timed=7196 skip=4369 ar_us_sum=635254 ar_us_avg=88.3
+[RT] spec checkpoints: 0.021 ms/round over 96 rounds
+[AR] calls=13312 tensors=53248 bytes=9201582080 avg_tensors=4.0 avg_bytes=691225
+[AR] timed=7334 skip=4453 ar_us_sum=644892 ar_us_avg=87.9
+[RT] target decode+sync: 30.393 ms/round over 96 rounds (last n_tokens=8)
+0.21.283.937 I process: inject timing: n=96 | inject_decode=1.98 ms/call
+0.21.357.724 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.62 accept=0.00 ms (n_process=97)
+[AR] calls=13568 tensors=54272 bytes=9369354240 avg_tensors=4.0 avg_bytes=690548
+[AR] timed=7465 skip=4544 ar_us_sum=654016 ar_us_avg=87.6
+0.21.413.434 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.76 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=195 reuse=0 rebuild=195 | build_us=25758 alloc_us=383292 setin_us=7504 enqueue_us=1446012 sync_us=0
+0.21.413.528 I draft: spec timing: n=96 | draft_decode=17.41 selector=2.71 walk=0.06 ms/round
+0.21.413.574 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=13824 tensors=55296 bytes=9537126400 avg_tensors=4.0 avg_bytes=689896
+[AR] timed=7600 skip=4633 ar_us_sum=663536 ar_us_avg=87.3
+[AR] calls=14080 tensors=56320 bytes=9704898560 avg_tensors=4.0 avg_bytes=689268
+[AR] timed=7731 skip=4729 ar_us_sum=672763 ar_us_avg=87.0
+[AR] calls=14336 tensors=57344 bytes=9872670720 avg_tensors=4.0 avg_bytes=688663
+[AR] timed=7857 skip=4832 ar_us_sum=681642 ar_us_avg=86.8
+[AR] calls=14592 tensors=58368 bytes=10040442880 avg_tensors=4.0 avg_bytes=688079
+[AR] timed=7984 skip=4930 ar_us_sum=689754 ar_us_avg=86.4
+0.21.779.020 I slot print_timing: id  0 | task 0 | n_gen =    383, tg =  62.86 t/s, tg_3s =  64.27 t/s
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 206.475 ms over 384 calls (0.538 ms/call)
+[AR] calls=14848 tensors=59392 bytes=10208215040 avg_tensors=4.0 avg_bytes=687514
+[AR] timed=8115 skip=5021 ar_us_sum=698791 ar_us_avg=86.1
+[META] calls=320 sub/call=47.5 ar/call=46.5 | total=13.100 loop=12.056 dev=8.941 ar=3.111 ms/call | prologue=1.044 (8.0%)
+[AR] calls=15104 tensors=60416 bytes=10375987200 avg_tensors=4.0 avg_bytes=686969
+[AR] timed=8248 skip=5110 ar_us_sum=707966 ar_us_avg=85.8
+[AR] calls=15360 tensors=61440 bytes=10543759360 avg_tensors=4.0 avg_bytes=686443
+[AR] timed=8379 skip=5201 ar_us_sum=717082 ar_us_avg=85.6
+0.22.168.761 I process: inject timing: n=112 | inject_decode=1.93 ms/call
+[AR] calls=15616 tensors=62464 bytes=10711531520 avg_tensors=4.0 avg_bytes=685933
+[AR] timed=8523 skip=5294 ar_us_sum=727808 ar_us_avg=85.4
+0.22.297.310 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.64 accept=0.00 ms (n_process=113)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=227 reuse=0 rebuild=227 | build_us=30113 alloc_us=446195 setin_us=8816 enqueue_us=1672622 sync_us=0
+0.22.354.842 I draft: spec timing: n=112 | draft_decode=17.37 selector=2.71 walk=0.07 ms/round
+0.22.354.889 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=15872 tensors=63488 bytes=10879303680 avg_tensors=4.0 avg_bytes=685440
+[AR] timed=8759 skip=5294 ar_us_sum=744635 ar_us_avg=85.0
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 240.774 ms over 448 calls (0.537 ms/call)
+[AR] calls=16128 tensors=64512 bytes=11047075840 avg_tensors=4.0 avg_bytes=684963
+[AR] timed=8889 skip=5392 ar_us_sum=753600 ar_us_avg=84.8
+[AR] calls=16384 tensors=65536 bytes=11214848000 avg_tensors=4.0 avg_bytes=684500
+[AR] timed=9017 skip=5488 ar_us_sum=761854 ar_us_avg=84.5
+[AR] calls=16640 tensors=66560 bytes=11382620160 avg_tensors=4.0 avg_bytes=684052
+[AR] timed=9150 skip=5577 ar_us_sum=771016 ar_us_avg=84.3
+[AR] calls=16896 tensors=67584 bytes=11550392320 avg_tensors=4.0 avg_bytes=683617
+[AR] timed=9282 skip=5667 ar_us_sum=780135 ar_us_avg=84.0
+[AR] calls=17152 tensors=68608 bytes=11708334080 avg_tensors=4.0 avg_bytes=682622
+[AR] timed=9433 skip=5753 ar_us_sum=793426 ar_us_avg=84.1
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 275.062 ms over 512 calls (0.537 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=125 reuse=117 rebuild=8 | build_us=14507 alloc_us=219316 setin_us=4530 enqueue_us=3122754 sync_us=0
+0.23.144.728 I slot print_timing: id  0 | task 0 | prompt eval time =     690.66 ms /    76 tokens (    9.09 ms per token,   110.04 tokens per second)
+0.23.144.738 I slot print_timing: id  0 | task 0 |        eval time =    7442.97 ms /   512 tokens (   14.57 ms per token,    68.66 tokens per second)
+0.23.144.739 I slot print_timing: id  0 | task 0 |       total time =    8133.63 ms /   588 tokens
+0.23.144.767 I slot print_timing: id  0 | task 0 |    graphs reused =        117
+0.23.144.776 I slot print_timing: id  0 | task 0 | draft acceptance = 0.45927 (  389 accepted /   847 generated), mean len =  4.19
+0.23.144.882 I slot      release: id  0 | task 0 | stop processing: n_tokens = 587, truncated = 0
+0.23.257.907 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.425 (> 0.100 thold), f_keep = 0.077
+0.23.380.452 I slot launch_slot_: id  0 | task 126 | processing task, is_child = 0
+[AR] calls=17408 tensors=69632 bytes=11951800320 avg_tensors=4.0 avg_bytes=686569
+[AR] timed=9687 skip=5753 ar_us_sum=824997 ar_us_avg=85.2
+[RT] spec checkpoints: 0.019 ms/round over 128 rounds
+[AR] calls=17664 tensors=70656 bytes=12865699840 avg_tensors=4.0 avg_bytes=728357
+[AR] timed=9943 skip=5753 ar_us_sum=882296 ar_us_avg=88.7
+[RT] target decode+sync: 48.265 ms/round over 128 rounds (last n_tokens=4)
+0.23.929.652 I process: inject timing: n=128 | inject_decode=2.06 ms/call
+[META] calls=384 sub/call=47.6 ar/call=46.6 | total=14.075 loop=12.794 dev=9.659 ar=3.130 ms/call | prologue=1.282 (9.1%)
+[AR] calls=17920 tensors=71680 bytes=13007912960 avg_tensors=4.0 avg_bytes=725888
+[AR] timed=10195 skip=5753 ar_us_sum=913104 ar_us_avg=89.6
+0.24.229.801 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=131)
+[AR] calls=18176 tensors=72704 bytes=13175685120 avg_tensors=4.0 avg_bytes=724895
+[AR] timed=10383 skip=5799 ar_us_sum=935857 ar_us_avg=90.1
+[AR] calls=18432 tensors=73728 bytes=13343457280 avg_tensors=4.0 avg_bytes=723929
+[AR] timed=10511 skip=5898 ar_us_sum=944151 ar_us_avg=89.8
+0.24.360.470 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.79 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=262 reuse=0 rebuild=262 | build_us=34536 alloc_us=513939 setin_us=10983 enqueue_us=1922330 sync_us=0
+0.24.360.554 I draft: spec timing: n=128 | draft_decode=17.35 selector=2.71 walk=0.07 ms/round
+0.24.360.584 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=18688 tensors=74752 bytes=13511229440 avg_tensors=4.0 avg_bytes=722990
+[AR] timed=10648 skip=5983 ar_us_sum=953712 ar_us_avg=89.6
+[AR] calls=18944 tensors=75776 bytes=13679001600 avg_tensors=4.0 avg_bytes=722076
+[AR] timed=10787 skip=6066 ar_us_sum=963468 ar_us_avg=89.3
+[AR] calls=19200 tensors=76800 bytes=13846773760 avg_tensors=4.0 avg_bytes=721186
+[AR] timed=10925 skip=6150 ar_us_sum=973160 ar_us_avg=89.1
+[AR] calls=19456 tensors=77824 bytes=14014545920 avg_tensors=4.0 avg_bytes=720320
+[AR] timed=11055 skip=6242 ar_us_sum=982228 ar_us_avg=88.8
+[AR] calls=19712 tensors=78848 bytes=14182318080 avg_tensors=4.0 avg_bytes=719476
+[AR] timed=11181 skip=6344 ar_us_sum=991038 ar_us_avg=88.6
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 34.232 ms over 576 calls (0.059 ms/call)
+0.24.948.964 I process: inject timing: n=144 | inject_decode=2.05 ms/call
+[AR] calls=19968 tensors=79872 bytes=14350090240 avg_tensors=4.0 avg_bytes=718654
+[AR] timed=11307 skip=6447 ar_us_sum=999862 ar_us_avg=88.4
+[AR] calls=20224 tensors=80896 bytes=14517862400 avg_tensors=4.0 avg_bytes=717853
+[AR] timed=11434 skip=6546 ar_us_sum=1008029 ar_us_avg=88.2
+0.25.112.707 I common_speculative_timing_report: spec overhead per round | process=0.05 draft=0.00 accept=0.00 ms (n_process=147)
+[AR] calls=20480 tensors=81920 bytes=14685634560 avg_tensors=4.0 avg_bytes=717072
+[AR] timed=11573 skip=6629 ar_us_sum=1017652 ar_us_avg=87.9
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=294 reuse=0 rebuild=294 | build_us=38926 alloc_us=577791 setin_us=12137 enqueue_us=2155196 sync_us=0
+0.25.249.122 I draft: spec timing: n=144 | draft_decode=17.36 selector=2.71 walk=0.07 ms/round
+0.25.249.179 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=20736 tensors=82944 bytes=14853406720 avg_tensors=4.0 avg_bytes=716310
+[AR] timed=11715 skip=6709 ar_us_sum=1027613 ar_us_avg=87.7
+[META] calls=448 sub/call=47.7 ar/call=46.7 | total=13.673 loop=12.475 dev=9.345 ar=3.125 ms/call | prologue=1.198 (8.8%)
+[AR] calls=20992 tensors=83968 bytes=15021178880 avg_tensors=4.0 avg_bytes=715567
+[AR] timed=11859 skip=6787 ar_us_sum=1037683 ar_us_avg=87.5
+[AR] calls=21248 tensors=84992 bytes=15188951040 avg_tensors=4.0 avg_bytes=714841
+[AR] timed=11992 skip=6876 ar_us_sum=1046911 ar_us_avg=87.3
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 68.644 ms over 640 calls (0.107 ms/call)
+[AR] calls=21504 tensors=86016 bytes=15356723200 avg_tensors=4.0 avg_bytes=714133
+[AR] timed=12122 skip=6975 ar_us_sum=1055980 ar_us_avg=87.1
+[AR] calls=21760 tensors=87040 bytes=15524495360 avg_tensors=4.0 avg_bytes=713442
+[AR] timed=12251 skip=7075 ar_us_sum=1064977 ar_us_avg=86.9
+[AR] calls=22016 tensors=88064 bytes=15692267520 avg_tensors=4.0 avg_bytes=712767
+[AR] timed=12442 skip=7124 ar_us_sum=1085285 ar_us_avg=87.2
+[RT] spec checkpoints: 0.023 ms/round over 160 rounds
+[RT] target decode+sync: 38.789 ms/round over 160 rounds (last n_tokens=8)
+0.25.988.455 I process: inject timing: n=160 | inject_decode=2.01 ms/call
+[AR] calls=22272 tensors=89088 bytes=15860039680 avg_tensors=4.0 avg_bytes=712107
+[AR] timed=12651 skip=7152 ar_us_sum=1112864 ar_us_avg=88.0
+[AR] calls=22528 tensors=90112 bytes=16027811840 avg_tensors=4.0 avg_bytes=711462
+[AR] timed=12790 skip=7235 ar_us_sum=1122596 ar_us_avg=87.8
+0.26.160.361 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=163)
+[AR] calls=22784 tensors=91136 bytes=16195584000 avg_tensors=4.0 avg_bytes=710831
+[AR] timed=12928 skip=7319 ar_us_sum=1132234 ar_us_avg=87.6
+0.26.296.155 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.81 + gate 1.06 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=326 reuse=0 rebuild=326 | build_us=43646 alloc_us=642073 setin_us=13406 enqueue_us=2399026 sync_us=0
+0.26.296.237 I draft: spec timing: n=160 | draft_decode=17.45 selector=2.72 walk=0.07 ms/round
+0.26.296.301 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=23040 tensors=92160 bytes=16363356160 avg_tensors=4.0 avg_bytes=710215
+[AR] timed=13067 skip=7404 ar_us_sum=1142008 ar_us_avg=87.4
+[AR] calls=23296 tensors=93184 bytes=16531128320 avg_tensors=4.0 avg_bytes=709612
+[AR] timed=13202 skip=7496 ar_us_sum=1151347 ar_us_avg=87.2
+[AR] calls=23552 tensors=94208 bytes=16698900480 avg_tensors=4.0 avg_bytes=709023
+[AR] timed=13330 skip=7597 ar_us_sum=1160292 ar_us_avg=87.0
+[AR] calls=23808 tensors=95232 bytes=16866672640 avg_tensors=4.0 avg_bytes=708446
+[AR] timed=13462 skip=7690 ar_us_sum=1168728 ar_us_avg=86.8
+[META] calls=512 sub/call=47.5 ar/call=46.5 | total=13.532 loop=12.369 dev=9.246 ar=3.118 ms/call | prologue=1.163 (8.6%)
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 103.150 ms over 704 calls (0.147 ms/call)
+[AR] calls=24064 tensors=96256 bytes=17034444800 avg_tensors=4.0 avg_bytes=707881
+[AR] timed=13597 skip=7777 ar_us_sum=1178061 ar_us_avg=86.6
+[AR] calls=24320 tensors=97280 bytes=17202216960 avg_tensors=4.0 avg_bytes=707328
+[AR] timed=13731 skip=7865 ar_us_sum=1187316 ar_us_avg=86.5
+0.26.877.517 I process: inject timing: n=176 | inject_decode=1.98 ms/call
+0.26.936.340 I slot print_timing: id  0 | task 126 | n_gen =    208, tg =  68.87 t/s, tg_3s =  69.20 t/s
+[AR] calls=24576 tensors=98304 bytes=17369989120 avg_tensors=4.0 avg_bytes=706787
+[AR] timed=13864 skip=7954 ar_us_sum=1196568 ar_us_avg=86.3
+0.27.043.771 I common_speculative_timing_report: spec overhead per round | process=0.05 draft=0.00 accept=0.00 ms (n_process=179)
+[AR] calls=24832 tensors=99328 bytes=17537761280 avg_tensors=4.0 avg_bytes=706256
+[AR] timed=13995 skip=8046 ar_us_sum=1205671 ar_us_avg=86.2
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=358 reuse=0 rebuild=358 | build_us=47980 alloc_us=705206 setin_us=14511 enqueue_us=2639023 sync_us=0
+0.27.174.185 I draft: spec timing: n=176 | draft_decode=17.50 selector=2.72 walk=0.07 ms/round
+0.27.174.241 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=25088 tensors=100352 bytes=17705533440 avg_tensors=4.0 avg_bytes=705737
+[AR] timed=14124 skip=8146 ar_us_sum=1214645 ar_us_avg=86.0
+[AR] calls=25344 tensors=101376 bytes=17873305600 avg_tensors=4.0 avg_bytes=705228
+[AR] timed=14256 skip=8243 ar_us_sum=1223949 ar_us_avg=85.9
+[AR] calls=25600 tensors=102400 bytes=18041077760 avg_tensors=4.0 avg_bytes=704730
+[AR] timed=14397 skip=8326 ar_us_sum=1233121 ar_us_avg=85.7
+[AR] calls=25856 tensors=103424 bytes=18208849920 avg_tensors=4.0 avg_bytes=704241
+[AR] timed=14536 skip=8409 ar_us_sum=1242736 ar_us_avg=85.5
+[AR] calls=26112 tensors=104448 bytes=18376622080 avg_tensors=4.0 avg_bytes=703762
+[AR] timed=14677 skip=8490 ar_us_sum=1252662 ar_us_avg=85.3
+[AR] calls=26368 tensors=105472 bytes=18544394240 avg_tensors=4.0 avg_bytes=703292
+[AR] timed=14817 skip=8572 ar_us_sum=1262552 ar_us_avg=85.2
+[RT] spec checkpoints: 0.024 ms/round over 192 rounds
+[RT] target decode+sync: 30.508 ms/round over 192 rounds (last n_tokens=8)
+0.27.768.516 I process: inject timing: n=192 | inject_decode=1.96 ms/call
+[AR] calls=26624 tensors=106496 bytes=18712166400 avg_tensors=4.0 avg_bytes=702831
+[AR] timed=14952 skip=8661 ar_us_sum=1271995 ar_us_avg=85.1
+[META] calls=576 sub/call=47.4 ar/call=46.4 | total=13.223 loop=12.108 dev=8.993 ar=3.111 ms/call | prologue=1.114 (8.4%)
+[AR] calls=26880 tensors=107520 bytes=18879938560 avg_tensors=4.0 avg_bytes=702379
+[AR] timed=15082 skip=8760 ar_us_sum=1281018 ar_us_avg=84.9
+0.27.930.010 I common_speculative_timing_report: spec overhead per round | process=0.05 draft=0.00 accept=0.00 ms (n_process=195)
+[AR] calls=27136 tensors=108544 bytes=19047710720 avg_tensors=4.0 avg_bytes=701935
+[AR] timed=15211 skip=8860 ar_us_sum=1289883 ar_us_avg=84.8
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 137.829 ms over 768 calls (0.179 ms/call)
+0.28.070.030 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.80 + gate 1.05 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=390 reuse=0 rebuild=390 | build_us=52779 alloc_us=769643 setin_us=15887 enqueue_us=2889094 sync_us=0
+0.28.070.107 I draft: spec timing: n=192 | draft_decode=17.59 selector=2.72 walk=0.07 ms/round
+0.28.070.139 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=27392 tensors=109568 bytes=19215482880 avg_tensors=4.0 avg_bytes=701500
+[AR] timed=15341 skip=8953 ar_us_sum=1298328 ar_us_avg=84.6
+[AR] calls=27648 tensors=110592 bytes=19383255040 avg_tensors=4.0 avg_bytes=701073
+[AR] timed=15476 skip=9040 ar_us_sum=1307622 ar_us_avg=84.5
+[AR] calls=27904 tensors=111616 bytes=19551027200 avg_tensors=4.0 avg_bytes=700653
+[AR] timed=15620 skip=9118 ar_us_sum=1317679 ar_us_avg=84.4
+[AR] calls=28160 tensors=112640 bytes=19718799360 avg_tensors=4.0 avg_bytes=700241
+[AR] timed=15758 skip=9202 ar_us_sum=1327283 ar_us_avg=84.2
+[AR] calls=28416 tensors=113664 bytes=19886571520 avg_tensors=4.0 avg_bytes=699837
+[AR] timed=15888 skip=9296 ar_us_sum=1336322 ar_us_avg=84.1
+[AR] calls=28672 tensors=114688 bytes=20054343680 avg_tensors=4.0 avg_bytes=699440
+[AR] timed=16017 skip=9396 ar_us_sum=1345309 ar_us_avg=84.0
+0.28.656.573 I process: inject timing: n=208 | inject_decode=1.94 ms/call
+[AR] calls=28928 tensors=115712 bytes=20222115840 avg_tensors=4.0 avg_bytes=699050
+[AR] timed=16145 skip=9497 ar_us_sum=1353986 ar_us_avg=83.9
+[AR] calls=29184 tensors=116736 bytes=20389888000 avg_tensors=4.0 avg_bytes=698667
+[AR] timed=16276 skip=9589 ar_us_sum=1362597 ar_us_avg=83.7
+0.28.822.442 I common_speculative_timing_report: spec overhead per round | process=0.05 draft=0.00 accept=0.00 ms (n_process=211)
+[AR] calls=29440 tensors=117760 bytes=20557660160 avg_tensors=4.0 avg_bytes=698290
+[AR] timed=16410 skip=9677 ar_us_sum=1371859 ar_us_avg=83.6
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=422 reuse=0 rebuild=422 | build_us=57185 alloc_us=832976 setin_us=17068 enqueue_us=3129851 sync_us=0
+0.28.953.518 I draft: spec timing: n=208 | draft_decode=17.62 selector=2.72 walk=0.07 ms/round
+0.28.953.553 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=29696 tensors=118784 bytes=20725432320 avg_tensors=4.0 avg_bytes=697920
+[AR] timed=16543 skip=9766 ar_us_sum=1381070 ar_us_avg=83.5
+[META] calls=640 sub/call=47.5 ar/call=46.5 | total=12.974 loop=11.903 dev=8.775 ar=3.124 ms/call | prologue=1.071 (8.3%)
+[AR] calls=29952 tensors=119808 bytes=20893204480 avg_tensors=4.0 avg_bytes=697556
+[AR] timed=16669 skip=9862 ar_us_sum=1389901 ar_us_avg=83.4
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 172.354 ms over 832 calls (0.207 ms/call)
+[AR] calls=30208 tensors=120832 bytes=21060976640 avg_tensors=4.0 avg_bytes=697199
+[AR] timed=16796 skip=9961 ar_us_sum=1398838 ar_us_avg=83.3
+[AR] calls=30464 tensors=121856 bytes=21228748800 avg_tensors=4.0 avg_bytes=696847
+[AR] timed=16926 skip=10060 ar_us_sum=1408070 ar_us_avg=83.2
+[AR] calls=30720 tensors=122880 bytes=21396520960 avg_tensors=4.0 avg_bytes=696501
+[AR] timed=17055 skip=10158 ar_us_sum=1416703 ar_us_avg=83.1
+[RT] spec checkpoints: 0.023 ms/round over 224 rounds
+[AR] calls=30976 tensors=123904 bytes=21564293120 avg_tensors=4.0 avg_bytes=696161
+[AR] timed=17185 skip=10251 ar_us_sum=1425423 ar_us_avg=82.9
+[RT] target decode+sync: 30.440 ms/round over 224 rounds (last n_tokens=8)
+0.29.539.029 I process: inject timing: n=224 | inject_decode=1.92 ms/call
+[AR] calls=31232 tensors=124928 bytes=21732065280 avg_tensors=4.0 avg_bytes=695827
+[AR] timed=17322 skip=10336 ar_us_sum=1434984 ar_us_avg=82.8
+0.29.699.282 I common_speculative_timing_report: spec overhead per round | process=0.05 draft=0.00 accept=0.00 ms (n_process=227)
+[AR] calls=31488 tensors=125952 bytes=21899837440 avg_tensors=4.0 avg_bytes=695498
+[AR] timed=17452 skip=10428 ar_us_sum=1444020 ar_us_avg=82.7
+0.29.829.787 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.76 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=454 reuse=0 rebuild=454 | build_us=61367 alloc_us=896280 setin_us=18243 enqueue_us=3357290 sync_us=0
+0.29.829.863 I draft: spec timing: n=224 | draft_decode=17.59 selector=2.72 walk=0.07 ms/round
+0.29.829.905 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=31744 tensors=126976 bytes=22067609600 avg_tensors=4.0 avg_bytes=695174
+[AR] timed=17579 skip=10523 ar_us_sum=1452905 ar_us_avg=82.7
+[AR] calls=32000 tensors=128000 bytes=22235381760 avg_tensors=4.0 avg_bytes=694856
+[AR] timed=17705 skip=10622 ar_us_sum=1461721 ar_us_avg=82.6
+0.29.971.495 I slot print_timing: id  0 | task 126 | n_gen =    377, tg =  62.24 t/s, tg_3s =  55.68 t/s
+[AR] calls=32256 tensors=129024 bytes=22403153920 avg_tensors=4.0 avg_bytes=694542
+[AR] timed=17833 skip=10724 ar_us_sum=1470679 ar_us_avg=82.5
+[AR] calls=32512 tensors=130048 bytes=22570926080 avg_tensors=4.0 avg_bytes=694234
+[AR] timed=17956 skip=10828 ar_us_sum=1478728 ar_us_avg=82.4
+[META] calls=704 sub/call=47.4 ar/call=46.4 | total=12.701 loop=11.665 dev=8.558 ar=3.103 ms/call | prologue=1.036 (8.2%)
+[AR] calls=32768 tensors=131072 bytes=22738698240 avg_tensors=4.0 avg_bytes=693930
+[AR] timed=18087 skip=10920 ar_us_sum=1487633 ar_us_avg=82.2
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 206.728 ms over 896 calls (0.231 ms/call)
+[AR] calls=33024 tensors=132096 bytes=22906470400 avg_tensors=4.0 avg_bytes=693631
+[AR] timed=18231 skip=10998 ar_us_sum=1497644 ar_us_avg=82.1
+0.30.401.830 I process: inject timing: n=240 | inject_decode=1.90 ms/call
+[AR] calls=33280 tensors=133120 bytes=23074242560 avg_tensors=4.0 avg_bytes=693337
+[AR] timed=18393 skip=11073 ar_us_sum=1509592 ar_us_avg=82.1
+[AR] calls=33536 tensors=134144 bytes=23242014720 avg_tensors=4.0 avg_bytes=693047
+[AR] timed=18618 skip=11074 ar_us_sum=1525343 ar_us_avg=81.9
+0.30.621.107 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=243)
+[AR] calls=33792 tensors=135168 bytes=23409786880 avg_tensors=4.0 avg_bytes=692761
+[AR] timed=18751 skip=11169 ar_us_sum=1534777 ar_us_avg=81.9
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=486 reuse=0 rebuild=486 | build_us=65727 alloc_us=960579 setin_us=19582 enqueue_us=3586304 sync_us=0
+0.30.760.595 I draft: spec timing: n=240 | draft_decode=17.57 selector=2.72 walk=0.07 ms/round
+0.30.760.649 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=34048 tensors=136192 bytes=23577559040 avg_tensors=4.0 avg_bytes=692480
+[AR] timed=18885 skip=11263 ar_us_sum=1544201 ar_us_avg=81.8
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 241.193 ms over 960 calls (0.251 ms/call)
+[AR] calls=34304 tensors=137216 bytes=23745331200 avg_tensors=4.0 avg_bytes=692203
+[AR] timed=19008 skip=11366 ar_us_sum=1552137 ar_us_avg=81.7
+[AR] calls=34560 tensors=138240 bytes=23913103360 avg_tensors=4.0 avg_bytes=691930
+[AR] timed=19143 skip=11454 ar_us_sum=1561449 ar_us_avg=81.6
+[AR] calls=34816 tensors=139264 bytes=24080875520 avg_tensors=4.0 avg_bytes=691661
+[AR] timed=19277 skip=11542 ar_us_sum=1570723 ar_us_avg=81.5
+[AR] calls=35072 tensors=140288 bytes=24248647680 avg_tensors=4.0 avg_bytes=691396
+[AR] timed=19409 skip=11632 ar_us_sum=1579890 ar_us_avg=81.4
+[RT] spec checkpoints: 0.023 ms/round over 256 rounds
+[AR] calls=35328 tensors=141312 bytes=24416419840 avg_tensors=4.0 avg_bytes=691135
+[AR] timed=19540 skip=11723 ar_us_sum=1589120 ar_us_avg=81.3
+[RT] target decode+sync: 31.908 ms/round over 256 rounds (last n_tokens=8)
+0.31.355.099 I process: inject timing: n=256 | inject_decode=1.89 ms/call
+[META] calls=768 sub/call=47.3 ar/call=46.3 | total=12.661 loop=11.611 dev=8.514 ar=3.092 ms/call | prologue=1.051 (8.3%)
+[AR] calls=35584 tensors=142336 bytes=24558960640 avg_tensors=4.0 avg_bytes=690169
+[AR] timed=19743 skip=11772 ar_us_sum=1611023 ar_us_avg=81.6
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 275.665 ms over 1024 calls (0.269 ms/call)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=258 reuse=242 rebuild=16 | build_us=28741 alloc_us=440281 setin_us=9646 enqueue_us=6267554 sync_us=0
+0.31.665.219 I slot print_timing: id  0 | task 126 | prompt eval time =     549.95 ms /   106 tokens (    5.19 ms per token,   192.74 tokens per second)
+0.31.665.227 I slot print_timing: id  0 | task 126 |        eval time =    7734.74 ms /   512 tokens (   15.14 ms per token,    66.07 tokens per second)
+0.31.665.229 I slot print_timing: id  0 | task 126 |       total time =    8284.69 ms /   618 tokens
+0.31.665.247 I slot print_timing: id  0 | task 126 |    graphs reused =        242
+0.31.665.256 I slot print_timing: id  0 | task 126 | draft acceptance = 0.42193 (  381 accepted /   903 generated), mean len =  3.93
+0.31.665.334 I slot      release: id  0 | task 126 | stop processing: n_tokens = 617, truncated = 0
+0.31.707.024 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 0.536 (> 0.100 thold), f_keep = 0.073
+0.31.831.468 I slot launch_slot_: id  0 | task 260 | processing task, is_child = 0
+[AR] calls=35840 tensors=143360 bytes=25108807680 avg_tensors=4.0 avg_bytes=700581
+[AR] timed=19999 skip=11772 ar_us_sum=1657605 ar_us_avg=82.9
+0.32.180.375 I common_speculative_timing_report: spec overhead per round | process=0.24 draft=0.00 accept=0.00 ms (n_process=260)
+[AR] calls=36096 tensors=144384 bytes=25475481600 avg_tensors=4.0 avg_bytes=705770
+[AR] timed=20253 skip=11772 ar_us_sum=1696551 ar_us_avg=83.8
+[AR] calls=36352 tensors=145408 bytes=25643253760 avg_tensors=4.0 avg_bytes=705415
+[AR] timed=20506 skip=11772 ar_us_sum=1733221 ar_us_avg=84.5
+0.32.686.132 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.79 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=521 reuse=0 rebuild=521 | build_us=70256 alloc_us=1026081 setin_us=21645 enqueue_us=3828385 sync_us=0
+0.32.686.214 I draft: spec timing: n=256 | draft_decode=17.55 selector=2.72 walk=0.07 ms/round
+0.32.686.259 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=36608 tensors=146432 bytes=25811025920 avg_tensors=4.0 avg_bytes=705065
+[AR] timed=20641 skip=11860 ar_us_sum=1742132 ar_us_avg=84.4
+[AR] calls=36864 tensors=147456 bytes=25978798080 avg_tensors=4.0 avg_bytes=704720
+[AR] timed=20774 skip=11949 ar_us_sum=1751401 ar_us_avg=84.3
+[AR] calls=37120 tensors=148480 bytes=26146570240 avg_tensors=4.0 avg_bytes=704380
+[AR] timed=20906 skip=12039 ar_us_sum=1760609 ar_us_avg=84.2
+[AR] calls=37376 tensors=149504 bytes=26314342400 avg_tensors=4.0 avg_bytes=704044
+[AR] timed=21037 skip=12130 ar_us_sum=1769796 ar_us_avg=84.1
+0.33.105.304 I process: inject timing: n=272 | inject_decode=1.92 ms/call
+[AR] calls=37632 tensors=150528 bytes=26482114560 avg_tensors=4.0 avg_bytes=703713
+[AR] timed=21169 skip=12223 ar_us_sum=1779014 ar_us_avg=84.0
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 34.076 ms over 1088 calls (0.031 ms/call)
+[AR] calls=37888 tensors=151552 bytes=26649886720 avg_tensors=4.0 avg_bytes=703386
+[AR] timed=21300 skip=12321 ar_us_sum=1788158 ar_us_avg=84.0
+[AR] calls=38144 tensors=152576 bytes=26817658880 avg_tensors=4.0 avg_bytes=703064
+[AR] timed=21430 skip=12419 ar_us_sum=1797101 ar_us_avg=83.9
+0.33.357.993 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.67 accept=0.00 ms (n_process=276)
+[AR] calls=38400 tensors=153600 bytes=26985431040 avg_tensors=4.0 avg_bytes=702746
+[AR] timed=21571 skip=12501 ar_us_sum=1806505 ar_us_avg=83.7
+[AR] calls=38656 tensors=154624 bytes=27153203200 avg_tensors=4.0 avg_bytes=702432
+[AR] timed=21717 skip=12577 ar_us_sum=1816817 ar_us_avg=83.7
+[META] calls=832 sub/call=47.5 ar/call=46.5 | total=13.064 loop=11.944 dev=8.832 ar=3.108 ms/call | prologue=1.120 (8.6%)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=553 reuse=0 rebuild=553 | build_us=74814 alloc_us=1090906 setin_us=22779 enqueue_us=4066655 sync_us=0
+0.33.595.523 I draft: spec timing: n=272 | draft_decode=17.57 selector=2.72 walk=0.07 ms/round
+0.33.595.582 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=38912 tensors=155648 bytes=27320975360 avg_tensors=4.0 avg_bytes=702122
+[AR] timed=21861 skip=12655 ar_us_sum=1826995 ar_us_avg=83.6
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 68.452 ms over 1152 calls (0.059 ms/call)
+[AR] calls=39168 tensors=156672 bytes=27488747520 avg_tensors=4.0 avg_bytes=701816
+[AR] timed=22001 skip=12737 ar_us_sum=1836941 ar_us_avg=83.5
+[AR] calls=39424 tensors=157696 bytes=27656519680 avg_tensors=4.0 avg_bytes=701515
+[AR] timed=22139 skip=12824 ar_us_sum=1846572 ar_us_avg=83.4
+[RT] spec checkpoints: 0.023 ms/round over 288 rounds
+[AR] calls=39680 tensors=158720 bytes=27824291840 avg_tensors=4.0 avg_bytes=701217
+[AR] timed=22270 skip=12922 ar_us_sum=1855735 ar_us_avg=83.3
+[RT] target decode+sync: 50.746 ms/round over 288 rounds (last n_tokens=8)
+0.34.036.992 I process: inject timing: n=288 | inject_decode=1.91 ms/call
+[AR] calls=39936 tensors=159744 bytes=27992064000 avg_tensors=4.0 avg_bytes=700923
+[AR] timed=22462 skip=12973 ar_us_sum=1876805 ar_us_avg=83.6
+[AR] calls=40192 tensors=160768 bytes=28159836160 avg_tensors=4.0 avg_bytes=700633
+[AR] timed=22663 skip=13010 ar_us_sum=1903331 ar_us_avg=84.0
+0.34.425.895 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.68 accept=0.00 ms (n_process=292)
+[AR] calls=40448 tensors=161792 bytes=28327608320 avg_tensors=4.0 avg_bytes=700346
+[AR] timed=22807 skip=13088 ar_us_sum=1913503 ar_us_avg=83.9
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 102.866 ms over 1216 calls (0.085 ms/call)
+[AR] calls=40704 tensors=162816 bytes=28495380480 avg_tensors=4.0 avg_bytes=700063
+[AR] timed=22949 skip=13168 ar_us_sum=1923440 ar_us_avg=83.8
+0.34.659.678 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.82 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=585 reuse=0 rebuild=585 | build_us=79763 alloc_us=1156480 setin_us=24167 enqueue_us=4312996 sync_us=0
+0.34.659.761 I draft: spec timing: n=288 | draft_decode=17.62 selector=2.72 walk=0.07 ms/round
+0.34.659.814 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=40960 tensors=163840 bytes=28663152640 avg_tensors=4.0 avg_bytes=699784
+[AR] timed=23080 skip=13259 ar_us_sum=1932593 ar_us_avg=83.7
+[AR] calls=41216 tensors=164864 bytes=28830924800 avg_tensors=4.0 avg_bytes=699508
+[AR] timed=23211 skip=13354 ar_us_sum=1941733 ar_us_avg=83.7
+[AR] calls=41472 tensors=165888 bytes=28998696960 avg_tensors=4.0 avg_bytes=699236
+[AR] timed=23341 skip=13453 ar_us_sum=1950802 ar_us_avg=83.6
+[META] calls=896 sub/call=47.4 ar/call=46.4 | total=13.033 loop=11.927 dev=8.816 ar=3.106 ms/call | prologue=1.106 (8.5%)
+[AR] calls=41728 tensors=166912 bytes=29166469120 avg_tensors=4.0 avg_bytes=698966
+[AR] timed=23468 skip=13553 ar_us_sum=1959133 ar_us_avg=83.5
+[AR] calls=41984 tensors=167936 bytes=29334241280 avg_tensors=4.0 avg_bytes=698700
+[AR] timed=23603 skip=13641 ar_us_sum=1968287 ar_us_avg=83.4
+0.35.087.737 I process: inject timing: n=304 | inject_decode=1.90 ms/call
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 137.055 ms over 1280 calls (0.107 ms/call)
+[AR] calls=42240 tensors=168960 bytes=29502013440 avg_tensors=4.0 avg_bytes=698438
+[AR] timed=23739 skip=13727 ar_us_sum=1977699 ar_us_avg=83.3
+[AR] calls=42496 tensors=169984 bytes=29669785600 avg_tensors=4.0 avg_bytes=698178
+[AR] timed=23874 skip=13814 ar_us_sum=1987132 ar_us_avg=83.2
+0.35.341.302 I common_speculative_timing_report: spec overhead per round | process=0.00 draft=0.65 accept=0.00 ms (n_process=308)
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=309 reuse=288 rebuild=21 | build_us=37616 alloc_us=579305 setin_us=11723 enqueue_us=7722529 sync_us=0
+0.35.375.957 I slot print_timing: id  0 | task 260 | prompt eval time =     532.50 ms /    84 tokens (    6.34 ms per token,   157.75 tokens per second)
+0.35.375.966 I slot print_timing: id  0 | task 260 |        eval time =    3011.89 ms /   292 tokens (   10.35 ms per token,    96.62 tokens per second)
+0.35.375.968 I slot print_timing: id  0 | task 260 |       total time =    3544.39 ms /   376 tokens
+0.35.376.011 I slot print_timing: id  0 | task 260 |    graphs reused =        288
+0.35.376.021 I slot print_timing: id  0 | task 260 | draft acceptance = 0.72619 (  244 accepted /   336 generated), mean len =  6.08
+0.35.376.117 I slot      release: id  0 | task 260 | stop processing: n_tokens = 376, truncated = 0
+0.35.952.311 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.223
+0.36.072.488 I slot launch_slot_: id  0 | task 312 | processing task, is_child = 0
+[AR] calls=42752 tensors=171008 bytes=30010245120 avg_tensors=4.0 avg_bytes=701961
+[AR] timed=24038 skip=13904 ar_us_sum=2008734 ar_us_avg=83.6
+[AR] calls=43008 tensors=172032 bytes=30656102400 avg_tensors=4.0 avg_bytes=712800
+[AR] timed=24294 skip=13904 ar_us_sum=2061159 ar_us_avg=84.8
+[AR] calls=43264 tensors=173056 bytes=30802247680 avg_tensors=4.0 avg_bytes=711960
+[AR] timed=24546 skip=13904 ar_us_sum=2093036 ar_us_avg=85.3
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=620 reuse=0 rebuild=620 | build_us=84535 alloc_us=1222006 setin_us=26126 enqueue_us=4563689 sync_us=0
+0.37.040.202 I draft: spec timing: n=304 | draft_decode=17.65 selector=2.72 walk=0.07 ms/round
+0.37.040.248 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=43520 tensors=174080 bytes=30970019840 avg_tensors=4.0 avg_bytes=711627
+[AR] timed=24728 skip=13953 ar_us_sum=2114815 ar_us_avg=85.5
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 96.215 ms over 1344 calls (0.072 ms/call)
+[AR] calls=43776 tensors=175104 bytes=31137792000 avg_tensors=4.0 avg_bytes=711298
+[AR] timed=24857 skip=14052 ar_us_sum=2123885 ar_us_avg=85.4
+[AR] calls=44032 tensors=176128 bytes=31305564160 avg_tensors=4.0 avg_bytes=710973
+[AR] timed=24985 skip=14148 ar_us_sum=2132251 ar_us_avg=85.3
+[RT] spec checkpoints: 0.022 ms/round over 320 rounds
+[RT] target decode+sync: 49.768 ms/round over 320 rounds (last n_tokens=8)
+0.37.349.661 I process: inject timing: n=320 | inject_decode=1.92 ms/call
+[AR] calls=44288 tensors=177152 bytes=31473336320 avg_tensors=4.0 avg_bytes=710652
+[AR] timed=25118 skip=14237 ar_us_sum=2141542 ar_us_avg=85.3
+[AR] calls=44544 tensors=178176 bytes=31641108480 avg_tensors=4.0 avg_bytes=710334
+[AR] timed=25256 skip=14321 ar_us_sum=2151302 ar_us_avg=85.2
+[META] calls=960 sub/call=47.5 ar/call=46.5 | total=13.295 loop=12.148 dev=9.032 ar=3.112 ms/call | prologue=1.147 (8.6%)
+[AR] calls=44800 tensors=179200 bytes=31808880640 avg_tensors=4.0 avg_bytes=710020
+[AR] timed=25393 skip=14406 ar_us_sum=2161046 ar_us_avg=85.1
+0.37.763.261 I common_speculative_timing_report: spec overhead per round | process=0.06 draft=0.00 accept=0.00 ms (n_process=326)
+[AR] calls=45056 tensors=180224 bytes=31976652800 avg_tensors=4.0 avg_bytes=709709
+[AR] timed=25525 skip=14497 ar_us_sum=2170434 ar_us_avg=85.0
+[AR] calls=45312 tensors=181248 bytes=32144424960 avg_tensors=4.0 avg_bytes=709402
+[AR] timed=25652 skip=14600 ar_us_sum=2179396 ar_us_avg=85.0
+[RT] common_sampler_sample: llama_synchronize = 0.013 ms/call | sampling cumulative = 332.416 ms over 1408 calls (0.236 ms/call)
+[AR] calls=45568 tensors=182272 bytes=32312197120 avg_tensors=4.0 avg_bytes=709098
+[AR] timed=25778 skip=14703 ar_us_sum=2188202 ar_us_avg=84.9
+0.38.200.973 I build_dflash2_selector_cpu: selector cpu per round = fetch 0.09 + topk 0.79 + gate 1.04 ms (threads=8, n_tokens=8 rank=256)
+[RT] perf: ctx=Qwen3.8-27B-DFlash2 n_ctx=8192 splits=2 rounds=652 reuse=0 rebuild=652 | build_us=88816 alloc_us=1286588 setin_us=27231 enqueue_us=4791915 sync_us=0
+0.38.201.052 I draft: spec timing: n=320 | draft_decode=17.63 selector=2.72 walk=0.07 ms/round
+0.38.201.091 I draft: draft ctx: n_eval=1 n_reused=0 t_eval=0.0 ms
+[AR] calls=45824 tensors=183296 bytes=32479969280 avg_tensors=4.0 avg_bytes=708798
+[AR] timed=25907 skip=14797 ar_us_sum=2196683 ar_us_avg=84.8
+[AR] calls=46080 tensors=184320 bytes=32615628800 avg_tensors=4.0 avg_bytes=707804
+[AR] timed=26082 skip=14859 ar_us_sum=2218377 ar_us_avg=85.1
+[RT] perf: ctx=Qwen3.8-27B n_ctx=8192 splits=2 rounds=334 reuse=308 rebuild=26 | build_us=46592 alloc_us=722234 setin_us=12762 enqueue_us=8665221 sync_us=0
+0.38.505.564 I slot print_timing: id  0 | task 312 | prompt eval time =     554.80 ms /    84 tokens (    6.60 ms per token,   151.41 tokens per second)
+0.38.505.574 I slot print_timing: id  0 | task 312 |        eval time =    1878.18 ms /   128 tokens (   14.79 ms per token,    67.62 tokens per second)
+0.38.505.576 I slot print_timing: id  0 | task 312 |       total time =    2432.98 ms /   212 tokens
+0.38.505.623 I slot print_timing: id  0 | task 312 |    graphs reused =        308
+0.38.505.634 I slot print_timing: id  0 | task 312 | draft acceptance = 0.70000 (  105 accepted /   150 generated), mean len =  5.77
+0.38.505.712 I slot      release: id  0 | task 312 | stop processing: n_tokens = 211, truncated = 0
+0.38.657.962 I srv    operator(): operator(): cleaning up before exit...
+0.38.674.150 W ~llama_context:  CUDA_Host compute buffer size of   5.8612 MiB, does not match expectation of   1.5334 MiB
+[AR] calls=46110 tensors=184440 bytes=32625459200 avg_tensors=4.0 avg_bytes=707557
+[AR] timed=26113 skip=14859 ar_us_sum=2223400 ar_us_avg=85.1

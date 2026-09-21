@@ -1,0 +1,167 @@
+CHAIN_START 17:35:23
+IDLE_WAIT i=1 idle=1 17:35:23
+IDLE_WAIT i=2 idle=0 17:35:43
+IDLE_WAIT i=3 idle=0 17:36:03
+IDLE_WAIT i=4 idle=0 17:36:23
+IDLE_WAIT i=5 idle=0 17:36:43
+IDLE_WAIT i=6 idle=0 17:37:03
+IDLE_WAIT i=7 idle=0 17:37:23
+IDLE_WAIT i=8 idle=0 17:37:44
+IDLE_WAIT i=9 idle=0 17:38:04
+IDLE_WAIT i=10 idle=0 17:38:24
+IDLE_WAIT i=11 idle=0 17:38:44
+IDLE_WAIT i=12 idle=0 17:39:04
+IDLE_WAIT i=13 idle=0 17:39:24
+IDLE_WAIT i=14 idle=0 17:39:44
+IDLE_WAIT i=15 idle=0 17:40:04
+IDLE_WAIT i=16 idle=0 17:40:24
+IDLE_WAIT i=17 idle=0 17:40:44
+IDLE_WAIT i=18 idle=0 17:41:04
+IDLE_WAIT i=19 idle=1 17:41:24
+IDLE_WAIT i=20 idle=2 17:41:45
+MACHINE_IDLE 17:41:45
+SRC_MD5_BEFORE=01c5bb687f6a51f3b3d864ee4643e9c0 UPLOAD_MD5=967af7b5e833c205f8f9dea680af2f19
+SRC_SWAPPED
+SRC_MD5_AFTER=967af7b5e833c205f8f9dea680af2f19
+BUILD_RC=0
+BUILD_ERRORS=0
+BUILD_TARGETS=115
+BUILD_TAIL=[100%] Built target llama-app
+SRC_MD5_POSTBUILD=967af7b5e833c205f8f9dea680af2f19
+LIB_MD5_CUDA=8fc530e2fb48eee720d6a6af25b17dd5
+LIB_MD5_BASE=88bd3f2b70134add9b275b34d6fcb590
+MARK_FPD=1
+MARK_MKEY=1
+MARK_FAK=1
+ARM_A_RC=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=80.65
+P60_DONE TAG=fpdA STATUS=OK
+ARM_B_RC=0
+greedy: content_len=158 reasoning_len=171 sha256=f3edac19446ef641447f8391c71cb1b25a74055d662e9887890fa4a98602ca34
+MEDIAN_TG=81.12
+P60_DONE TAG=fpdB STATUS=OK
+===FPD_HEAD_A===
+[FPD] call=1 n_nodes 4951 -> 649
+[FPD] call=1 i=0 inp_noise_embd op=GET_ROWS changed=node
+[FPD]   ne 5120 2 1 1 -> 5120 2 1 1 | nb 4 20480 40960 40960 -> 4 20480 40960 40960
+[FPD] call=1 i=1 norm-0 op=RMS_NORM changed=node
+[FPD]   ne 5120 2 1 1 -> 5120 2 1 1 | nb 4 20480 40960 40960 -> 4 20480 40960 40960
+[FPD] call=1 i=2 noise_norm-0 op=MUL changed=node
+[FPD]   ne 5120 2 1 1 -> 5120 2 1 1 | nb 4 20480 40960 40960 -> 4 20480 40960 40960
+[FPD] call=1 i=3 node_3 op=MUL_MAT changed=node,data,op,ne0,ne1,nb1,nb2,nb3
+[FPD]   ne 30720 8 1 1 -> 1280 2 1 1 | nb 4 122880 983040 983040 -> 4 5120 10240 10240
+[FPD] call=2 n_nodes 649 -> 4951
+[FPD] call=2 i=0 model.input_embed op=GET_ROWS changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 2 1 1 -> 5120 42 1 1 | nb 4 20480 40960 40960 -> 4 20480 860160 860160
+[FPD] call=2 i=1 norm-0 op=RMS_NORM changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 2 1 1 -> 5120 42 1 1 | nb 4 20480 40960 40960 -> 4 20480 860160 860160
+[FPD] call=2 i=2 attn_norm-0 op=MUL changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 2 1 1 -> 5120 42 1 1 | nb 4 20480 40960 40960 -> 4 20480 860160 860160
+[FPD] call=2 i=3 cache_r_l0 (reshaped) op=RESHAPE changed=node,data,op,ne0,ne1,nb1,nb2,nb3
+[FPD]   ne 1280 2 1 1 -> 30720 8 1 1 | nb 4 5120 10240 10240 -> 4 122880 983040 983040
+[FPD] call=3 i=0 model.input_embed op=GET_ROWS changed=ne1,nb2,nb3
+[FPD]   ne 5120 42 1 1 -> 5120 30 1 1 | nb 4 20480 860160 860160 -> 4 20480 614400 614400
+[FPD] call=3 i=1 norm-0 op=RMS_NORM changed=ne1,nb2,nb3
+[FPD]   ne 5120 42 1 1 -> 5120 30 1 1 | nb 4 20480 860160 860160 -> 4 20480 614400 614400
+[FPD] call=3 i=2 attn_norm-0 op=MUL changed=ne1,nb2,nb3
+[FPD]   ne 5120 42 1 1 -> 5120 30 1 1 | nb 4 20480 860160 860160 -> 4 20480 614400 614400
+[FPD] call=3 i=4 cache_r_l0 (reshaped) (view) op=VIEW changed=ne0,nb1,nb2,nb3
+[FPD]   ne 30720 1 1 1 -> 0 1 1 1 | nb 4 122880 122880 122880 -> 4 0 0 0
+[FPD] call=4 i=0 model.input_embed op=GET_ROWS changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 30 1 1 -> 5120 4 1 1 | nb 4 20480 614400 614400 -> 4 20480 81920 81920
+[FPD] call=4 i=1 norm-0 op=RMS_NORM changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 30 1 1 -> 5120 4 1 1 | nb 4 20480 614400 614400 -> 4 20480 81920 81920
+[FPD] call=4 i=2 attn_norm-0 op=MUL changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 30 1 1 -> 5120 4 1 1 | nb 4 20480 614400 614400 -> 4 20480 81920 81920
+[FPD] call=4 i=3 cache_r_l0 (reshaped) op=RESHAPE changed=node
+[FPD]   ne 30720 8 1 1 -> 30720 8 1 1 | nb 4 122880 983040 983040 -> 4 122880 983040 983040
+[FPD] call=5 n_nodes 4951 -> 649
+[FPD] call=5 i=0 inp_noise_embd op=GET_ROWS changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 4 1 1 -> 5120 8 1 1 | nb 4 20480 81920 81920 -> 4 20480 163840 163840
+[FPD] call=5 i=1 norm-0 op=RMS_NORM changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 4 1 1 -> 5120 8 1 1 | nb 4 20480 81920 81920 -> 4 20480 163840 163840
+[FPD] call=5 i=2 noise_norm-0 op=MUL changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 4 1 1 -> 5120 8 1 1 | nb 4 20480 81920 81920 -> 4 20480 163840 163840
+[FPD] call=5 i=3 node_3 op=MUL_MAT changed=node,data,op,ne0,nb1,nb2,nb3
+[FPD]   ne 30720 8 1 1 -> 1280 8 1 1 | nb 4 122880 983040 983040 -> 4 5120 40960 40960
+[FPD] call=6 n_nodes 649 -> 4951
+[FPD] call=6 i=0 model.input_embed op=GET_ROWS changed=node
+[FPD]   ne 5120 8 1 1 -> 5120 8 1 1 | nb 4 20480 163840 163840 -> 4 20480 163840 163840
+[FPD] call=6 i=1 norm-0 op=RMS_NORM changed=node
+[FPD]   ne 5120 8 1 1 -> 5120 8 1 1 | nb 4 20480 163840 163840 -> 4 20480 163840 163840
+[FPD] call=6 i=2 attn_norm-0 op=MUL changed=node
+[FPD]   ne 5120 8 1 1 -> 5120 8 1 1 | nb 4 20480 163840 163840 -> 4 20480 163840 163840
+===FPD_TAIL_A===
+[FPD] call=189 i=1 norm-0 op=RMS_NORM changed=node
+[FPD]   ne 5120 8 1 1 -> 5120 8 1 1 | nb 4 20480 163840 163840 -> 4 20480 163840 163840
+[FPD] call=189 i=2 noise_norm-0 op=MUL changed=node
+[FPD]   ne 5120 8 1 1 -> 5120 8 1 1 | nb 4 20480 163840 163840 -> 4 20480 163840 163840
+[FPD] call=189 i=3 node_3 op=MUL_MAT changed=node,data,op,ne0,nb1,nb2,nb3
+[FPD]   ne 30720 8 1 1 -> 1280 8 1 1 | nb 4 122880 983040 983040 -> 4 5120 40960 40960
+[FPD] calls=192 same=152 diff=39 hit8=160 dist1=20 dist2=25 dist3=23 dist4=21 dist5=20 dist6=20 dist7=16 dist8=15
+[FPD] TOP 1242  (reshaped):RESHAPE.nb3
+[FPD] TOP 1058  (reshaped):RESHAPE.node
+[FPD] TOP 978  (reshaped):RESHAPE.ne2
+[FPD] TOP 966  (view):VIEW.node
+[FPD] TOP 946  (view):VIEW.nb3
+[FPD] TOP 860  (reshaped) (view):VIEW.nb3
+[FPD] TOP 710  (reshaped):RESHAPE.nb2
+[FPD] TOP 684  (reshaped) (view):VIEW.nb2
+[FPD] call=208 n_nodes 649 -> 4951
+[FPD] call=208 i=0 model.input_embed op=GET_ROWS changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 8 1 1 -> 5120 1 1 1 | nb 4 20480 163840 163840 -> 4 20480 20480 20480
+[FPD] call=208 i=1 norm-0 op=RMS_NORM changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 8 1 1 -> 5120 1 1 1 | nb 4 20480 163840 163840 -> 4 20480 20480 20480
+[FPD] call=208 i=2 attn_norm-0 op=MUL changed=node,ne1,nb2,nb3
+[FPD]   ne 5120 8 1 1 -> 5120 1 1 1 | nb 4 20480 163840 163840 -> 4 20480 20480 20480
+[FPD] call=208 i=3 cache_r_l0 (reshaped) op=RESHAPE changed=node,data,op,ne0,nb1,nb2,nb3
+[FPD]   ne 1280 8 1 1 -> 30720 8 1 1 | nb 4 5120 40960 40960 -> 4 122880 983040 983040
+===SCHED_A===
+[SCHED] BIG calls=132 splits=132 cached=0 split=257.8 us/call alloc=5437.3 us/call | SMALL calls=124 splits=124 cached=0 split=26.4 alloc=541.6 | uid_before=0 uid_after=9630 last=0 nodes=649 cache=0
+===SCHED_B===
+[SCHED] BIG calls=132 splits=132 cached=0 split=259.5 us/call alloc=5489.5 us/call | SMALL calls=124 splits=124 cached=0 split=27.5 alloc=536.2 | uid_before=0 uid_after=9630 last=0 nodes=649 cache=1
+===FAK_A===
+[FAK] kernel=MMA_F16 D=256 n_q=512 n_kv=8192 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=VEC D=256 n_q=1 n_kv=8192 kv_type=8 need_f16_K=0 need_f16_V=0
+[FAK] kernel=TILE D=256 n_q=2 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=MMA_F16 D=128 n_q=64 n_kv=2304 kv_type=1 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=128 n_q=1 n_kv=2304 kv_type=1 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=128 n_q=2 n_kv=256 kv_type=1 need_f16_K=1 need_f16_V=1
+[FAK] kernel=MMA_F16 D=256 n_q=42 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=MMA_F16 D=256 n_q=30 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=256 n_q=4 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=MMA_F16 D=128 n_q=8 n_kv=256 kv_type=1 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=256 n_q=8 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=256 n_q=6 n_kv=512 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=MMA_F16 D=256 n_q=60 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=256 n_q=7 n_kv=512 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=TILE D=256 n_q=3 n_kv=512 kv_type=8 need_f16_K=1 need_f16_V=1
+[FAK] kernel=MMA_F16 D=256 n_q=38 n_kv=256 kv_type=8 need_f16_K=1 need_f16_V=1
+===MKEY_A===
+[MKEY] r=0 i=0 j=0 n0=0x7ffd28330ec0 uid=22 n=79
+[MKEY] r=0 i=0 j=1 n0=0x7ffd11320ec0 uid=151 n=79
+[MKEY] r=0 i=0 j=2 n0=0x7ffcfa310ec0 uid=280 n=79
+[MKEY] r=0 i=1 j=0 n0=0x7ffd28335530 uid=23 n=8
+[MKEY] r=0 i=1 j=1 n0=0x7ffd11325530 uid=152 n=8
+[MKEY] r=0 i=1 j=2 n0=0x7ffcfa315530 uid=281 n=8
+[MKEY] r=0 i=2 j=0 n0=0x7ffd283360b0 uid=24 n=78
+[MKEY] r=0 i=2 j=1 n0=0x7ffd113260b0 uid=153 n=78
+[MKEY] r=0 i=2 j=2 n0=0x7ffcfa3160b0 uid=282 n=78
+[MKEY] r=0 i=3 j=0 n0=0x7ffd2833a890 uid=25 n=8
+[MKEY] r=0 i=3 j=1 n0=0x7ffd1132a890 uid=154 n=8
+[MKEY] r=0 i=3 j=2 n0=0x7ffcfa31a890 uid=283 n=8
+[MKEY] r=1 i=0 j=0 n0=0x7ffc50ff2450 uid=430 n=62
+[MKEY] r=1 i=0 j=1 n0=0x7ffc39fe2450 uid=441 n=62
+[MKEY] r=1 i=0 j=2 n0=0x7ffc22fd2450 uid=452 n=62
+[MKEY] r=1 i=1 j=0 n0=0x7ffc50ff6f10 uid=431 n=54
+[MKEY] r=1 i=1 j=1 n0=0x7ffc39fe6f10 uid=442 n=54
+[MKEY] r=1 i=1 j=2 n0=0x7ffc22fd6f10 uid=453 n=54
+[MKEY] r=1 i=2 j=0 n0=0x7ffc50ffb6f0 uid=432 n=75
+[MKEY] r=1 i=2 j=1 n0=0x7ffc39feb6f0 uid=443 n=75
+[MKEY] r=1 i=2 j=2 n0=0x7ffc22fdb6f0 uid=454 n=75
+[MKEY] r=1 i=3 j=0 n0=0x7ffc51001460 uid=433 n=54
+[MKEY] r=1 i=3 j=1 n0=0x7ffc39ff1460 uid=444 n=54
+[MKEY] r=1 i=3 j=2 n0=0x7ffc22fe1460 uid=455 n=54
+CHAIN_END 17:47:32
+FPD_CHAIN_DONE
