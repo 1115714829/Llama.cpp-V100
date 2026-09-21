@@ -179,6 +179,22 @@ target : ctx=Qwen3.8-27B        rounds=219 reuse=205 rebuild=14  | build=24799 a
    修法方向因此非常明确：**让 draft ctx 的图能够复用**（像 target 那样 94%）——这是 DFlash2 线上唯一的大额、且方向明确的项。
    待定的只是「复用失败的充分条件」（token 数？pos 模式？KV 行索引？），E3 已把 `tok=` 加进探针，读数在手即可判定。
 
+### 1.4g E3 读数（`tok=` 探针到位）——**块批恒定、注入批变动；但 target 也交替却复用 94% ⇒ 交替不是元凶**
+```
+inject timing: n=288 | gather=0.10 copy=0.13 submit=1.80 wait=0.00 ms/call (layers=5 tok=8.93)
+spec timing:   n=272 | draft_decode=13.65 selector=2.79 walk=0.09 wait=0.00 ms/round (tok=8.00)
+draft  : rounds=556 reuse=0   rebuild=556 | alloc=1060743 enqueue=3037492 us   (第三次采样，仍 0%)
+target : rounds=294 reuse=270 rebuild=24  | alloc=672891  enqueue=6078877 us   (92% 复用)
+arm    : health ok=1 after 15s, MEDIAN_TG=97.70, sha256=f3edac19... (正确性门通过)
+```
+- **块批 tok 恒为 8.00**；**注入批 tok ≈ 8.86-8.93（每轮变）**。
+- ⚠️ **但预判表的第一条不成立**：我原以为「交替 + 注入批变动 ⇒ 命中不了复用」，
+  **然而 target 同样在 8-token verify 与 AL 注入之间交替（AL 也变），复用率却有 92%**
+  => **「图交替」本身不是复用失败的充分原因**，draft 的 0% 另有原因。
+- ⇒ 下一步（**只读代码**，下一步就做）：读我加的 `[RT]` 探针到底在 `llama_context` 的哪一处计数 `reuse/rebuild`，
+  再对比 draft 与 target 在该判据上的输入差异（候选：`n_ubatch`、`has_embeddings`、`embd` 指针、`pos` 模式、KV 行索引、`logits` 需求）。
+  **在找到那个差异之前不动代码。**
+
 ### 1.5 由此得到的三条候选改动（按证据强度排序，需先用分段探针确认再动手）
 | 编号 | 改动 | 落点 | 预期 |
 |---|---|---|---|
