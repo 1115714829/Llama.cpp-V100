@@ -691,6 +691,85 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 3. **256K decode**：KV 带宽受限（q8_0 下每 token 每卡约 5.7 GB ≈ 6.3 ms）；若要改善需 KV 压缩或 attention 重构。
 4. **push AR（独立子项目）**：需要信用/确认握手 + 3 卡确定性单测（见 §12.1），不要再无单测直上端到端。
 
+---
+
+## §16 Round 40（2026-09-21）：长上下文差距的机制定位 + 树一致性修复
+
+### 16.1 卫生事故（已修，教训入档）
+- 服务器 `/root/llm/test/v100-opt/llama.cpp` **根本不是 git 仓库**：命令 `git status --porcelain 2>/dev/null` 静默失败，
+  我据此误判"树干净"。**远程非 git 树不能用 git 判断状态**。
+- 实测漂移：服务器 `allreduce.cu` 仍含 push 实验码（`grep -c push_flag_stride` = **7**），
+  且 `/root/libdir-instr/libggml-cuda.so` md5 = `7d4069d9...`、`strings | grep -c "push allreduce enabled"` = 1
+  => **当时在案的库带实验代码，与文档记录的 HEAD 不一致**。
+- 修法（权威同步）：本地 `git archive HEAD`（176 MB tar）-> scp -> 服务器解包覆盖源码 -> 重建。
+  校验：`allreduce.cu` md5 = `c663d3b8...`、`push_flag_stride` 计数 = **0**。
+- 重建后按正式口径跑 1 臂（`CARDS=0,1,2 SPLIT=tensor L=/root/libdir-instr P2P=1 NPRED=512`）：
+  **MEDIAN_TG = 99.76 t/s，AL 5.55 / 4.22 / 6.38，贪心 sha256 = `f3edac19...`**
+  => 与记录（96.43 / 99.37、逐位相同 AL、同一 hash）一致 => **记录数字有效、可复现**；
+  同时证明 push 码（默认不激活）不改变性能与数值。
+
+### 16.2 模型几何补全：这是**稠密**模型（MoE 假设全部作废）
+自写 GGUF 元数据 dump（`/root/ggufdump.py`，纯 stdlib）：
+`feed_forward_length = 17408`、**无 `expert_count`** => 稠密。
+=> 27.05 GiB Q8_0 权重 / TP3 = **9.02 GiB 每卡每步**，按有效 ~800 GB/s 计 => **步下限 12.1 ms**。
+（实测 target 步 32-34 ms，其中含 138 次集合通信的串行延迟 ~9.4-13 ms。）
+
+### 16.3 roofline 三算（把"还有多少空间"钉死）
+| 项 | 计算 | roofline | 实测 | 倍差 |
+|---|---|---|---:|---:|
+| 256K prefill | attn ~13.5 PFLOP + GEMM ~14 PFLOP = 28 PFLOP | ~230-290 s | **292 s（896 t/s）** | **约 1.0x => 已到顶** |
+| 256K decode (M=1) | KV 每卡 ~4.6 GB/token（4 个 KV 头按 2+1+1 切） | ~5.7 ms/token | **54 ms/token（18.45 t/s）** | **9.5x** |
+| target 步 (M=8/9) | 权重 9.02 GiB/卡 | 12.1 ms | 32-34 ms | 2.7x |
+结论：**256K prefill 不再是问题**（1cat 的 3567-4069 t/s 是 32K/64K 深度，不可直接比）；
+**长上下文 decode 是真正的洼地**；短上下文步的 2.7x 余量主要被集合通信延迟吃掉。
+
+### 16.4 FA 在 Volta 上按形状派发（纠正"FA 改动影响解码"的误解）
+- `fattn.cu:611` `can_use_vector_kernel`（D=256 为真）、`:638-642` `gqa_ratio_eff = 2`、`:644-652` Volta 分支。
+- **M=1 -> VEC**（`:645`，原生读 q8_0，不做反量化）；**M=2..8 -> TILE**（`:648`）；**M>=9 -> MMA_F16**（`:651`）。
+- => DFlash2 投机解码（n_max=7 => M 约 8）走 **TILE**；我们落地的 `Q_in_reg=false` 只作用在 **prefill**（M>=9）
+  => 与实测一致（32K/256K prefill +11%/+42%，decode 无变化）。
+- `fattn.cu:706-709`：**TILE 与 MMA 都强制 `need_f16_K/V = true`** => 量化 KV 每次调用都要**整段反量化成 f16**
+  （缓冲区在 KQV 的 extra 空间，`fattn-common.cuh:53`；反量化函数 `dequantize_V_q8_0` 等，`:588`）。
+  256K 时每层每步：K 约 285 MB 读 + 537 MB 写，V 同理 => 1.64 GB/层 => x16 层 ≈ **26 GB/步**（按头切分每卡约一半）。
+  **这是投机解码在长上下文下的额外固定流量，VEC（M=1）没有。**
+
+### 16.5 上游 split-KV 的真实状态（子代理取证 + 主线抽查）
+- VEC/TILE 确实切分 KV：`fattn-common.cuh:1201-1203` 的 `blocks_num.y = parallel_blocks` 即 KV 切分索引，
+  内核按 `gridDim.y` 跨步（`fattn-vec.cuh:250-256`、`fattn-tile.cuh:957-973`），归约在 `flash_attn_combine_results`（`:917-972`、`:1288-1295`）。
+- 但 **`parallel_blocks` 由 occupancy / wave 效率决定，不随 n_kv 增长**（`:1126-1132`、`:1179-1199`；`:1132` 的 `ntiles_KV` 只是上限）。
+- MMA 走 stream-K（`fattn-mma-f16.cuh:1870-1871`，`kbc` 空间均分 + `flash_attn_stream_k_fixup_*`）。
+- => V100 + 256K + M<=8 只有约 **6-26 路 KV 并行**，每块仍要串行走 300-680 个 KV tile。
+- 上游 issue **#28734 "CUDA: decode slows linearly with context"（2026-09-11，仍 open）** 与我们实测同源。
+
+### 16.6 1cat 的对标做法（"提取 V100 专项优化"的直接答案）
+- `vllm/platforms/cuda.py:149-159`：SM70 默认后端 **`FLASH_ATTN_V100`**（`VLLM_SM70_FLASH_ATTN_V100` 默认 1，`vllm/envs.py:358`）。
+- **decode 明确 split-KV**：`flash-attention-v100/kernel/flash_decode_paged.cu:1038, 1061-1076`
+  （`blockIdx.z = partition_idx`、`start_token_idx = partition_idx * PARTITION_SIZE`）+ 归约 `:2728`；
+  partition size 256/512/**1024（seq_len >= 32768）**（`flash_attn_v100/flash_attn_interface.py:19-20, 599-608`）。
+- D256 专项：`csrc/attention/sm70_v37/` + `cmake/patches/sm70_flash_attn_d256_{splitkv3,pipeline,k_pingpong,gqa_arch}.patch`。
+- 生产（`scripts/serve_qwen38_27b_nvfp4_v100.sh:81-86`）：
+  `--attention-backend FLASH_ATTN_V100 --dtype half --kv-cache-dtype fp8_e4m3 --max-model-len 262144 --tensor-parallel-size 4 --block-size 2048`；
+  权重 NVFP4，计算是 **fp16 HMMA**（`csrc/attention/sm70_v37/tail.cu:30-31`，`SM70_8x8x4_F32F16F16F32`）。
+- => **KV 只做 fp8 存储（1 B/元素），算前展开 fp16，且带 partition 并行**；
+  我们 = q8_0 存储 + **整段** f16 展开 + 切分度不足。注意 V100 无 FP8 张量核，1cat 的 FP8 也只是 KV 存储。
+
+### 16.7 量化权重在 V100 上的算力天花板（新假设，**未验证**）
+- V100 无 INT8 张量核；MMQ 依赖 `VOLTA_MMA_AVAILABLE`（`mma.cuh:152/838`）的**模拟 int8 mma**。
+- 1cat 用 NVFP4 权重 + fp16 HMMA（marlin SM70：`csrc/quantization/marlin/sm70_marlin_*.cu{h}`，cutlass `default_mma_core_sm70.h`）。
+- 与实测吻合：32K prefill 我们 2170 t/s vs 1cat 公开 3567-4069 t/s（1.6-1.9x）。
+- **隔离实验（未做）**：单卡 `test-backend-ops perf -o MUL_MAT` 比 q8_0 与 f16 权重的 prefill 形状吞吐；或用 f16 GGUF 跑 32K prefill 对照。
+
+### 16.8 本轮判据与下一步
+1. 长上下文 decode 的 **KV dtype x 深度曲线**（§16.9 正在跑）：若 f16 KV 在深上下文反超 q8_0 => **零代码可交付配置**（用户 256K 场景）。
+2. 若要动内核：把 TILE/MMA 的"整段 f16 反量化"改成按 tile 反量化（或 TILE 支持 q8_0 直读），即 1cat partition 路线的等价物；**属大改动，先问用户**。
+3. 量化权重 prefill 天花板：用 f16 GGUF 做 32K prefill 隔离实验。
+4. push AR（信用/确认握手）仍是独立子项目，优先级低于 1 与 2。
+
+### 16.9 正在跑的实测（脚本 `/root/lc-sweep.sh`，日志 `/tmp/lc-sweep.log`）
+canonical 重建 + `llama-bench -sm tensor -ts 1/1/1 -fa 1 -p 0 -n 64 -r 2`，
+`-d {8192, 32768, 131072, 262144}` x `-ctk/-ctv {q8_0, f16}`，另加 `-fa 0` 诊断两臂（8K/32K）。
+判据：每 KV-token 的 ms 斜率 vs §16.3 的 roofline 倍差（结果回来后补在 §17）。
+
 
 
 

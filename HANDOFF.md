@@ -1,7 +1,23 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
 > ## ★★ 2026-09-21 DSH 会话实况（优先于本文件其余内容）
 >
-> **权威顺序**：本节 > `AUDIT-2026-09-20-dsh.md` > `SESSION-2026-09-20-measurements.md`（本轮逐条实测与纠正，§0-§11）> 其余。
+> **权威顺序**：本节 > `AUDIT-2026-09-20-dsh.md` > `SESSION-2026-09-20-measurements.md`（逐条实测与纠正，§0-§11 与 **§16**）> 其余。
+>
+> **◎ Round 40 新增（细节见 SESSION §16）**
+> - **树/库一致性事故已修**：服务器源码树**不是 git 仓库**（`git status` 静默失败 => 被误判为"干净"），
+>   且 `/root/libdir-instr` 当时是**带 push 实验码**的构建（`push_flag_stride` x7 + 二进制标记）。
+>   已用本地 `git archive HEAD`（176 MB）权威同步服务器源码并重建；复核臂 **MEDIAN_TG = 99.76 t/s、AL 5.55/4.22/6.38、
+>   greedy `f3edac19...`** => 记录数字有效、可复现（push 码默认不激活，不影响性能与数值）。
+> - **模型是稠密的**（GGUF 实测 `feed_forward_length=17408`、**无 `expert_count`**）=> 一切 MoE / 专家小 GEMM 方向作废。
+> - **roofline 定位**：256K prefill **已到 roofline**（attn 13.5 + GEMM 14 = 28 PFLOP，实测 292 s / 896 t/s）；
+>   **长上下文 decode 才是洼地**（M=1 时 54 ms/token，roofline 5.7 ms => **9.5x**）；
+>   target 步的 2.7x 余量主要被 138 次集合通信的串行延迟（~9.4-13 ms）吃掉。
+> - **FA 在本形状（Volta, D=256, GQA=6）的派发**：**M=1 -> VEC**（q8_0 直读，无反量化）；
+>   **M=2..8 -> TILE，强制 `need_f16_K/V` => 每次调用把整段 KV 反量化成 f16**（256K 约 **26 GB/步**，正是投机解码所在路径）；
+>   M>=9 -> MMA（我们只有 prefill 会走到）。
+> - **上游 split-KV 存在但不随上下文增长**（`parallel_blocks` 由 occupancy/wave 决定，V100+256K 仅 6-26 路；上游 issue #28734 仍 open）。
+>   **1cat 的 V100 专项答案** = `FLASH_ATTN_V100` 的 partition split-KV（256/512/**1024**）+ **fp8 KV 存储（算前展开 fp16）** + fp16 HMMA（NVFP4 权重）。
+> - 下一步判据：长上下文 **KV dtype x 深度曲线**（`/root/lc-sweep.sh`，正在跑）；"按 tile 反量化"内核改造属大改动，**先问用户**。
 >
 > **验收对账（同日实测，带 drop_caches）**
 > | 项 | 项目最初 | 现在 |
