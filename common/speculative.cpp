@@ -1370,6 +1370,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         static const bool inj_enabled = (getenv("LLAMA_SPEC_TIMING") != nullptr);
         static int64_t inj_us = 0;
         static int32_t inj_n  = 0;
+        // phase split of the gather step, and optional submit-vs-wait split (diagnostic only)
+        static int64_t ph_gather_us = 0;
+        static int64_t ph_copy_us   = 0;
+        static const bool sync_split = (getenv("LLAMA_SPEC_SYNC_SPLIT") != nullptr);
+        static int64_t ph_wait_inj_us = 0;
+        static int64_t ph_tok = 0;
 
         for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
             if (i_batch_beg[seq_id] < 0) {
@@ -1390,8 +1396,11 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 // gather target features per extract layer; the fused decode encodes and
                 // injects them into the K/V cache at the target positions
                 batch_inject.n_tokens = n_chunk;
+                ph_tok += n_chunk;
                 for (uint32_t k = 0; k < target_layer_ids_n; ++k) {
+                    const int64_t ph_t0 = inj_enabled ? ggml_time_us() : 0;
                     const float * layer = llama_get_embeddings_layer_inp(ctx_tgt, (uint32_t) target_layer_ids[k]);
+                    const int64_t ph_t1 = inj_enabled ? ggml_time_us() : 0;
                     if (!layer) {
                         GGML_ABORT("DFlash: target layer %d input not extracted.", target_layer_ids[k]);
                     }
@@ -1399,6 +1408,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                         float       * dst = batch_inject.embd + (size_t) i * n_embd_enc + k * (size_t) n_embd_tgt;
                         const float * src = layer + (size_t) (i_batch_beg[seq_id] + offset + i) * n_embd_tgt;
                         std::memcpy(dst, src, (size_t) n_embd_tgt * sizeof(float));
+                    }
+                    if (inj_enabled) {
+                        ph_gather_us += ph_t1 - ph_t0;
+                        ph_copy_us   += ggml_time_us() - ph_t1;
                     }
                 }
 
@@ -1417,10 +1430,17 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 const int64_t inj_t0 = inj_enabled ? ggml_time_us() : 0;
                 const int32_t rc = llama_decode(ctx_dft, batch_inject);
                 if (inj_enabled) {
-                    inj_us += ggml_time_us() - inj_t0;
+                    const int64_t inj_submit_us = ggml_time_us() - inj_t0;
+                    inj_us += inj_submit_us;
+                    if (sync_split) {
+                        const int64_t ph_s0 = ggml_time_us();
+                        llama_synchronize(ctx_dft);
+                        ph_wait_inj_us += ggml_time_us() - ph_s0 - inj_submit_us;
+                    }
                     if (++inj_n % 16 == 0) {
-                        LOG_INF("%s: inject timing: n=%d | inject_decode=%.2f ms/call\n",
-                                __func__, inj_n, inj_us/1e3/inj_n);
+                        LOG_INF("%s: inject timing: n=%d | gather=%.2f copy=%.2f submit=%.2f wait=%.2f ms/call (layers=%u tok=%.2f)\n",
+                                __func__, inj_n, ph_gather_us/1e3/inj_n, ph_copy_us/1e3/inj_n,
+                                inj_us/1e3/inj_n, ph_wait_inj_us/1e3/inj_n, target_layer_ids_n, (double) ph_tok/inj_n);
                     }
                 }
                 if (rc != 0) {
@@ -1476,11 +1496,22 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         static int64_t st_sel = 0;
         static int64_t st_walk = 0;
         static int32_t st_n = 0;
+        static const bool st_sync_split = (getenv("LLAMA_SPEC_SYNC_SPLIT") != nullptr);
+        static int64_t st_wait = 0;
+        static int64_t st_tok = 0;
         const int64_t  st_t0 = st_enabled ? ggml_time_us() : 0;
 
         // decode all sequence's noise block in a single batch
         int ret = llama_decode(ctx_dft, batch);
         const int64_t st_t1 = st_enabled ? ggml_time_us() : 0;
+        if (st_enabled) {
+            st_tok += batch.n_tokens;
+        }
+        if (st_enabled && st_sync_split) {
+            const int64_t st_s0 = ggml_time_us();
+            llama_synchronize(ctx_dft);
+            st_wait += ggml_time_us() - st_s0 - (st_t1 - st_t0);
+        }
         if (ret != 0) {
             LOG_WRN("%s: llama_decode returned %d\n", __func__, ret);
             return;
@@ -1646,8 +1677,9 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             st_walk += ggml_time_us() - st_t2;
             st_n++;
             if (st_n % 16 == 0) {
-                LOG_INF("%s: spec timing: n=%d | draft_decode=%.2f selector=%.2f walk=%.2f ms/round\n",
-                        __func__, st_n, st_dec/1e3/st_n, st_sel/1e3/st_n, st_walk/1e3/st_n);
+                LOG_INF("%s: spec timing: n=%d | draft_decode=%.2f selector=%.2f walk=%.2f wait=%.2f ms/round (tok=%.2f)\n",
+                        __func__, st_n, st_dec/1e3/st_n, st_sel/1e3/st_n, st_walk/1e3/st_n, st_wait/1e3/st_n,
+                        st_n ? (double) st_tok/st_n : 0.0);
                 const llama_perf_context_data pcd = llama_perf_context(ctx_dft);
                 LOG_INF("%s: draft ctx: n_eval=%d n_reused=%d t_eval=%.1f ms\n",
                         __func__, (int) pcd.n_eval, (int) pcd.n_reused, pcd.t_eval_ms);
