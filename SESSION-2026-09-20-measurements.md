@@ -254,6 +254,150 @@ LD_LIBRARY_PATH=/root/libdir-instr CUDA_VISIBLE_DEVICES=0,1,2 /root/libdir-instr
    这样：(a) 少掉一次 draft 前向的权重读取；(b) 投影的批次可以安全地填充成常量形状（无状态语义）⇒ 图稳定 ⇒ 重放代替直提。
    **预期回收：draft 侧约 10-12 ms/轮**（当前 13 ms 里大部分）。
    这是**结构性改动**（改 DFlash 图的构建方式），按红线需用户批准后再动。
+---
+
+## 8. 2026-09-21 上午：上游 PR 核对 + draft churn 代码级根因 + 两个有界修法
+
+### 8.1 上游 PR 核对（按用户要求定期查最新 PR 的产物）
+
+| PR/Issue | 状态 | 与我们的关系 |
+|---|---|---|
+| **#22041** "Reduce CPU overhead in meta backend: cache subgraph splits when cgraph is unchanged"（gaugarg-nv，2026-04-19 合并） | **已在我们的 base 里**（ggml-backend-meta.cpp:1970 `needs_rebuild`、:2283 给子图分配 uid） | 上游在 2x5090 上 tg128 **+16%**；我们已享有该收益 |
+| **#28549** "Enable CUDA graph for MTP draft"（gaugarg-nv，2026-09-16 合并） | **已在我们的 base 里**（llama-context.h:371 `std::array<llm_graph_result_ptr, 2> gf_res_prev`、按 `n_outputs > 0` 选槽） | 上游症状与我们完全一致（两种形状互相顶掉捕获图）；双 arena 已生效 |
+| **#28661** "SM70 V100 Volta - Crashes using CUDA FA for Non-Standard Dimension Heads"（open） | 需要核对 | 只影响**非 64/128/256** 的头维度；我们 D=256 => **本次 FA 配置改动无此风险**（且 8K/32K/128K 实测通过） |
+| #26289 "CUDA: tune fp16 tile FlashAttention configs for head sizes 40-112" | 上游已合并（未核对是否在 base） | 我们的**解码走 TILE kernel**，但 8K 下注意力占比约 1-2%，暂不追 |
+| #22105 DFlash 支持 / #25173 DSpark | 上游 | 我们 DFlash2 路径的来源 |
+
+### 8.2 draft churn 的代码级根因（本轮闭合）
+
+1. `llama-graph.cpp:29-46`：`build_attn_inp_kq_mask()` 把 mask 建成 **`[n_kv, n_tokens]`**，其中 `n_kv = mctx->get_n_kv()`（随上下文增长）、`n_tokens = ubatch.n_tokens`。
+2. `llama-graph.cpp:48-65`：`can_reuse_kq_mask()` 要求 **ne[0]==n_kv 且 ne[1]==n_tokens** 才允许复用。
+3. ⇒ draft 的 `causal_attn = false`（必须显式 mask），且
+   - **块前向**：n_tokens=8 恒定，但 **n_kv 每轮 +AL 增长** => mask 形状变 => 整图重建；
+   - **注入前向**：n_tokens=AL 每轮变化 => 同样重建。
+   ⇒ **draft 的每一片子图每轮都判为"属性已变" => 全部退回逐节点直提**（实测：draft 的 ~70 次子图计算/轮，direct 占 ~82 次/轮），而 target 因果 + 批次/分桶稳定 => 只有 2.8% 直提。
+4. 这也解释了 `GGML_CUDA_DISABLE_GRAPHS` 对 draft 完全无影响（它本来就没在用图）。
+
+**修法（下一步，需注意 n_kv 分桶与 mask 填充语义）**：把 mask 的 ne[0] 由 n_kv 改为**分桶值**（如 GGML_PAD(n_kv, 256)），并把填充区写 -inf；
+这样 mask 只在跨桶时重建。注意：**注入前向的 n_tokens=AL 变化是独立的第二因**，靠分桶修不掉（而"填充注入批次"因 draft 含递归状态 conv_states/cache_r 而不可行）。
+
+### 8.3 本轮新增的两个有界修法（已提交代码，待 A/B）
+
+1. **sched 层 split 缓存**（ggml-backend.cpp）：`ggml_backend_sched_alloc_graph()` 每轮无条件重跑 `split_graph`（400+ 子图扫描 + 逐 split 优化）= 实测 `alloc_us` **4.26 ms/轮**。
+   新增 `last_graph_uid` + `GGML_SCHED_SPLIT_CACHE=1` 时才跳过重复切分（默认行为不变，便于同库 A/B）；
+   `ggml_backend_sched_reset()` 里清零 uid 以强制重切。另加 `GGML_SCHED_SPLIT_TIMING=1` 输出 split/alloc 两段耗时。
+2. **selector 重排**（common/speculative.cpp）：实测 `fetch 0.06 + work 3.21-3.30 ms`，其中 gate 矩阵乘
+   （`sel_hidden[rank x 5120]` 对**每个** block 位置各读一遍 = 约 42 MB/轮）是大头，不是 top-k 扫描。
+   改成 rank-major（每行只读一次、8 个位置复用），**每个点积的累加顺序不变 => 数值逐位相同**；
+   同时把计时拆成 `fetch + topk + gate` 三段便于验证。
+
+### 8.4 又一次靠"核对代码"避免弯路：mask 宽度**已经**分桶
+
+llama-kv-cache.cpp:1250-1263：
+
+~~~cpp
+uint32_t llama_kv_cache::get_n_kv(const slot_info & sinfo) const {
+    // pad the n_kv value so that the graph remains constant across batches and can be reused
+    const uint32_t n_pad_cur = std::max(n_pad, 256u);
+    result = std::max(std::min(cells.size(), std::max(n_pad_cur, GGML_PAD(cells.used_max_p1(), n_pad_cur))), result);
+~~~
+
+=> mask 的 ne[0]=n_kv **每 256 token 才变一次**，block 前向（n_tokens=8 恒定）在桶内是稳定图。
+**所以 draft 的约 82 次/轮直提全部来自"注入前向"**（n_tokens=AL 每轮都不同 => 整图重建），与实测自洽：
++82 direct/轮、+13.6 capture/轮、GGML_CUDA_DISABLE_GRAPHS 对 draft 无影响（本来就没在用图）。
+
+### 8.5 对应修法：按**批大小**分槽的图 arena（已实现，待验证）
+
+上游 #28549 只分"有输出/无输出"两槽；我们把每类再按批大小分 16 槽（llama-context.h 的 gf_res_n_size_slots）：
+每个 AL 形状各一张图 => 各自独立的 CUDA graph 缓存键 => 某形状第二次出现即完成 warmup 并开始重放
+（warmup 只要求"与该键上次属性一致"，不要求连续两轮）。预期把注入的约 82 次直提变成重放 => **约 -10 ms/轮**。
+风险：arena 数量增加 => 捕获的 CUDA 图变多（稳态只用到 AL 的少数取值，约 6-8 张），显存/主机内存可控。
+
+### 8.6 selector：rank-major 本身没用，瓶颈是串行 FMA 依赖链
+
+实测 fetch 0.06 + topk 0.70 + gate 2.78 ms（rank=256, n_embd_dec=5120, n_tokens=8）：
+gate = 10.5M MAC / 8 线程 = 每 MAC 约 2.1 ns（约 8 周期）=> **标量累加的串行依赖**，不是内存带宽。
+已改为 4 路部分和（归约顺序固定 => 结果确定），预期 gate 降到约 0.8 ms。
+
+### 8.7 sched split 缓存：守卫无法生效（有测量证据）
+
+[SCHED] 显示 split=137 us/call 但 alloc_splits=2863 us/call，且 uid_before=0 ... last=0：
+传入 ggml_backend_sched_alloc_graph 的图**每轮 uid 都是 0** —— 因为 **KV cache 有自己的 sched**
+（llama-kv-cache.cpp:866/873 每轮 reset + 重建 cpy 图，图对象是新建的）。所以 split 只占 alloc 的 5%，
+大头是 alloc_splits（每次 2.9 ms）。探针已改为 BIG（>200 节点，主解码图）/SMALL（KV cpy 图）分桶，
+以便定位主图那 2.47 ms/轮花在哪。
+
+### 8.8 selector 优化已 A/B 验证（子代理跑测，两臂 md5 一致）
+
+| 指标 | 之前 | 之后 |
+|---|---:|---:|
+| selector gate | 2.78 ms | **1.00 ms** |
+| selector 总计（spec timing） | 4.42 ms | **2.63 ms** |
+| tg（prompt1/2/3） | 89.57 / 69.90 / 114.18 | **92.35 / 72.23 / 117.56** |
+| AL | 5.18 / 3.75 / 6.38 | 完全相同 |
+| greedy sha256 | f3edac19...02ca34 | **逐位一致** |
+
+=> **+3.3% tg** 已落袋（提交 0a598af40）。
+
+### 8.9 主机侧最大头寸：主解码图的 alloc_splits = 5 ms/次
+
+分桶探针（新增；BIG = 主解码图 >200 节点，SMALL = KV cache 自己的 cpy 图）：
+
+| 桶 | calls / 257 轮 | split | alloc_splits |
+|---|---:|---:|---:|
+| **BIG**（主解码图，649 节点） | 263 | 246 us/call | **5063 us/call** |
+| SMALL（KV cpy 图，58 节点） | 249 | 25 us/call | 460 us/call |
+
+- **split 只占 5%**，大头是 ggml_backend_sched_alloc_splits（5 ms 级/次）。
+  target 的 [RT] alloc_us 是 2.44 ms/轮；BIG 桶均值 5.06 ms 混合了 target 与 draft 两个 sched。
+- 根因：split_graph 每轮**交换 node_backend_ids / prev_ 数组**，使 alloc_splits 里的
+  backend_ids_changed 恒为真 => 每轮走**全量重分配**分支。
+- 修法（已实现，待验证）：给 sched 加**图指纹**（节点指针+形状+buffer 的 FNV 哈希，约 2k 次乘法/轮），
+  指纹相同就跳过 split_graph（GGML_SCHED_SPLIT_CACHE=1）=> 数组不再交换 => backend_ids_changed 为假
+  => 走 gallocr 快速路径。**不能用 graph->uid 做守卫**：split_graph 每轮给它赋新值；
+  实测 uid_before 恒为 0 的调用来自 KV cache 新建的 cpy 图（它有自己的 sched）。
+
+### 8.10 同时验证中的另一项：按批大小分槽的图 arena（见 8.5）
+
+两项都已编译进服务器源码，正由后台子代理跑双臂（缓存关/开）取证。
+
+### 8.11 验证纪律教训（本轮踩到，必须记住）
+
+一次 A/B 被两个流程错误污染，结论作废：
+
+1. **上传与编译竞态**：我在子代理"已经启动编译"的时间窗内上传了新源码 => 编译用的是半新半旧的树
+   （表现为 [SCHED] 行里 `last=0`、`cached=0`，说明跑的还是**旧的 uid 守卫版本**，而不是新的指纹守卫）。
+   **规矩：先上传并校验源码，再启动编译/跑测；编译期间绝不改服务器源码。**
+2. **md5 自检集合不全**：之前只校验 `libggml-cuda.so` 与 `libllama-common.so`，
+   但**调度器在 `libggml-base.so`**、**llama_context 在 `libllama.so`** => 这两个库的改动完全没被 A/B 纪律覆盖。
+   **规矩：A/B 的 md5 集合 = {libggml-cuda.so, libggml-base.so, libllama.so, libllama-common.so} 四个。**
+3. **再加一道二进制内标记校验**：`strings <lib> | grep -c <新格式串>`（例如 `BIG calls`），
+   确认新代码真的进了**被加载的那个库**，而不是只看源码 grep。
+
+这三条已写入本文件；下一次 A/B（arena 分槽 + 指纹缓存）按新流程执行。
+
+### 8.12 结构性根因（本轮最终定论）：单 scheduler + 交替形状 ⇒ 每轮重建是**结构性**的
+
+证据链（全部实机）：
+
+1. 升级版属性探针（新增 `what=` 字段判定）统计：`other 120 / src_ne 116 / src_data 46 / nb 4`，
+   样本节点全是 GDN/卷积类（`v_conv_predelta-22`、`conv_output_silu-57`、
+   `cache_r_l5 (view) (copy of conv_input-5 (view))`、`state_predelta-14`、`attn_post_norm-48`）。
+2. ⇒ 图内容每轮都在变（源张量形状/指针），不只是 mask；**块前向（n_tokens=8 恒定）也每轮失效**。
+3. 但"按批大小分槽的图 arena"实测**无效**，原因：
+   - llama.cpp 的 `ggml_backend_sched` **只有一份 `sched->graph` 与一份 splits**（单槽资源），
+     复用图 result 时必须跳过 `ggml_backend_sched_reset()`；
+   - 上游 #28549 的守卫 `gf_res_prev_active == res` 保证"只有连续同一个 arena 才复用"——
+     而我们的流程是 注入(AL) -> 块前向(8) -> 注入(AL') 交替 ⇒ **守卫必然挡住复用** ⇒ 每轮 reset + 重切 + 重分配。
+   - 若去掉该守卫而直接复用别的 arena，则 sched 里留着的仍是**另一个图**的 splits ⇒ 会执行错图（这正是守卫存在的原因）。
+4. ⇒ 结论：**draft 侧约 12 ms/轮 的图管理开销、以及主图 ~5 ms 的 alloc_splits，都是"单 scheduler + 形状交替"的结构性代价**，
+   在 llama.cpp 当前架构下无法用局部补丁消除；要根治只能走 1cat 的路线（静态形状 / 整轮单图捕获），属大改动。
+   这条结论同时解释了：`cached=0`、arena 无效、以及 `GGML_SCHED_SPLIT_CACHE` 无法生效。
+
+
+
+
+
 
 
 
