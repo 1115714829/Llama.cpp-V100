@@ -814,6 +814,18 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 | 图 rebuild 比例 | 178/367 = 48% | 179/357 = 50% | 24/294 = 8% |
 | alloc_us（含 prefill） | 4472 ms / 367 轮 | 4246 ms / 357 轮 | 2.44 ms/轮（纯解码） |
 
+### 17.1.1 反推纠正：`rebuild` 的增长来自 **prefill 分块**，不是解码轮退化
+
+用新数据算：`rebuild` 与 prefill 分块数**精确吻合**
+- 64K：3 prompt x ceil(53043/512) = **312** 块，实测 rebuild = **329**（差 17，即少数解码轮）
+- 32K：3 x ceil(26719/512) = **156** 块，实测 rebuild = **178**（差 22）
+- 8K（正式标尺的短 prompt）：几乎无 prefill 分块，实测 rebuild = 24/294
+
+=> **结论修正**：`rebuild` 比例上升与 `alloc_us` 变大，主因是**长 prompt 的分块 prefill**（每块一次 `alloc_graph`），
+   **不是**"解码轮随上下文变慢"。=> 工作流 A2 的作用域应重新定位为 **TTFT/prefill 抓手**（64K prefill 39.25 s 里估计有数秒是图分配），
+   解码轮的主机侧开销仍以 ~2.4-5 ms/轮计（与 8K 同量级）。
+   => A2 的改法不变（索引式写 + 让连续同形状分块复用图），但**预期收益记在 prefill/TTFT 上，不要记在 decode 上**。
+
 ### 17.2 结论
 
 1. **KV dtype 在 32K 无实质差别**：每轮 60.6 vs 61.2 ms、prefill 1502 vs 1519 t/s（均在离散度内）。
