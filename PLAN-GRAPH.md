@@ -63,7 +63,7 @@ flowchart TD
     X13["并发测量"]:::no
     X14["A2 递归状态索引式写入<br/>逐位中性已验证; 但 prefill 真因<br/>是 mask/KV 宽度, 非递归 head"]:::warn
     X15["HMMA/FP16 TC 权重路线(1.36x)<br/>口径已更正, 见 K5"]:::no
-    X16["照抄 jusko D256 FA 常量<br/>pp32768: 2162.64 vs 2136.88 = -1.19%<br/>纯 prefill 口径"]:::no
+    X16["照抄 jusko D256 FA 常量: -1.19%<br/>pp32768 2162.64 vs 2136.88, 两轮 ABBA<br/>sha256 一致; 只覆盖 ncols=64 行<br/>(ncols=32 行本次没走到)"]:::no
   end
   X1 -.->|它量化出| METATAX
   METATAX["★ meta 税 = 15.8 ms/轮<br/>alloc 15x, enqueue 4x"]:::hot
@@ -579,6 +579,10 @@ flowchart LR
    —— Round 145（Z1/Z2 准备 + 一次事故）：
       ⑬ Z2 的探针写进代码后，**图上没有 Z1-Z5 的位置** —— 先手量测是新的一类对象，已写进 `PLAN-to-180ts.md` §5 并在本文件 §5 记纪律；
       ⑭ 事故（source 导致真跑 harness）**不是代码问题而是纪律问题** -> 记进 §5 与 AGENTS §4。
+   —— Round 147（N3 彻底闭环）：
+      ⑮ N3 的判决此前只写了"慢 1.19%"，**没写它只覆盖哪一行配置**；补上"只覆盖 ncols=64 行（pp32768 => Q->ne[1]=2048 => ncols2=2），ncols=32 行本次没走到" -> X16 标签就地改；
+      ⑯ 正确性门通过（两臂 greedy sha256 都是 f3edac19...）也要写在 X16 上，否则"正确性没退"这条信息会丢；
+      ⑰ 两条纪律补进 §5 与 AGENTS：**实验改动的源码必须还原**、**pgrep 自匹配**。
 ```
 
 ## 5. 作业纪律（血泪）
@@ -602,4 +606,9 @@ flowchart LR
   正好撞上另一个代理正在跑的正确性门（端口 8212），违反 §4.24。清理用**精确 PID `kill -9`**（不是 pkill -f），事后核对 `pgrep -a -x llama-server` 只剩对方那一个。
   规矩：语法检查只用 `bash -n`；要看变量默认值用 `grep`/`sed -n`，**永远不要 source**。
   附：这也解释了为什么『看起来无害的验证动作』必须按测量纪律对待 —— 它能改机器状态。
+- 【R147】**实验性的源码改动会留在服务器树里，下一次构建就带上它。** 本次 R3 A/B 把 `fattn-mma-f16.cuh` 的 D256 常量改成 jusko 版（md5 `bb366cc...` -> `26add0c5...`，实测 **-1.2% 回归**），
+  改完**没有还原**；谁以后直接 `cmake --build build-instr` 都会静默继承这个回归。已在 R147 用 `/root/faab/fattn-mma-f16.cuh.orig` 还原并核对 md5 = `bb366cc...`。
+  **规矩**：任何"只为实验"的源码改动，① 先留 `.orig` 备份；② 实验结束**立刻还原 + md5 核对**；③ 若确实要保留，就必须同时更新"服务器树当前状态"的记录（否则下一次构建的含义不明）。
+- 【R147】**`pgrep -x llama-bench` 会自匹配**：命令行里含该字面串的 `bash -c` 包装进程会被命中（本机实测，导致两次 guard 误判中止）。
+  busy 检查一律用**括号转义 + 上下文锚定**：`pgrep -f 'llama-benc[h] -m'` / `pgrep -f 'llama-serve[r] --model'`。
 ```
