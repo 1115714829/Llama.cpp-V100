@@ -329,12 +329,16 @@ flowchart LR
   UP4 --> N8T
   UP5 --> N1
   subgraph RSM["★ sm70-attn 分支（R152 新发现，第 9 个项目；1Cat 风格 Split-D N32 D256 张量核 + 核内读 q4_0 KV）"]
-    SM1["声称 176k prefill 372.94 -> 521.93 t/s (+39.9%)<br/>含 SplitKV3 / -ctk q4_0 选项"]:::pending
-    SM2["审计进行中: 入口条件是否覆盖 D256/gqa6/n_q=8<br/>是否核内反量化/支持哪些量化类型"]:::run
+    SM1["声称 176k prefill 372.94 -> 521.93 t/s (+39.9%)<br/>⚠️ R158 审计: 数字**不可复核**(无 log/csv,<br/>runner 引用的基线与 README 不同, md5 守卫在 HEAD 就失败)<br/>=> 证据等级 C"]:::no
+    SM2["★ R158 审计判决: **对我们的 verify 路径什么都不改**<br/>两道硬门都把我们挡掉:<br/>(1) 入口要求 Q->ne[1] >= 256 (开 black_magic 也要 >=17), 我们只有 8<br/>(2) KV 类型只支持 {F16, Q4_0}, 我们是 q8_0<br/>且它自己的核内 q4_0 反量化实测 **-3.6%**(457 vs 474 tok/s @176k)<br/>默认路径照样整条 KV 建 f16 镜像<br/>=> 它是 **prefill-only / 大 q** 路径"]:::fact
+    SM3["★ SM3 可借用项(与 N1 无关):<br/>① ~40 行 hook (fattn.cu:512/679/742/867 + sm70-hook.patch)<br/>② D256 prefill 张量核内核(64x32, Split-D, 2 CTA/SM, 45568 B smem)<br/>③ smem 布局经验(pitch-68 K / TT-swizzle / Swizzle<3,3,3>)<br/>④ to_fp16_nc 的 stride 教训<br/>=> 对准的是**预填充缺口**(我们第二大), 不是 decode"]:::pending
   end
   SM1 --> N1
   SM1 --> N9
   SM2 --> N1
+  SM2 -.->|反例: 核内反量化不是自动赢| N1
+  SM3 --> N9
+  SM3 -.->|prefill 缺口| G
   subgraph RQP["★ qwen38-v100-serve（R148 联网新发现，单卡 V100-32G + Qwen3.8-27B，同题！）"]
     QP1["ncols2=3 GQA 打包补丁<br/>128K KV 流量 26.37->8.59 GB/token (-67.4%)<br/>decode 16.45->23.83 t/s (+44.86%)<br/>KLD 0.000000, 100% top-1"]:::pending
     QP2["现役选择器只打包 2 个 Q 头<br/>= 我们的 KV 冗余是 3x, 不是 6x<br/>（修正 Z1 先验预测）"]:::fact
@@ -543,6 +547,22 @@ flowchart LR
 | XL2 | `planar*/iso*` 被该仓库**自己的 PPL 表**判死（3.03-3.06 vs f16 1.0023，**+203%**） | A | X2 |
 | XL3 | 用的是**更老的上游**，图抖动线同样没有新招 | A | C1（否定性） |
 | XL4 | 200k 多卡长上下文对照表 | A | K2 |
+
+#### 3.2.9 ★ sm70-attn（R152 新发现 / R158 审计完毕）—— **prefill 专用，不解决我们的 verify 路径**
+
+> `fishlikeX/sm70-attn`（clone @ `3bcab55`，shallow，无 merge base；用 blob hash 对 b11053 做的 diff）。
+> base 声明 = 上游 master `25ae3a9b3`(8/18) + 103 commits(8/24)；相对 b11053 = 342 改 / 205 增 / 67 删，**但其中大部分是上游年代差，不是它的工作**。
+
+| # | 结论 | 证据 |
+|---|---|---|
+| **SM2** | **对我们的 verify 路径零影响**：① 入口 `Q->ne[1] >= 256`（开 `FISHLIKEXIE_BLACK_MAGIC=1` 也要 ≥17），我们只有 **8** ⇒ 被拒；② KV 只支持 **{F16, Q4_0}**，我们 **q8_0** ⇒ 被拒。落到我们**已有的同一条 TILE** | `fattn-sm70-d256.cu:369, :383`；hook 在 `fattn.cu:679-680` |
+| SM2b | 它**自己的核内 q4_0 反量化实测 -3.6%**（176k: 457 vs 474 tok/s），且默认路径**照样整条 KV 建 f16 镜像** | `fattn-sm70-d256.cu:121-157, :184-196` |
+| SM1 | **数字不可复核**：`372.94/521.93` 只在 README 与手绘图里；仓库内无任何 log/csv；提交的 runner 引用的基线（394.66/278）与 README 表不同；`verify/run.sh` 的 md5 守卫在 HEAD 就失败（期望 `00f7d130...`，实际 `3c5e842d...`） ⇒ **证据等级 C** | 全仓库 `**/*.{log,csv}` 只命中上游资产 |
+| **SM3** | **可借用项（对准预填充缺口，不是 decode）**：① 约 40 行 hook（`fattn.cu:512/679/742/867`，另有独立 `sm70-hook.patch`）② D256 prefill 张量核内核（kBlockM=64/kBlockN=32/Split-D、2 warps 各占 128 维、`kNThreads=256`、**smem 45568 B → 2 CTA/SM**）③ smem 布局经验（pitch-68 K、TT-swizzled V、`Swizzle<3,3,3>`）④ `to_fp16_nc` 把 dst 线性化成 `[ne1][ne2][ne0]`（**pos-major 不是 head-major**）的 stride 教训 ⑤ SplitKV3（prefill-only，`kv_len>=2048` 且 batch=1） | 审计逐行 |
+| 不可移植 | D=256 硬编码；HMMA 需要 f16 操作数（q8_0 要新写 34 字节块的解包分支）；默认路径仍建整条 f16 镜像；PagedKV 路径在该 fork 里是死代码；162 个 vendor 头（Apache/BSD，许可干净但很重） | 同上 |
+
+**⚠️ 对 N1 的反面证据**：目前**唯一真正实现了 Volta 核内量化-KV 反量化**的开源实现，实测是 **-3.6%**。
+（口径不同：它是 **prefill**、**q4_0**、q_len≥256；jusko 是 **decode**、**q8_0**、T=4 且报 +32%。所以不构成对 N1 的否定，但说明「核内反量化」**不是自动的赢**。）
 
 #### 3.2.8 ★ qwen38-v100-serve（R148 联网新发现 —— 与我们同题：Qwen3.8-27B / V100 / 长上下文 agent）
 
