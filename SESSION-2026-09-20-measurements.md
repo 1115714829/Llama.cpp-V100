@@ -838,7 +838,29 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 
 => **A2 与 A3 是同一个修法的两面**，优先级仅次于 A1（AR）。
 
-### 19.3 改动面（估计，开工前先小步验证）
+### 19.3 改动面（已对齐上游先例，机械替换）
+
+**已确认的管道**：`s_copy` 就是"主机侧填值的 int32 行索引张量"——
+`llama-graph.cpp:334-342` 在 `set_input` 里按 `mctx->s_copy(i)` 填值，`:352-355` 在 `can_reuse` 里只比较**形状**（不比较数值）
+=> **索引值的变化不影响图的复用** ✓；`ggml_set_rows` 已被 KV cache（`llama-kv-cache.cpp:1350, 1385`）、sampler、MoE 多处使用 ✓。
+=> A2 只需照抄这套：新增一个写索引张量 + 在 `set_input` 填值 + 把 `delta-net-base` 的 view/cpy 换成 `set_rows` + 从 `can_reuse` 去掉 head。
+
+**先例**：`src/llama-kv-cache.cpp:1318-1350`（`cpy_k`）——把目标 reshape 成 2D，再用
+`ggml_set_rows(ctx, k, k_cur, k_idxs)` 写入，**索引张量 `k_idxs` 每次调用由 `set_input` 填值**。
+=> 图里只有固定张量，索引值变化不影响图结构。
+
+**逐点替换**（`src/models/delta-net-base.cpp:490-496` 与 `:514-520`）：
+- 现状：`ggml_view_2d(ctx0, conv_states_all, row_count, n_seqs, nb[1], (s_slot*mem_size + kv_head)*row_size)` + `ggml_cpy(src, view)`
+- 改为：把 `conv_states_all` 视作 `(row_count, total_rows)`（`nb[0] == row_size` 已由现有代码隐含保证），
+  新增一个 **int32 索引张量 `conv_idxs`（长度 row_count）**，其值 = `s_slot*mem_size + kv_head + i`，
+  然后 `ggml_set_rows(ctx0, flat, src_rows, conv_idxs)`。
+- `src/llama-graph.cpp:345-361`：`llm_graph_input_rs` 增加该索引张量；`can_reuse` **去掉 `head` 依赖**（`:357`），
+  改为只比较索引张量形状；`set_input`（`:329-343`）里按当前 head/s_slot 填索引值。
+- `src/llama-memory-recurrent.*`：给上下文暴露"把 head/s_slot 映射成行索引"的取值（`get_head()` 已有，`:1282`；`s_copy(i)` 已有，`:1306`）。
+
+**判据**：同配置 greedy sha256 **逐位不变**（本改动不改变数值，只改变图结构复用）+ `rebuild`/`alloc_us` 下降 + ms/轮下降 + AL 不劣化。
+
+### 19.4 原始估计（保留）
 
 - `src/models/delta-net-base.cpp`：conv/state 写入改索引式（新增一个小索引张量，或在现有 rs 输入里加一路）。
 - `src/llama-graph.cpp`：`llm_graph_input_rs` 增索引张量、`can_reuse` 去掉 head 依赖、`set_input` 写入索引值。
@@ -862,6 +884,22 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 - 测量口径：同一 harness 内并联 **NCCL 基线**（同样的 host-loop、同样的 event 口径），分别报
   **host us/call** 与 **GPU 可见 us/call（rank0 的 ev0..ev1）**；三种规模：164 KB（在役尺寸）/ 1 MB / 10 MB。
 - **判据**：164 KB 下 1000 轮 **0 mismatch**、**spin timeout 0**、GPU 可见 **<=15 us**（NCCL 在役 68-95 us）。
+
+### 18.4 A1 集成的 A/B 设计（库指纹可追溯）+ 一次真实事故
+
+**库指纹**（同源、同一 build dir，唯一变量是库版本与 env）：
+| 臂 | TAG | 库 md5（libggml-cuda.so） | env |
+|---|---|---|---|
+| 基线（canonical，已测） | `aroff` | `629dd1fb...` | - |
+| 基线（同库复测） | `aroff2` | 见下（含 AR 代码、env 未设） | - |
+| 设备侧 AR（标量） | `aron` | `2c123419...` | `GGML_CUDA_AR_DEVICE=1` |
+| 设备侧 AR（float4） | `aronv` | 见下 | `GGML_CUDA_AR_DEVICE=1` |
+
+**事故（已修，已入纪律 AGENTS §4.25）**：第一次 A/B 的 arm 2 跑的是**旧库**——因为构建命令写成
+`bash -c "CC=... cmake --build ..."`，内层长串被 Windows argv 吃掉 ⇒ **命令根本没执行**，日志只有 `BUILD_RC=0` 一行，
+库 md5 仍是 canonical、标记串计数 = 0。修法：**构建放进 `.sh` 文件**执行 + `rm -f <target>.o` 强制重编 +
+**三查**（error 行数为 0、有 `Built target` 行、二进制标记串非 0）。修好后：`BUILD3_RC=0`、`error lines: 0`、md5 `2c123419...`、**marker = 1** ✓。
+=> 这次是 AGENTS §4.18 的"二进制标记串校验"救的场（若只看 BUILD_RC 就会把两个臂都当成有效测量）。
 
 ### 18.2 A1 小样结果（v2 协议：逐块 flag、无全局屏障、slot+epoch）
 
