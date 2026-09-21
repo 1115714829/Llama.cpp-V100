@@ -209,6 +209,15 @@ extern "C" {
     typedef void   (*ggml_backend_comm_free_t)(void * comm_ctx);
     typedef bool   (*ggml_backend_comm_allreduce_tensor_t)(void * comm_ctx, struct ggml_tensor ** tensors);
 
+    // Whole-call CUDA graph capture, used by the meta backend to record all subgraphs of one call
+    // (including the collectives) into a single graph per device. The parent backend opens one capture
+    // per device, runs its normal execution loop, then closes and instantiates the graphs. While a
+    // capture is open the device backend must not capture per-graph graphs of its own.
+    typedef bool   (*ggml_backend_capture_begin_t)(ggml_backend_t backend);
+    typedef bool   (*ggml_backend_capture_end_t)(ggml_backend_t backend, void ** graph_exec);
+    typedef bool   (*ggml_backend_capture_launch_t)(ggml_backend_t backend, void * graph_exec);
+    typedef void   (*ggml_backend_capture_discard_t)(void * graph_exec);
+
     // Split buffer type for tensor parallelism (old)
     typedef ggml_backend_buffer_type_t   (*ggml_backend_split_buffer_type_t)(int main_device, const float * tensor_split);
     // Set the number of threads for the backend

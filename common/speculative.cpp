@@ -1017,7 +1017,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
         // DFlash input is [id_last, <mask> * (block_size-1)]: in-place denoising yields at most
         // block_size-1 draft tokens, anchor-first DSpark yields a full block_size draft tokens
-        const int32_t n_draft_max = is_dspark && sample_from_anchor ? block_size : block_size - 1;
+        int32_t n_draft_max = is_dspark && sample_from_anchor ? block_size : block_size - 1;
+        // GGML_SPEC_DRAFT_NMAX_MULT: extend the masked block past the trained size, to probe whether
+        // the denoiser still yields usable tokens for the extra mask positions. 1 = trained behaviour.
+        static const int32_t nmax_mult = []() {
+            const char * env = getenv("GGML_SPEC_DRAFT_NMAX_MULT");
+            const int32_t v = env ? atoi(env) : 1;
+            return v < 1 ? 1 : (v > 8 ? 8 : v);
+        }();
+        n_draft_max *= nmax_mult;
         if (this->params.n_max > n_draft_max || this->params.n_min > n_draft_max) {
             LOG_WRN("%s: requested draft size (n_max=%d, n_min=%d) exceeds the trained block size %d -- clamping to %d\n",
                     __func__, this->params.n_max, this->params.n_min, block_size, n_draft_max);

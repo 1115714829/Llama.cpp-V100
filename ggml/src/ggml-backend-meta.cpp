@@ -1734,7 +1734,14 @@ static ggml_backend_buffer_t ggml_backend_meta_buffer_type_alloc_buffer(ggml_bac
 struct ggml_backend_buffer * ggml_backend_meta_alloc_ctx_tensors_from_buft(struct ggml_context * ctx, ggml_backend_buffer_type_t buft) {
     const size_t n_simple_bufts = ggml_backend_meta_buft_n_bufts(buft);
 
-    constexpr size_t compute_headroom = 16; // Maximum number of views per statically allocated tensor that can be created between evals.
+    // Maximum number of views per statically allocated tensor that can be created before the next
+    // graph rebuild. The graph's shape work (DFlash2 selector, GDN convolutions) is per token, so a
+    // larger ubatch needs proportionally more room. GGML_META_COMPUTE_HEADROOM overrides the default.
+    static const size_t compute_headroom = []() {
+        const char * env = getenv("GGML_META_COMPUTE_HEADROOM");
+        const int64_t v = env ? atoll(env) : 32;
+        return (size_t) (v < 16 ? 16 : (v > 4096 ? 4096 : v));
+    }();
     const ggml_init_params params_static = {
         /*.mem_size   =*/ ggml_get_mem_size(ctx),
         /*.mem_buffer =*/ nullptr,
@@ -1829,6 +1836,23 @@ struct ggml_backend_meta_context {
     void *                               comm_ctx       = nullptr;
     ggml_backend_comm_allreduce_tensor_t comm_allreduce = nullptr;
 
+    // Whole-call capture state (GGML_META_FULLGRAPH): one captured graph per device per signature.
+    struct capture_slot_t {
+        uint64_t            sig  = 0;
+        bool                used = false;
+        std::vector<void *> exec;
+    };
+    static constexpr size_t n_capture_slot = 8;
+    capture_slot_t capture_slots[n_capture_slot];
+    uint64_t       capture_seen[n_capture_slot] = {};
+    size_t         capture_seen_next = 0;
+    size_t         capture_next      = 0;
+    bool           capture_failed    = false;
+    ggml_backend_capture_begin_t   capture_begin   = nullptr;
+    ggml_backend_capture_end_t     capture_end     = nullptr;
+    ggml_backend_capture_launch_t  capture_launch  = nullptr;
+    ggml_backend_capture_discard_t capture_discard = nullptr;
+
     ggml_backend_meta_context(ggml_backend_dev_t meta_dev, const char * params) {
         const size_t n_devs = ggml_backend_meta_dev_n_devs(meta_dev);
         n_reduce_steps = std::ceil(std::log2(n_devs));
@@ -1859,10 +1883,29 @@ struct ggml_backend_meta_context {
                 ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(
                     ggml_backend_get_device(simple_backends[0])), "ggml_backend_comm_allreduce_tensor");
             GGML_ASSERT(comm_allreduce != nullptr);
+
+            ggml_backend_reg_t reg0 = ggml_backend_dev_backend_reg(ggml_backend_get_device(simple_backends[0]));
+            capture_begin   = (ggml_backend_capture_begin_t)   ggml_backend_reg_get_proc_address(reg0, "ggml_backend_capture_begin");
+            capture_end     = (ggml_backend_capture_end_t)     ggml_backend_reg_get_proc_address(reg0, "ggml_backend_capture_end");
+            capture_launch  = (ggml_backend_capture_launch_t)  ggml_backend_reg_get_proc_address(reg0, "ggml_backend_capture_launch");
+            capture_discard = (ggml_backend_capture_discard_t) ggml_backend_reg_get_proc_address(reg0, "ggml_backend_capture_discard");
+            for (size_t i = 0; i < n_capture_slot; i++) {
+                capture_slots[i].exec.resize(n_devs, nullptr);
+            }
         }
     }
 
     ~ggml_backend_meta_context() {
+        for (size_t i = 0; i < n_capture_slot; i++) {
+            if (!capture_slots[i].used) {
+                continue;
+            }
+            for (size_t j = 0; j < capture_slots[i].exec.size(); j++) {
+                if (capture_discard != nullptr) {
+                    capture_discard(capture_slots[i].exec[j]);
+                }
+            }
+        }
         if (comm_ctx != nullptr) {
             ggml_backend_comm_free_t comm_free = (ggml_backend_comm_free_t) ggml_backend_reg_get_proc_address(
                 ggml_backend_dev_backend_reg(ggml_backend_get_device(backend_configs[0].backend)), "ggml_backend_comm_free");
@@ -2010,6 +2053,69 @@ static uint64_t ggml_backend_meta_graph_hash(const struct ggml_cgraph * cgraph) 
     return h;
 }
 
+// Signature of everything a whole-call capture depends on: the buffers the recorded kernels read
+// and the shapes they were recorded with. A repeat means the captured graphs can be replayed.
+// Fingerprint of everything the per-device tensor images are derived from. Two calls with the same
+// fingerprint produce the same images, so an unchanged fingerprint lets the rebuild be skipped.
+static uint64_t ggml_backend_meta_graph_ptr_hash(struct ggml_cgraph * cgraph) {
+    uint64_t h = 1469598103934665603ULL;
+
+    auto mix = [&h](uint64_t v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+    };
+
+    mix((uint64_t) cgraph->n_nodes);
+    mix((uint64_t) cgraph->n_leafs);
+    for (int i = 0; i < cgraph->n_leafs; i++) {
+        mix((uint64_t) (uintptr_t) cgraph->leafs[i]->data);
+        mix((uint64_t) cgraph->leafs[i]->ne[0]);
+    }
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        const ggml_tensor * node = cgraph->nodes[i];
+        mix((uint64_t) (uintptr_t) node->data);
+        mix((uint64_t) node->op);
+        for (int k = 0; k < GGML_MAX_DIMS; k++) {
+            mix((uint64_t) node->ne[k]);
+        }
+        for (int k = 0; k < GGML_MAX_SRC; k++) {
+            mix(node->src[k] != nullptr ? (uint64_t) (uintptr_t) node->src[k]->data : 0);
+        }
+    }
+    return h;
+}
+
+static uint64_t ggml_backend_meta_capture_sig(struct ggml_cgraph * cgraph, ggml_backend_meta_context * ctx) {
+    uint64_t h = 1469598103934665603ULL;
+
+    auto mix = [&h](uint64_t v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+    };
+
+    mix((uint64_t) cgraph->n_nodes);
+    mix((uint64_t) cgraph->n_leafs);
+    for (int i = 0; i < cgraph->n_leafs; i++) {
+        mix((uint64_t) (uintptr_t) cgraph->leafs[i]->data);
+    }
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        const ggml_tensor * node = cgraph->nodes[i];
+        mix((uint64_t) (uintptr_t) node->data);
+        for (int k = 0; k < GGML_MAX_DIMS; k++) {
+            mix((uint64_t) node->ne[k]);
+        }
+    }
+    for (size_t j = 0; j < ctx->backend_configs.size(); j++) {
+        for (int i = 0; i < cgraph->n_nodes; i++) {
+            const ggml_tensor * node = ctx->backend_configs[j].nodes[i];
+            mix((uint64_t) (uintptr_t) node->data);
+            mix((uint64_t) node->ne[0]);
+            mix((uint64_t) node->ne[1]);
+        }
+    }
+    return h;
+}
+
 static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
     GGML_ASSERT(cgraph->grads == nullptr);
     const size_t n_backends = ggml_backend_meta_n_backends(backend);
@@ -2024,6 +2130,14 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     static int64_t n_mt_calls    = 0;
     static int64_t n_mt_sub      = 0;
     static int64_t n_mt_ar       = 0;
+    // dev breakdown: per-device time, per-(i,j) compute time distribution and subgraph sizes
+    static constexpr size_t mt_max_dev = 8;
+    static int64_t t_mt_devj_us[mt_max_dev] = {0};
+    static int64_t n_mt_skips     = 0;
+    static int64_t n_mt_computes  = 0;
+    static int64_t n_mt_nodes_sum = 0;
+    static int64_t n_mt_hist[4]   = {0}; // <20, 20-60, 60-150, >150 us
+    static std::vector<int64_t> mt_ij_us;
     const int64_t mt_fn0 = mt_enabled ? ggml_time_us() : 0;
 
     // If the previous cgraph had a defined UID it can be used to skip rebuilding the subgraphs per simple backend.
@@ -2034,9 +2148,13 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     // captured graph instead of launching every node individually. Only the immediately preceding call can be
     // reused: any other graph rebuild would have overwritten the subgraph slots in between.
     static const bool rebuild_cache = (getenv("GGML_META_REBUILD_CACHE") != nullptr);
-    const uint64_t rebuild_fp = rebuild_cache ? ggml_backend_meta_graph_hash(cgraph) : 0;
+    // GGML_META_REBUILD_PTR selects the pointer/shape fingerprint instead of the content hash: the
+    // images only have to be rebuilt when one of their inputs actually moved.
+    static const bool rebuild_ptr = (getenv("GGML_META_REBUILD_PTR") != nullptr);
+    const uint64_t rebuild_fp = rebuild_cache ? (rebuild_ptr ? ggml_backend_meta_graph_ptr_hash(cgraph) : ggml_backend_meta_graph_hash(cgraph)) : 0;
     if (rebuild_cache && needs_rebuild && backend_ctx->rebuild_done && rebuild_fp == backend_ctx->rebuild_fp) {
         needs_rebuild = false;
+        n_mt_skips++;
     }
 
     bool max_nnodes_raised = false;
@@ -2510,6 +2628,13 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     static int dbg_key_round = 0;
 
     const int64_t mt_loop0 = mt_enabled ? ggml_time_us() : 0;
+
+    const bool fullgraph = getenv("GGML_META_FULLGRAPH") != nullptr;
+    const bool fg_ready  = fullgraph && !backend_ctx->capture_failed && backend_ctx->comm_ctx != nullptr && n_backends > 1 &&
+        backend_ctx->capture_begin != nullptr && backend_ctx->capture_end != nullptr && backend_ctx->capture_launch != nullptr &&
+        backend_ctx->capture_discard != nullptr;
+
+    auto run_subgraphs = [&]() -> enum ggml_status {
     for (size_t i = 0; i < backend_ctx->n_subgraphs; i++) {
         const int64_t mt_d0 = mt_enabled ? ggml_time_us() : 0;
         for (size_t j = 0; j < n_backends; j++) {
@@ -2520,7 +2645,18 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                         (unsigned long long) bcj.cgraphs[i].cgraph_main->uid,
                         (size_t) bcj.cgraphs[i].cgraph_main->n_nodes);
             }
+            const int64_t mt_dij = mt_enabled ? ggml_time_us() : 0;
             const ggml_status status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+            if (mt_enabled) {
+                const int64_t dt = ggml_time_us() - mt_dij;
+                if (j < mt_max_dev) {
+                    t_mt_devj_us[j] += dt;
+                }
+                mt_ij_us.push_back(dt);
+                n_mt_computes++;
+                n_mt_nodes_sum += bcj.cgraphs[i].cgraph_main->n_nodes;
+                n_mt_hist[dt < 20 ? 0 : dt < 60 ? 1 : dt < 150 ? 2 : 3]++;
+            }
             if (dbg_key && i + 1 == backend_ctx->n_subgraphs && j + 1 == n_backends) {
                 dbg_key_round++;
             }
@@ -2561,6 +2697,138 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
             n_mt_sub++;
         }
     }
+    return GGML_STATUS_SUCCESS;
+    };
+
+    // GGML_META_FULLGRAPH: record every subgraph of this call - the collectives included - into one
+    // graph per device, then replay it while the graph keeps the same buffers. A signature hit means
+    // the recorded kernels would read exactly the same addresses with the same shapes.
+    static constexpr size_t n_capture_slot = ggml_backend_meta_context::n_capture_slot;
+    enum ggml_status fg_status = GGML_STATUS_SUCCESS;
+    bool fg_done = false;
+
+    if (fg_ready) {
+        const uint64_t fg_sig = ggml_backend_meta_capture_sig(cgraph, backend_ctx);
+
+        int fg_hit = -1;
+        for (size_t s = 0; s < n_capture_slot; s++) {
+            if (backend_ctx->capture_slots[s].used && backend_ctx->capture_slots[s].sig == fg_sig) {
+                fg_hit = (int) s;
+                break;
+            }
+        }
+
+        if (fg_hit >= 0) {
+            bool ok = true;
+            for (size_t j = 0; j < n_backends; j++) {
+                if (!backend_ctx->capture_launch(backend_ctx->backend_configs[j].backend, backend_ctx->capture_slots[fg_hit].exec[j])) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) {
+                fg_done = true;
+            } else {
+                GGML_LOG_WARN("%s: captured graph launch failed, dropping it\n", __func__);
+                for (size_t j = 0; j < n_backends; j++) {
+                    backend_ctx->capture_discard(backend_ctx->capture_slots[fg_hit].exec[j]);
+                    backend_ctx->capture_slots[fg_hit].exec[j] = nullptr;
+                }
+                backend_ctx->capture_slots[fg_hit].used = false;
+            }
+        } else {
+            bool fg_seen = false;
+            for (size_t s = 0; s < n_capture_slot; s++) {
+                if (backend_ctx->capture_seen[s] == fg_sig) {
+                    fg_seen = true;
+                    break;
+                }
+            }
+            if (!fg_seen) {
+                backend_ctx->capture_seen[backend_ctx->capture_seen_next] = fg_sig;
+                backend_ctx->capture_seen_next = (backend_ctx->capture_seen_next + 1) % n_capture_slot;
+            } else {
+                // Second sighting of the same buffers: worth recording.
+                size_t             fg_began = 0;
+                bool               ok       = true;
+                std::vector<void *> fg_exec(n_backends, nullptr);
+                for (size_t j = 0; j < n_backends; j++) {
+                    if (!backend_ctx->capture_begin(backend_ctx->backend_configs[j].backend)) {
+                        ok = false;
+                        break;
+                    }
+                    fg_began++;
+                }
+                enum ggml_status st = GGML_STATUS_SUCCESS;
+                if (ok) {
+                    st = run_subgraphs();
+                }
+                for (size_t j = 0; j < fg_began; j++) {
+                    void * e = nullptr;
+                    if (backend_ctx->capture_end(backend_ctx->backend_configs[j].backend, &e) && e != nullptr) {
+                        fg_exec[j] = e;
+                    } else {
+                        ok = false;
+                    }
+                }
+                if (ok && st == GGML_STATUS_SUCCESS) {
+                    const size_t s = backend_ctx->capture_next;
+                    if (backend_ctx->capture_slots[s].used) {
+                        for (size_t j = 0; j < n_backends; j++) {
+                            backend_ctx->capture_discard(backend_ctx->capture_slots[s].exec[j]);
+                        }
+                    }
+                    backend_ctx->capture_slots[s].used = true;
+                    backend_ctx->capture_slots[s].sig  = fg_sig;
+                    backend_ctx->capture_slots[s].exec = fg_exec;
+                    backend_ctx->capture_next = (s + 1) % n_capture_slot;
+
+                    bool lok = true;
+                    for (size_t j = 0; j < n_backends; j++) {
+                        if (!backend_ctx->capture_launch(backend_ctx->backend_configs[j].backend, fg_exec[j])) {
+                            lok = false;
+                            break;
+                        }
+                    }
+                    if (lok) {
+                        fg_done = true;
+                        backend_ctx->capture_seen_next = 0;
+                        for (size_t k = 0; k < n_capture_slot; k++) {
+                            backend_ctx->capture_seen[k] = 0;
+                        }
+                    } else {
+                        backend_ctx->capture_slots[s].used = false;
+                        for (size_t j = 0; j < n_backends; j++) {
+                            backend_ctx->capture_discard(fg_exec[j]);
+                            backend_ctx->capture_slots[s].exec[j] = nullptr;
+                        }
+                    }
+                } else {
+                    GGML_LOG_WARN("%s: full-graph capture failed, using the plain loop from now on\n", __func__);
+                    for (size_t j = 0; j < n_backends; j++) {
+                        backend_ctx->capture_discard(fg_exec[j]);
+                    }
+                    backend_ctx->capture_failed = true;
+                }
+            }
+        }
+    }
+
+    if (!fg_done) {
+        fg_status = run_subgraphs();
+    }
+    // GGML_META_HOST_SPIN_US: burn a known amount of host time at the end of every call, to probe
+    // whether host-side time sits on the critical path of a speculative round. 0 = no change.
+    static const int64_t host_spin_us = []() {
+        const char * env = getenv("GGML_META_HOST_SPIN_US");
+        const int64_t v = env ? atoll(env) : 0;
+        return v < 0 ? 0 : (v > 20000 ? 20000 : v);
+    }();
+    if (host_spin_us > 0) {
+        const int64_t t_spin_end = ggml_time_us() + host_spin_us;
+        while (ggml_time_us() < t_spin_end) {
+        }
+    }
 
     if (mt_enabled) {
         t_mt_total_us += ggml_time_us() - mt_fn0;
@@ -2568,19 +2836,50 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
         n_mt_calls++;
         if (n_mt_calls % 64 == 0) {
             const double k = 1e3 * (double) n_mt_calls;
-            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f ar=%.3f ms/call | prologue=%.3f (%.1f%%)%c",
+            char dev_j[256] = "";
+            int dev_j_len = 0;
+            for (size_t j = 0; j < n_backends && j < mt_max_dev; j++) {
+                const int n = snprintf(dev_j + dev_j_len, sizeof(dev_j) - dev_j_len, " dev%zu=%.3f", j, (double) t_mt_devj_us[j] / k);
+                if (n <= 0 || dev_j_len + n >= (int) sizeof(dev_j)) {
+                    break;
+                }
+                dev_j_len += n;
+            }
+            int64_t ij_min = 0;
+            int64_t ij_med = 0;
+            int64_t ij_max = 0;
+            if (!mt_ij_us.empty()) {
+                std::vector<int64_t> srt = mt_ij_us;
+                std::sort(srt.begin(), srt.end());
+                ij_min = srt.front();
+                ij_med = srt[srt.size()/2];
+                ij_max = srt.back();
+            }
+            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f%s ar=%.3f ms/call | prologue=%.3f (%.1f%%) | dev_hist_us n=%lld min=%lld med=%lld max=%lld | <20=%lld 20-60=%lld 60-150=%lld >150=%lld | nodes/sub=%.1f skipped=%lld%c",
                     (long long) n_mt_calls,
                     (double) n_mt_sub / (double) n_mt_calls,
                     (double) n_mt_ar / (double) n_mt_calls,
                     (double) t_mt_total_us / k,
                     (double) t_mt_loop_us / k,
                     (double) t_mt_dev_us / k,
+                    dev_j,
                     (double) t_mt_ar_us / k,
                     (double) (t_mt_total_us - t_mt_loop_us) / k,
-                    100.0 * (double) (t_mt_total_us - t_mt_loop_us) / (double) (t_mt_total_us ? t_mt_total_us : 1), 10);
+                    100.0 * (double) (t_mt_total_us - t_mt_loop_us) / (double) (t_mt_total_us ? t_mt_total_us : 1),
+                    (long long) n_mt_computes,
+                    (long long) ij_min,
+                    (long long) ij_med,
+                    (long long) ij_max,
+                    (long long) n_mt_hist[0],
+                    (long long) n_mt_hist[1],
+                    (long long) n_mt_hist[2],
+                    (long long) n_mt_hist[3],
+                    (double) n_mt_nodes_sum / (double) (n_mt_computes ? n_mt_computes : 1),
+                    (long long) n_mt_skips,
+                    10);
         }
     }
-    return GGML_STATUS_SUCCESS;
+    return fg_status;
 }
 
 static const ggml_backend_i ggml_backend_meta_i = {

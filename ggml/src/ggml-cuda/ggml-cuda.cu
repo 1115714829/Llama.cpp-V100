@@ -4961,6 +4961,10 @@ static bool ggml_cuda_graph_set_enabled(ggml_backend_cuda_context * cuda_ctx, co
 }
 #endif // USE_CUDA_GRAPH
 
+// Number of parent-backend captures that currently hold a stream of this process in capture mode.
+// While it is non-zero no device graph of our own may be captured or replayed.
+static int g_cuda_capture_nested = 0;
+
 static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
     ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
 
@@ -5021,6 +5025,12 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
         }
     }
 #endif // USE_CUDA_GRAPH
+
+    // A parent backend may hold this stream in a capture that has to contain plain kernel work.
+    if (g_cuda_capture_nested > 0) {
+        use_cuda_graph = false;
+        cuda_graph_update_required = false;
+    }
 
     {
         static int64_t g_calls = 0, g_cap = 0, g_replay = 0, g_direct = 0, g_dec_us = 0, g_nodes = 0;
@@ -5083,6 +5093,70 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     }
 
     return GGML_STATUS_SUCCESS;
+}
+
+// Whole-call capture for parent backends (see the capture typedefs in ggml-backend.h).
+// The parent opens one capture per device, runs its execution loop, then closes and instantiates
+// the graphs. Collectives issued while a capture is open become nodes of that device graph.
+static bool ggml_backend_cuda_capture_begin(ggml_backend_t backend) {
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_cuda_set_device(cuda_ctx->device);
+
+    const cudaError_t err = cudaStreamBeginCapture(cuda_ctx->stream(), cudaStreamCaptureModeRelaxed);
+    if (err != cudaSuccess) {
+        (void) cudaGetLastError();
+        GGML_LOG_ERROR("%s: cudaStreamBeginCapture failed: %s\n", __func__, cudaGetErrorString(err));
+        return false;
+    }
+    g_cuda_capture_nested++;
+    return true;
+}
+
+static bool ggml_backend_cuda_capture_end(ggml_backend_t backend, void ** graph_exec) {
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_cuda_set_device(cuda_ctx->device);
+    GGML_ASSERT(g_cuda_capture_nested > 0);
+    g_cuda_capture_nested--;
+
+    cudaGraph_t graph = nullptr;
+    const cudaError_t err = cudaStreamEndCapture(cuda_ctx->stream(), &graph);
+    if (err != cudaSuccess || graph == nullptr) {
+        (void) cudaGetLastError();
+        GGML_LOG_ERROR("%s: cudaStreamEndCapture failed: %s\n", __func__, cudaGetErrorString(err));
+        if (graph != nullptr) {
+            (void) cudaGraphDestroy(graph);
+        }
+        return false;
+    }
+
+    cudaGraphExec_t exec = nullptr;
+    const cudaError_t err_inst = cudaGraphInstantiate(&exec, graph, nullptr, nullptr, 0);
+    (void) cudaGraphDestroy(graph);
+    if (err_inst != cudaSuccess) {
+        (void) cudaGetLastError();
+        GGML_LOG_ERROR("%s: cudaGraphInstantiate failed: %s\n", __func__, cudaGetErrorString(err_inst));
+        return false;
+    }
+
+    *graph_exec = (void *) exec;
+    return true;
+}
+
+static bool ggml_backend_cuda_capture_launch(ggml_backend_t backend, void * graph_exec) {
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_cuda_set_device(cuda_ctx->device);
+    const cudaError_t err = cudaGraphLaunch((cudaGraphExec_t) graph_exec, cuda_ctx->stream());
+    if (err != cudaSuccess) {
+        (void) cudaGetLastError();
+        return false;
+    }
+    return true;
+}
+
+static void ggml_backend_cuda_capture_discard(void * graph_exec) {
+    if (graph_exec != nullptr) {
+        (void) cudaGraphExecDestroy((cudaGraphExec_t) graph_exec);
+    }
 }
 
 static void ggml_backend_cuda_event_record(ggml_backend_t backend, ggml_backend_event_t event) {
@@ -6293,6 +6367,18 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
     }
     if (strcmp(name, "ggml_backend_comm_allreduce_tensor") == 0) {
         return (void *)ggml_backend_cuda_comm_allreduce_tensor;
+    }
+    if (strcmp(name, "ggml_backend_capture_begin") == 0) {
+        return (void *)ggml_backend_cuda_capture_begin;
+    }
+    if (strcmp(name, "ggml_backend_capture_end") == 0) {
+        return (void *)ggml_backend_cuda_capture_end;
+    }
+    if (strcmp(name, "ggml_backend_capture_launch") == 0) {
+        return (void *)ggml_backend_cuda_capture_launch;
+    }
+    if (strcmp(name, "ggml_backend_capture_discard") == 0) {
+        return (void *)ggml_backend_cuda_capture_discard;
     }
     if (strcmp(name, "ggml_backend_register_host_buffer") == 0) {
         return (void *)ggml_backend_cuda_register_host_buffer;
