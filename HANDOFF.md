@@ -47,6 +47,21 @@
       target 每轮只 1 次调用 => 同槽连续命中 => 92%。
       修法与风险分析见新规格 `1cat-vllm-v100-study/SPEC-P-B-draft-graph-reuse.md`（3 条候选路线 + 必须先证明的 arena 安全性）。
       已派子代理做**判定性探针实验**（env 门控 `LLAMA_GRAPH_SLOT_DEBUG`，只验证假设，不改默认行为）。
+>   ⑧ **Round 103-106 实况（最新，优先于以上）**：
+      两个判定性实验已出结果，**计划的价值排序因此改变**（数据在 `SESSION` §25.10）：
+      - 槽位探针：draft 槽号**严格交替** => `hit=0/24`、`reuse=0`（假设成立）；且发现 `can_reuse` 本身也会 false（第二因）。
+      - `GGML_META_HOST_TIMING`（主线写的探针，`ggml/src/ggml-backend-meta.cpp`）：**`dev` 72% / `ar` 15% / `prologue` 13%**。
+      => **P-A 正式出局**（AR 主机时间只有 2.79 ms/call，即使归零也只值约 5% 轮时）。
+      - `dev` = 13.3 ms/call = **约 90 µs/次设备调用**；同一次运行里 GRAPH 探针给出
+        `calls=30208 capture=1596 replay=18495 direct=10117`（5.3% / 61.2% / **33.5% direct**），
+        而 decision 只占 4.6 µs => **95% 的时间在 decision 之后，三分之一调用根本没走 CUDA 图重放**。
+      - **新主攻 = `SPEC-P-E-direct-path.md`**：估收益 **每轮约 10 ms（~18%）**；第一步必须加 `GGML_CUDA_DIRECT_DEBUG`
+        打出「到底哪一项属性不符」（**现成的 `prop diff` 探针会误报，不许当依据**）。
+        若不符项集中在「mask/KV 视图宽度」「递归状态视图指针」=> **与 P-C、A2 同根**，那两项收益要按 decode 稳态重估。
+      - ⚠️ direct 占比在漂（pbdiag 18% vs metadiag2 33.5%），官方口径 2 臂复测进行中（`/root/direct-ab.sh` -> `/tmp/direct-ab.txt`）。
+>   **⚠️ 状态更正（Round 106）**：
+      本地 `llama.cpp` **不再干净**，有 3 处未提交改动：A2 索引式写入补丁、`llama-context.cpp` 的 SLOT 探针、`ggml-backend-meta.cpp` 的 META 探针。
+      服务器 `/root/llm/test/v100-opt/llama.cpp` 同样带着这些；`/root/libdir-instr/libllama.so.0.4.1` 是带 SLOT+META 探针的构建（均 env 门控、默认零影响）。
 >
 > **权威数字（正式口径，四次实测离散 <0.5%）**：tg **98.12 / 98.70 / 98.88 / 98.88 t/s**，AL 5.55/4.22/6.38，**57.6 ms/轮**，greedy sha256 **f3edac19...**（同配置逐位可复现）。
 > 长上下文（§21）：8K 24.9 -> 256K **53.0 ms/token**（+113%，斜率 0.113 us/KV-token）；256K+DFlash2 投机 = 34.13 t/s。
