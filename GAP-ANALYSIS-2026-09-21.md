@@ -238,6 +238,40 @@ xllama 用的是更老的上游。⇒ **不要再去外部找这条线的捷径�
 这两个仓库都是 **depth=1 的浅克隆**，`git log`/`git diff` 在仓库内做不出 fork 层 delta。
 本次是靠本地 llama.cpp 克隆里存在它们声明的 merge base（上游 `465e49b9c`），`git archive` + `git diff --no-index` 才得到可信的 24 文件 delta。**以后分析这类 fork 先确认能否拿到 merge base。**
 
+## 10. ★★ P0-2 实测（Round 131）：**layer split 更慢，但它把奖金量化出来了**
+
+`/root/layer-ab.sh`，官方口径（NPRED=512，`CARDS=0,1,2`，`L=libdir-instr`，`P2P=1`，交错四臂）：
+
+| 臂 | MEDIAN_TG | AL(p1/p2/p3) | ms/轮(p1) | `splits` | `alloc_us` | `enqueue_us` | greedy sha256 |
+|---|---:|---|---:|---:|---:|---:|---|
+| **lyA (layer)** | **70.74** | 5.16/5.21/6.62 | **77.3** | **4** | **40,059** | **1,309,965** | `ccc284e4...` |
+| **tsA (tensor)** | **100.61** | 5.55/4.22/6.38 | **55.2** | 2 | **620,946** | **5,431,093** | `f3edac19...` |
+
+### 10.1 判决：**layer split 在本配置下慢 40%（77.3 vs 55.2 ms/轮），不采用**
+jusko 的 +21.5% 在**我们没有复现** —— 那是 2xV100 + Qwen3.8-Flash-Next Q5_K_M 的口径。
+原因清楚：layer split 下 3 张卡**串行**跑各自的层块（GPU 时间 ≈ x3），省下的主机时间补不回来。
+
+### 10.2 ★ 但这次实验**独立证实了主机侧奖金的规模**（这是真正的收获）
+把两条 `[RT]` 折算成每轮：
+
+| 项 | tensor | layer | 差额（= meta 后端的税） |
+|---|---:|---:|---:|
+| `alloc` | 2.11 ms/轮 | 0.14 ms/轮 | **1.97 ms/轮** |
+| `enqueue`（`graph_compute` 主机窗口） | 18.5 ms/轮 | 4.71 ms/轮 | **13.8 ms/轮** |
+| **合计** | | | **约 15.8 ms/轮** |
+
+**这与我们之前算的「meta 后端主机循环 29.4 ms/轮」是同一笔钱**，现在有了第二条独立路径的印证：
+**绕开 meta 后端能省约 15.8 ms/轮**。而 layer split 因为付出约 22 ms/轮的 GPU 串行代价，净亏 6 ms。
+
+=> **结论：奖金是真的（15.8 ms/轮），但 layer split 是错的收法。**
+   正确的收法是**让 tensor-parallel 本身变便宜**（减少 meta 后端的设备调用次数 / 每次调用开销），
+   也就是回到 **P0-1（q8_0 KV 张量核注意力）** 与主机侧 metadata 缓存那条线。
+
+### 10.3 两个附带事实
+- layer 模式下 greedy sha256 = `ccc284e4...`，与 tensor 的 `f3edac19...` **不同** => 两种 split 的数值路径确实不同（与早前 TP4 出现同一个 hash 一致），
+  所以跨 split 模式**只能比 ms/轮，不能比 AL/tg**。
+- layer 的 `splits=4`（tensor 是 2），且即便绕开 meta，`enqueue` 仍有 4.71 ms/轮 —— 说明还有非 meta 的主机成本。
+
 ## 4. 待深挖（子代理正在做）
 - `v100-skinny fork_patches/gdn_attn.py`：**GDN 投机状态的快速元数据构建**，作者自测 **-1.4 ms/step**，
   消掉 **21 次 device sync + 约 70 次 copy** —— 我们的 direct 抖动源正是 **GDN 递归状态视图**，这条高度相关。
