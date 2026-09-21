@@ -27,7 +27,11 @@
 >   => 若 MTP 在当前库上仍显著更快，这是一个**战略岔路**，必须让用户决定（DFlash2 是既定路线，但硬指标是 tg >= 150）。
 >
 > **下一步（按序）**
-> 1. 收 `/root/fpd-chain.log` + `/root/fpd2-chain.log`（子代理在等，两级看门狗）。
+> 0. **N6a 已实现并提交**（`92a1566c9`，env 门控 `GGML_META_REBUILD_CACHE`，默认关；`-fsyntax-only` RC=0；已 push）。
+>    只动 `ggml-backend-meta.cpp`：`init_tensor_impl` 逐位相同则复用 simple tensor；`graph_compute` 内容指纹未变则**整块跳过 rebuild**（含容器旋转与 uid 重铸）。
+>    **chain 3 正在排队执行**（`/root/fpd3-chain.sh`，子代理 `a2a40f69`）：等 Z1 的阶梯跑完 -> 构建三查 + `MARK_RCACHE` -> **C0 干净基线 / C1 开缓存+三探针 / MTP 对照**。
+>    三条判据：`[MKEY]` 的 n0 **不再每轮变**、`[GRAPH] direct` 掉下来、sha256 仍 `f3edac19...`。预期 **-10 ~ -15 ms/轮**。
+> 1. ~~收 `/root/fpd-chain.log` + `/root/fpd2-chain.log`~~ **已完成**（R173/R174，账本已按实测改写：meta = 21.3 ms/call x 3.6 calls/轮 ≈ 整轮；`[GRAPH]` replay 78.5% / direct 18.2%；`[OP]` 探针坏了已作废）。
 > 2. 按 `[FPD]` 的 TOP 字段定 N6a 形态：命中距离 1 => 单槽缓存；距离 2-4 => 多槽；`same≈0` => 缓存无价值，直接做 N6b（改抖动源）。
 > 3. 按 `[DIRECT_PROBE]` / `[GRAPH] prop diff` 的**节点名**定位抖动源（首要嫌疑：GDN 递归状态视图；`llama-graph.cpp:3497` 的**零尺寸视图** `state_size*(rs_zero >= 0)` 是形状会翻的一处）。
 > 4. Z1 子代理：`llama-bench -d 256,384,...,131072 -r 8` 密集阶梯（q8_0 + f16 对照）=> 稳态深度曲线定论，决定 KV 线还有没有残余价值。
