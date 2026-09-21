@@ -1,5 +1,44 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
-> ## ★ 最新定格（2026-09-21 Round 143 - 读这一段就够）
+> ## ★ 最新定格（2026-09-21 Round 169 - 读这一段就够）
+>
+> **目标（用户重申）**：tg **>= 150 T/s**（= AL 5.55 下 **ms/轮 <= 37.0**，现 55.5）；180 / ~20 ms 是上界；对标 1cat 17.463 ms/轮。**报数必须 tg 与 ms/轮 并列**。
+> **入口 `PLAN-GRAPH.md`**（§1 主图 / §3 九项目矩阵 / §3.4 使能链 E1-E8）；**账 `PLAN-to-180ts.md`**；**纪律 `AGENTS.md`**（§1 决定性数字 + §4 三十六条）。
+>
+> **五个决定性数字（按可信度排序）**
+> 1. **有效带宽 438 GB/s**（harness 无投机 8K = 45.31 t/s = 22.07 ms/token，稳态口径）=> 权重流 **22.1 ms/轮 = 40%**；带宽类估算一律 ÷1.82。
+> 2. **`llama-bench -r 1` 的均值被 rep1 瞬态偏低 20-27%**（d8192: 33.62 -> 41.43 t/s）=> 深度曲线与「跨工具 35%」之谜同时结清；
+>    **H5（浅上下文台阶）已撤回**；入账数字一律 `-r >= 8` 并报 `+-`（AGENTS §4.36）。**N8T / N8-vec 仍改灰**（P=6 需 2-3 TB/s，任何测量都不可能出现）。
+> 3. **两阶段（`PLAN-to-180ts.md` §2.7）**：轮时 = 主机 20.6 + GPU 串行 34.5（可加性，N0 已证）=> 阶段一（N6a+N6b+P-B+N7）落到 ~34.5 = tg ~161；
+>    阶段二只有 LOWBIT / BW1 能动那个 34.5。**N6b 是硬前提**（没有它阶段一只有 tg 128）。
+> 4. **加卡已结清**：ms/轮 TP2 59.8 | TP3 61.8 | TP4 69.6 | TP6 93.7（enqueue 20->27->36->62 ms/轮）=> **加卡不省时间**；
+>    但它给 E1（设备侧 AR）一个量化理由：只有 AR 变便宜，TP4/TP6 才划算（那是 25-50% 权重流的唯一来源）。
+> 5. **N3 已判**（jusko D256 常量 pp32768 −1.19%，prefill 口径；decode 走 TILE 未测，N1 后须重测）；**N7 暂缓**（ninfer 的 op 是路径选择，非 drop-in）。
+>
+> **本轮（R167-R169）新增量具与结论**
+> - 新探针 **`GGML_SCHED_FP_DIFF`**（装在根因 `ggml-backend.cpp:1086`，`split_graph` 无条件重铸 uid 的那一行）：报逐字段差异 TOP8 + 与最近 8 次同指纹的次数/距离直方图。
+>   本地 commit `a6a10f667`（已 push `v100/master`），`-fsyntax-only` RC=0、无告警；**尚未进服务器构建树**（在 `/root/fpd/`，由 `/root/fpd-chain.sh` 安装+构建+跑臂）。
+> - 读码确认的因果链：**CUDA 图 replay 不需要 uid 稳定，但需要属性稳定** —— `ggml-cuda.cu:3042` 的 uid 快路径只是省掉 memcmp；
+>   真正决定走 `direct` 的是 `:3057-3089` 的逐节点属性 memcmp（含**每个 src 的 data/ne/nb**），一旦变化就 `warmup_complete = false`（`:5007`）并直发内核。
+>   => N6b 的目标是**让属性稳定**，而不是只保 uid。
+> - **待回**：`/root/fpd-chain.log`（构建三查 + `[FPD]` 命中率/距离 + `[SCHED]` split|alloc µs + `[FAK]` kernel + `[MKEY]` 图 key 是否交替）
+>   与 `/root/fpd2-chain.log`（`[META]` 归因 / `[GRAPH] calls=capture/replay/direct` / `[DIRECT_PROBE]` 字段直方图 / `[OP]` 每算子排名 + **MTP n=4 对照臂**）。
+> - **MTP 悬案（重要）**：`dflash-in-llamacpp.md` §16.4（2026-09-20，旧库、Q2_K_XL）量到 **dflash 轮时 91.8 ms vs MTP 50.7 ms**（MTP 快 1.8x，因 DFlash2 每轮多读 1.14 GB draft）。
+>   当前库下**从未重测**；chain 2 的 `mtp4` 臂就是它（同一 harness，只换 `SPEC=--spec-type draft-mtp --spec-draft-n-max 4`）。
+>   => 若 MTP 在当前库上仍显著更快，这是一个**战略岔路**，必须让用户决定（DFlash2 是既定路线，但硬指标是 tg >= 150）。
+>
+> **下一步（按序）**
+> 1. 收 `/root/fpd-chain.log` + `/root/fpd2-chain.log`（子代理在等，两级看门狗）。
+> 2. 按 `[FPD]` 的 TOP 字段定 N6a 形态：命中距离 1 => 单槽缓存；距离 2-4 => 多槽；`same≈0` => 缓存无价值，直接做 N6b（改抖动源）。
+> 3. 按 `[DIRECT_PROBE]` / `[GRAPH] prop diff` 的**节点名**定位抖动源（首要嫌疑：GDN 递归状态视图；`llama-graph.cpp:3497` 的**零尺寸视图** `state_size*(rs_zero >= 0)` 是形状会翻的一处）。
+> 4. Z1 子代理：`llama-bench -d 256,384,...,131072 -r 8` 密集阶梯（q8_0 + f16 对照）=> 稳态深度曲线定论，决定 KV 线还有没有残余价值。
+> 5. **等长任务一律用 `bash /root/wait-for.sh <file> <pattern> [max_minutes] [stall_ticks]`**（AGENTS §4.35），不要反复短查询。
+>
+> **状态**：`llama.cpp` HEAD `a6a10f667`（自建 commit 数见 `git log 1af554f8f..HEAD`，工作树干净，已 push `v100/master`）；`study-docs` 已 push `v100/study-docs`。
+> 服务器树：`ggml-backend.cpp` **尚为旧版**；`/root/fpd/ggml-backend.cpp` 是待安装的探针版（md5 `967af7b5e833c205f8f9dea680af2f19`）。
+>
+> ---
+>
+> ## 历史定格（R143-R158，已被上面的 R169 定格覆盖，保留以便追溯）
 >
 > **目标（用户重申）**：tg **>= 150 T/s**（= AL 5.55 下 **ms/轮 <= 37.0**，现 55.5）；180 / ~20 ms 是上界；对标 1cat 17.463 ms/轮。
 > **入口是 `PLAN-GRAPH.md`**（§1 主图 / §3 七个外部项目解读矩阵 / §3.4 使能链）；**账在 `PLAN-to-180ts.md`**（本轮已按 150 重写）。
