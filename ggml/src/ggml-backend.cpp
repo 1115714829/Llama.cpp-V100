@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
+#include <map>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -2008,6 +2010,152 @@ static uint64_t ggml_backend_sched_graph_fingerprint(const struct ggml_cgraph * 
     return h;
 }
 
+// Optional node-level diff between consecutive graphs: reports how often the fingerprint above
+// matches and which fields break it. Diagnostic only, enable with GGML_SCHED_FP_DIFF.
+struct ggml_backend_sched_node_info {
+    const struct ggml_tensor * node;
+    const void *               data;
+    uintptr_t                  buffer;
+    int64_t                    ne[GGML_MAX_DIMS];
+    int64_t                    nb[GGML_MAX_DIMS];
+    enum ggml_op               op;
+    uint32_t                   flags;
+    char                       name[GGML_MAX_NAME];
+};
+
+static void ggml_backend_sched_fp_diff(const struct ggml_cgraph * graph) {
+    static const bool enabled = (getenv("GGML_SCHED_FP_DIFF") != nullptr);
+    if (!enabled || graph->n_nodes <= 200) {
+        return;
+    }
+
+    static std::vector<ggml_backend_sched_node_info> prev;
+    static std::map<std::string, int64_t> by_field;
+    static int64_t n_calls = 0;
+    static int64_t n_same  = 0;
+    static int64_t n_diff  = 0;
+
+    uint64_t fp = 0xcbf29ce484222325ull;
+
+    std::vector<ggml_backend_sched_node_info> cur(graph->n_nodes);
+    for (int i = 0; i < graph->n_nodes; i++) {
+        const struct ggml_tensor * t = graph->nodes[i];
+        ggml_backend_sched_node_info & info = cur[i];
+        info = {};
+        info.node   = t;
+        info.data   = t->data;
+        info.buffer = (uintptr_t) t->buffer;
+        info.op     = t->op;
+        info.flags  = t->flags;
+        for (int k = 0; k < GGML_MAX_DIMS; k++) {
+            info.ne[k] = t->ne[k];
+            info.nb[k] = t->nb[k];
+        }
+        snprintf(info.name, sizeof(info.name), "%s", t->name);
+        fp = fp * 0x100000001b3ull + (uint64_t) (uintptr_t) t;
+        fp = fp * 0x100000001b3ull + (uint64_t) (uintptr_t) t->data;
+        fp = fp * 0x100000001b3ull + (uint64_t) (uintptr_t) t->buffer;
+        fp = fp * 0x100000001b3ull + (uint64_t) t->op;
+        fp = fp * 0x100000001b3ull + (uint64_t) t->flags;
+        for (int k = 0; k < GGML_MAX_DIMS; k++) {
+            fp = fp * 0x100000001b3ull + (uint64_t) t->ne[k];
+            fp = fp * 0x100000001b3ull + (uint64_t) t->nb[k];
+        }
+    }
+
+    if (!prev.empty()) {
+        if (prev.size() != cur.size()) {
+            fprintf(stderr, "[FPD] call=%lld n_nodes %zu -> %zu\n", (long long) n_calls, prev.size(), cur.size());
+        }
+        int n_changed = 0;
+        const size_t n = std::min(prev.size(), cur.size());
+        for (size_t i = 0; i < n; i++) {
+            const ggml_backend_sched_node_info & p = prev[i];
+            const ggml_backend_sched_node_info & c = cur[i];
+            char fields[128];
+            size_t nf = 0;
+            fields[0] = 0;
+            auto note = [&](const char * field) {
+                const int w = snprintf(fields + nf, sizeof(fields) - nf, "%s%s", nf > 0 ? "," : "", field);
+                if (w > 0) {
+                    nf += (size_t) w;
+                    if (nf >= sizeof(fields)) {
+                        nf = sizeof(fields) - 1;
+                    }
+                }
+            };
+            const std::string key = std::string(c.name[0] ? c.name : "-") + ":" + ggml_op_name(c.op) + ".";
+            if (p.node   != c.node)   { note("node");   by_field[key + "node"]++;   }
+            if (p.data   != c.data)   { note("data");   by_field[key + "data"]++;   }
+            if (p.buffer != c.buffer) { note("buffer"); by_field[key + "buffer"]++; }
+            if (p.op     != c.op)     { note("op");     by_field[key + "op"]++;     }
+            if (p.flags  != c.flags)  { note("flags");  by_field[key + "flags"]++;  }
+            for (int k = 0; k < GGML_MAX_DIMS; k++) {
+                char f_ne[8];
+                char f_nb[8];
+                snprintf(f_ne, sizeof(f_ne), "ne%d", k);
+                snprintf(f_nb, sizeof(f_nb), "nb%d", k);
+                if (p.ne[k] != c.ne[k]) { note(f_ne); by_field[key + f_ne]++; }
+                if (p.nb[k] != c.nb[k]) { note(f_nb); by_field[key + f_nb]++; }
+            }
+            if (fields[0] == 0) {
+                continue;
+            }
+            n_changed++;
+            if (n_changed <= 4) {
+                fprintf(stderr, "[FPD] call=%lld i=%zu %s op=%s changed=%s\n",
+                        (long long) n_calls, i, c.name[0] ? c.name : "-", ggml_op_name(c.op), fields);
+                fprintf(stderr, "[FPD]   ne %lld %lld %lld %lld -> %lld %lld %lld %lld | nb %lld %lld %lld %lld -> %lld %lld %lld %lld\n",
+                        (long long) p.ne[0], (long long) p.ne[1], (long long) p.ne[2], (long long) p.ne[3],
+                        (long long) c.ne[0], (long long) c.ne[1], (long long) c.ne[2], (long long) c.ne[3],
+                        (long long) p.nb[0], (long long) p.nb[1], (long long) p.nb[2], (long long) p.nb[3],
+                        (long long) c.nb[0], (long long) c.nb[1], (long long) c.nb[2], (long long) c.nb[3]);
+            }
+        }
+        if (n_changed == 0) {
+            n_same++;
+        } else {
+            n_diff++;
+        }
+    }
+
+    // distance to the most recent identical graph: the hit rate a small rebuild cache could reach
+    static const int ring_size = 8;
+    static uint64_t ring_fp[ring_size]  = {0};
+    static int64_t  ring_call[ring_size] = {0};
+    static int64_t  n_hit  = 0;
+    static int64_t  n_dist[ring_size + 1] = {0};
+    for (int i = 0; i < ring_size; i++) {
+        if (ring_fp[i] == fp && fp != 0) {
+            const int64_t d = n_calls - ring_call[i];
+            if (d >= 1 && d <= ring_size) {
+                n_dist[d]++;
+            }
+            n_hit++;
+            break;
+        }
+    }
+    ring_fp[n_calls % ring_size]   = fp;
+    ring_call[n_calls % ring_size] = n_calls;
+
+    prev = std::move(cur);
+    n_calls++;
+
+    if (n_calls % 32 == 0) {
+        fprintf(stderr, "[FPD] calls=%lld same=%lld diff=%lld hit8=%lld dist1=%lld dist2=%lld dist3=%lld dist4=%lld dist5=%lld dist6=%lld dist7=%lld dist8=%lld\n",
+                (long long) n_calls, (long long) n_same, (long long) n_diff, (long long) n_hit,
+                (long long) n_dist[1], (long long) n_dist[2], (long long) n_dist[3], (long long) n_dist[4],
+                (long long) n_dist[5], (long long) n_dist[6], (long long) n_dist[7], (long long) n_dist[8]);
+        std::vector<std::pair<int64_t, std::string>> top;
+        for (const auto & kv : by_field) {
+            top.emplace_back(kv.second, kv.first);
+        }
+        std::sort(top.begin(), top.end(), [](const auto & a, const auto & b) { return a.first > b.first; });
+        for (size_t i = 0; i < top.size() && i < 8; i++) {
+            fprintf(stderr, "[FPD] TOP %lld %s\n", (long long) top[i].first, top[i].second.c_str());
+        }
+    }
+}
 bool ggml_backend_sched_alloc_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
     GGML_ASSERT(sched);
     GGML_ASSERT((int)sched->hash_set.size >= graph->n_nodes + graph->n_leafs);
@@ -2021,6 +2169,7 @@ bool ggml_backend_sched_alloc_graph(ggml_backend_sched_t sched, struct ggml_cgra
     // Opt in with GGML_SCHED_SPLIT_CACHE for now; default stays unchanged.
     static const bool split_cache = (getenv("GGML_SCHED_SPLIT_CACHE") != nullptr);
     const uint64_t graph_fp = split_cache ? ggml_backend_sched_graph_fingerprint(graph) : 0;
+    ggml_backend_sched_fp_diff(graph);
     const bool graph_unchanged = split_cache && graph_fp == sched->last_graph_fp && sched->n_splits > 0;
 
     static const bool split_timing = (getenv("GGML_SCHED_SPLIT_TIMING") != nullptr);
