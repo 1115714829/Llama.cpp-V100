@@ -784,6 +784,19 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 3. 量化权重 prefill 天花板：用 f16 GGUF 做 32K prefill 隔离实验。
 4. push AR（信用/确认握手）仍是独立子项目，优先级低于 1 与 2。
 
+### 16.13 元后端的图切分结构（源码核实，解释"每轮 417 次 graph_compute"）
+
+`ggml/src/ggml-backend-meta.cpp:2434-2462`：图被切成 **n_subgraphs 段**，每段对**所有后端各调用一次** `ggml_backend_graph_compute_async`（`:`2437），
+段与段之间做一次 allreduce（`:`2453）；末段之后不归约（`:`2443）。
+=> 每轮 target = **139 段 x 3 后端 = 417 次 graph_compute** + **138 次 AR**，与实测"每轮 387-422 次、平均 40 节点"完全吻合。
+=> 每段的 GPU 工作量很小（约 40 节点），而每段的**主机侧固定成本**（dispatch + buffer 映射 + CUDA graph launch）与 AR 的主机成本才是每轮的主导 —— 这就是 1cat 用整轮 fullgraph 拉开差距的地方。
+
+**NCCL AR 单次成本分解（`ggml-cuda.cu:1000-1034`，我们的参数：ne 约 40960、3 后端）**：
+- 命中"小张量走 FP32"分支（`:`1019：3 后端且 ne < 131072）
+- 每次调用 = 3 x `ggml_cuda_set_device` + （仅非 COMPUTE 张量）`cudaMemsetAsync` + `ncclGroupStart` + 3 x `ncclAllReduce` + `ncclGroupEnd`
+- => 95 us 里绝大部分是**主机侧 NCCL 入队与 3 次设备切换**，而不是 164 KB 的传输（NV2 理论约 3.5 us）。
+- **推论**：任何"微优化"（去 memset、去 set_device、换 ring/P2P 拷贝）都只有 us 级收益 —— **必须走结构性修法（R1 设备侧 AR / R2 入图捕获）**。
+
 ### 16.12 allreduce 延迟的本质：**主机介导、未被图捕获**（源码核实）
 
 - 源码：`ggml/src/ggml-backend-meta.cpp:2453` `backend_allreduce_success = backend_ctx->comm_allreduce(backend_ctx->comm_ctx, nodes.data());`

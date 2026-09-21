@@ -3,6 +3,34 @@
 >
 > **权威顺序**：本节 > `AUDIT-2026-09-20-dsh.md` > `SESSION-2026-09-20-measurements.md`（逐条实测与纠正，§0-§11 与 **§16**）> 其余。
 >
+> **◎ Round 40-44 新增（细节见 SESSION §16.1-16.13）**
+> - **模型是稠密的**（GGUF 实测 `feed_forward_length=17408`、**无 `expert_count`**）=> MoE 方向全部作废。
+> - **roofline**：256K prefill 已到顶（28 PFLOP / 292 s）；**长上下文 decode 是洼地**（M=1 时 54 ms/token vs 5.7 ms 下限）；
+>   target 步的权重流 9.02 GiB/卡 = 12.1 ms 已接近 roofline。
+> - **账本闭合（决定优先级）**：普通解码实测 **24.9 ms/token** = 权重流 **12.1 ms** + 138 次 AR **13.1 ms**（误差 1%）
+>   => **target 步里 40-50% 是 allreduce 延迟**，这是与 1cat（17.463 ms/轮）差距的主因。
+> - **AR 的本质（源码核实）**：`ggml-backend-meta.cpp:2434-2462` 把图切成 **139 段**，每段对 3 个后端各调一次 graph_compute，
+>   段间由**元后端主机侧调用** allreduce（`:2453`）=> **138 次 AR 全都不在 CUDA graph 内**，GPU 在主机往返期间空转。
+>   NCCL 单次 95 us 里几乎全是主机入队 + 3 次设备切换（`ggml-cuda.cu:1000-1034`，我们命中"小张量 FP32"分支）。
+>   => **微优化（去 memset/set_device、换 ring/P2P）只有 us 级收益**；必须走 **R1 设备侧 AR（无主机往返）** 或 **R2 把 AR 纳入图捕获（= goal P2）**。
+> - **FA 派发（Volta 本形状）**：M=1 -> VEC（q8_0 直读）；**M=2..8 -> TILE，强制把整段 KV 反量化成 f16**（256K 约 26 GB/步，正是投机解码路径）；M>=9 -> MMA（只有 prefill 用到）。
+>   VEC 只实例化 cols<=2、TILE 签名即 `V.h2` => "让 TILE 直读 q8_0"**不是有界改动**。
+> - **上游 split-KV 存在但切分度不随上下文增长**（`parallel_blocks` 由 occupancy/wave 决定；上游 #28734 仍 open）；
+>   **1cat 的 V100 答案** = `FLASH_ATTN_V100` partition split-KV（256/512/**1024**）+ fp8 KV 存储 + fp16 HMMA（NVFP4+marlin）+ D256 专用内核与 smem K ping-pong。
+> - **prefill 差距是天花板差距**：我们 43.7 TFLOPS/卡 ≈ V100 dp4a 峰值（62.8 TOPS）的 70%；1cat 走 fp16 HMMA（峰值约 2x）=> 要拿必须换权重格式/自写 GEMM。
+> - **新纪律**：服务器树**不是 git 仓库**（状态只能靠 md5 + 二进制标记串）；`git archive` 解包会刷新 mtime 触发全量 CUDA 重编（ccache **不覆盖** CUDA）；**编译用 `-j128`**（用户授权）。见 AGENTS §4.22/23。
+> - **本轮在跑的任务与日志**（会话结束后仍在跑，接手先看这些文件）：
+>   | 脚本 | 内容 | 日志 |
+>   |---|---|---|
+>   | `/root/lc-par.sh` | 长上下文**投机**标尺 32K/64K x {q8_0,f16}，卡 3/4/5 | `/tmp/lc-par.log`、`/tmp/lc-spec-*.txt` |
+>   | `/root/lc-chain.sh` | TP4(q8_0/f16)、TP6(q8_0) @64K（等 PAR_DONE） | `/tmp/lc-chain.log` |
+>   | `/root/fa-split-probe.sh` | 编译 `GGML_CUDA_FA_SPLIT_FLOOR` 探针并扫 floor={0,64,256,1024} | `/tmp/fa-split.log`、`/tmp/fs-build.log` |
+>   | `/root/lc-sweep.sh` | 已停（保留 d8192=40.19 t/s 一点）；尾部臂让带宽给上面的投机标尺 | `/tmp/lc-sweep.log` |
+> - **本地树干净**（`c2d716519`）；探针改动已存为 `patches/0004-fa-split-floor-probe.patch`（**服务器源码里仍有该改动**，可直接编）。
+> - **下一步（按证据排序）**：① 长上下文 KV dtype / TP 度数结论（数据在路上）=> 零代码配置建议；
+>   ② 若 256K 仍差 => 按 `PORT-PLAN-sm70-longcontext.md` 走工作流 A（深度驱动切分，探针已在服务器上）；
+>   ③ 短上下文主指标只有 AR 结构改动（R1/R2）能拿 13 ms => 需用户批准后立项。
+>
 > **◎ Round 40 新增（细节见 SESSION §16）**
 > - **树/库一致性事故已修**：服务器源码树**不是 git 仓库**（`git status` 静默失败 => 被误判为"干净"），
 >   且 `/root/libdir-instr` 当时是**带 push 实验码**的构建（`push_flag_stride` x7 + 二进制标记）。
