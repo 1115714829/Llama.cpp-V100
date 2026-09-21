@@ -1,8 +1,8 @@
 diff --git a/ggml/src/ggml-cuda/allreduce.cu b/ggml/src/ggml-cuda/allreduce.cu
-index 39b23bed7..859d38439 100644
+index 39b23bed7..2e48af1ac 100644
 --- a/ggml/src/ggml-cuda/allreduce.cu
 +++ b/ggml/src/ggml-cuda/allreduce.cu
-@@ -335,6 +335,21 @@ struct ggml_cuda_ar_pipeline {
+@@ -335,6 +335,22 @@ struct ggml_cuda_ar_pipeline {
      // memory; CPU never reads/writes -- only the kernel and cudaMemset.
      // Use ggml_cuda_ar_arrival_ptr() to index.
      ggml_cuda_ar_host_mapping arrival;
@@ -15,6 +15,7 @@ index 39b23bed7..859d38439 100644
 +    size_t         push_slot_bytes = 0;
 +    int            push_n_blocks  = 0;
 +    int            push_n_threads = 0;
++    int            push_flag_stride = 32; // one 128 B cache line per block: keeps the arrival flags from false sharing
 +    void *         push_mem[GGML_CUDA_MAX_DEVICES] = {};
 +    char *         push_peer[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_DEVICES] = {};
 +    unsigned int * push_epoch[GGML_CUDA_MAX_DEVICES] = {};
@@ -24,7 +25,7 @@ index 39b23bed7..859d38439 100644
  };
  
  // Base pointer for the (slot, rank) per-block token block.  The kernel adds
-@@ -397,9 +412,16 @@ static void ggml_cuda_ar_wait_for_compute(
+@@ -397,9 +413,16 @@ static void ggml_cuda_ar_wait_for_compute(
  // Init / free
  // ---------------------------------------------------------------------------
  
@@ -42,7 +43,7 @@ index 39b23bed7..859d38439 100644
          GGML_LOG_DEBUG("%s: internal AllReduce only supports n_devices=2 (got %zu); "
                         "falling back\n", __func__, n_devices);
          return nullptr;
-@@ -536,6 +558,10 @@ ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n
+@@ -536,6 +559,10 @@ ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n
                    "%zu KB chunked kernel staging + %zu MB copy-engine staging per GPU\n",
                    __func__, n_devices, p->buf_bytes >> 10, p->copy_bytes >> 20);
  
@@ -53,7 +54,7 @@ index 39b23bed7..859d38439 100644
      return p;
  }
  
-@@ -745,14 +771,183 @@ static bool ggml_cuda_ar_allreduce_copy_outer(
+@@ -745,14 +772,190 @@ static bool ggml_cuda_ar_allreduce_copy_outer(
      return ok;
  }
  
@@ -67,7 +68,7 @@ index 39b23bed7..859d38439 100644
 +        unsigned int * __restrict__ pub_a, unsigned int * __restrict__ pub_b,
 +        const unsigned int * __restrict__ spin_a, const unsigned int * __restrict__ spin_b,
 +        const float4 * __restrict__ peer_a, const float4 * __restrict__ peer_b,
-+        int n4, unsigned int * __restrict__ epoch, int * __restrict__ err, int bound) {
++        int n4, unsigned int * __restrict__ epoch, int flag_stride, int * __restrict__ err, int bound) {
 +    const int bid = blockIdx.x;
 +
 +    __shared__ unsigned int ep_sh;
@@ -87,12 +88,12 @@ index 39b23bed7..859d38439 100644
 +    __syncthreads();
 +
 +    if (threadIdx.x == 0) {
-+        pub_a[bid] = ep;
-+        pub_b[bid] = ep;
++        pub_a[bid*flag_stride] = ep;
++        pub_b[bid*flag_stride] = ep;
 +
 +        int spins = 0;
-+        while (spins < bound && *(volatile const unsigned int *) &spin_a[bid] < ep) { spins++; }
-+        while (spins < bound && *(volatile const unsigned int *) &spin_b[bid] < ep) { spins++; }
++        while (spins < bound && *(volatile const unsigned int *) &spin_a[bid*flag_stride] < ep) { spins++; }
++        while (spins < bound && *(volatile const unsigned int *) &spin_b[bid*flag_stride] < ep) { spins++; }
 +        if (spins >= bound) { *err = 1; }
 +    }
 +    __syncthreads();
@@ -124,7 +125,7 @@ index 39b23bed7..859d38439 100644
 +    const int    nd        = p->n_devices;
 +    const size_t epoch_off = p->push_slot_bytes * (size_t) nd;
 +    const size_t flags_off = epoch_off + sizeof(unsigned int) * (size_t) p->push_n_blocks;
-+    const size_t per_dev   = flags_off + sizeof(unsigned int) * (size_t) p->push_n_blocks * (size_t) nd;
++    const size_t per_dev   = flags_off + sizeof(unsigned int) * (size_t) p->push_n_blocks * (size_t) p->push_flag_stride * (size_t) nd;
 +
 +    for (int i = 0; i < nd; ++i) {
 +        ggml_cuda_set_device(p->devices[i]);
@@ -200,6 +201,13 @@ index 39b23bed7..859d38439 100644
 +        ggml_cuda_set_device(ctx->device);
 +        cudaStream_t stream = ctx->stream();
 +
++        // A shard that is not marked compute holds padding, not a partial sum, so it must not
++        // contribute. The NCCL path zeroes these before reducing; without this the padding was
++        // summed in and the result was wrong (same class as upstream PR 23480).
++        if ((tensors[i]->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) {
++            CUDA_CHECK(cudaMemsetAsync(tensors[i]->data, 0, ggml_nbytes(tensors[i]), stream));
++        }
++
 +        const int j1 = (i + 1) % nd;
 +        const int j2 = (i + 2) % nd;
 +
@@ -207,13 +215,13 @@ index 39b23bed7..859d38439 100644
 +                (float4 *) tensors[i]->data,
 +                (float4 *) (p->push_peer[i][j1] + (size_t) i * p->push_slot_bytes),
 +                (float4 *) (p->push_peer[i][j2] + (size_t) i * p->push_slot_bytes),
-+                p->push_peer_flags[i][j1] + (size_t) i * p->push_n_blocks,
-+                p->push_peer_flags[i][j2] + (size_t) i * p->push_n_blocks,
-+                p->push_flags[i] + (size_t) j1 * p->push_n_blocks,
-+                p->push_flags[i] + (size_t) j2 * p->push_n_blocks,
++                p->push_peer_flags[i][j1] + (size_t) i * p->push_n_blocks * p->push_flag_stride,
++                p->push_peer_flags[i][j2] + (size_t) i * p->push_n_blocks * p->push_flag_stride,
++                p->push_flags[i] + (size_t) j1 * p->push_n_blocks * p->push_flag_stride,
++                p->push_flags[i] + (size_t) j2 * p->push_n_blocks * p->push_flag_stride,
 +                (const float4 *) (p->push_peer[i][j1] + (size_t) j1 * p->push_slot_bytes),
 +                (const float4 *) (p->push_peer[i][j2] + (size_t) j2 * p->push_slot_bytes),
-+                n4, p->push_epoch[i], (int *) p->push_err_dev[i], 2000000000);
++                n4, p->push_epoch[i], p->push_flag_stride, (int *) p->push_err_dev[i], 2000000000);
 +    }
 +    return true;
 +}
