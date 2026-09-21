@@ -134,6 +134,31 @@ spec timing:   n=272 | draft_decode=13.68 selector=2.79 walk=0.09 wait=-12.77 ms
 ⇒ **下一刀（E2）**：把块前向那 13.68 ms 在 `llama_decode` 内部拆开 —— 用既有的 `LLAMA_ROUND_TIMING`（它已按 `build/alloc/setin/enqueue` 分项）跑一臂，
    看 **draft ctx 是否也被该探针覆盖**；若没有，就给 draft ctx 补上（同款探针，2 行），拿到 `build/alloc/setin/enqueue` 四段。
 
+### 1.4e E2（零代码）——**draft ctx 的图复用率 = 0**，每轮全量重建+重分配+重派发
+`[RT]` 探针（`LLAMA_ROUND_TIMING=1`）**本来就覆盖 draft ctx**（之前只看过 target 那行）：
+```
+target : ctx=Qwen3.8-27B        rounds=294 reuse=251 rebuild=19  | build=42721 alloc=626634 setin=10431 enqueue=5551608 us
+draft  : ctx=Qwen3.8-27B-DFlash2 rounds=556 reuse=0   rebuild=556 | build=70903 alloc=1027885 setin=21147 enqueue=3130210 us
+```
+| 项 | draft 每轮 | target 每轮 | 说明 |
+|---|---|---|---|
+| **reuse / rebuild** | **0 / 556（复用率 0%）** | 251 / 19（**85% 复用**） | **draft 每一次 decode 都全量重建图** |
+| `enqueue_us`（异步提交窗口） | **5.63 ms** | 18.9 ms | draft 的提交窗口占它 decode 墙钟(13.68)的 41% |
+| `alloc_us` | **1.85 ms** | 2.13 ms | 每轮重新分配 |
+| `build_us` | 0.13 ms | 0.15 ms | — |
+| `setin_us` | 0.04 ms | 0.04 ms | — |
+
+⇒ **draft 每轮约 7.6 ms（alloc 1.85 + enqueue 5.63 + build 0.13）是「图管理 + 派发」的主机时间**，与 `st_dec=13.68` 同量级且同源。
+⇒ 而 **target 的复用率是 85%，draft 是 0%** —— 差别就是：target 的图在多数轮里形状不变，draft 的**注入批 `n_tokens = n_chunk = AL` 每轮都不同**
+   （`speculative.cpp:1392` `batch_inject.n_tokens = n_chunk`），块批也随接受情况变 ⇒ **draft ctx 永远命中不了图复用**。
+⇒ **这是「N6b 形状稳定化」在 draft 侧的同一个病**，而且这里更彻底（0% 复用），潜在收益 **~5-7 ms/轮**，是 DFlash2 专项 18.5 ms 里最大的一块。
+
+**⚠️ 但不能简单地「补齐成常量」**：注入批的每一行都要把 target 的隐状态写进 draft 的 KV 指定位置，
+块批的每行都要写 draft 的 KV；**补出来的空行如果照样参与计算/写 KV，就会污染缓存**。
+⇒ 所以下一步不是直接改，而是**先量清楚「n_tokens 到底在哪些取值间跳、每次跳是否真的破坏复用」**：
+   用 `LLAMA_ROUND_TIMING=1` 跑一臂同时看 target/draft 两行，并配合已有 `LLAMA_SPEC_TIMING` 的 `draft_n/n_block`，
+   判断复用失败的**最小充分条件**（只跟注入批有关？还是块批也变？），再决定改哪一处。
+
 ### 1.5 由此得到的三条候选改动（按证据强度排序，需先用分段探针确认再动手）
 | 编号 | 改动 | 落点 | 预期 |
 |---|---|---|---|
