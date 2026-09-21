@@ -119,7 +119,8 @@ flowchart TD
     N6["N6a metadata 缓存本身<br/>R149: 只值 -2~-3 ms (仅省 prologue)"]:::todo
     N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%"]:::todo
-    N8["N8 GQA read-once<br/>路线: fattn-vec ncols2=3 打包"]:::todo
+    N8["N8-vec GQA read-once (n_q=1 路径)<br/>今天 6 遍冗余, 可到 1 遍<br/>qwen38 补丁做的是这条路"]:::todo
+    N8T["★ N8T TILE 的 ncols2 2->3/6 (n_q=8 生产路径)<br/>R150: 今天 3 遍冗余 => 这是**我们**该做的<br/>放开门控 fattn-tile.cuh:1309 的 gqa_ratio % 2"]:::next
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
     N10["[RT] 7 处 fprintf 探针规整为 env 门控"]:::todo
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
@@ -138,6 +139,9 @@ flowchart TD
   METATAX -->|消灭它则解锁| K4
   N6 -->|消灭| METATAX
   N8 --> K2
+  N8T --> K2
+  N8T --> G
+  QP1 -.->|其补丁不动我们的路径| N8T
   N8 --> G
   N9 --> G
   N13 --> G
@@ -516,7 +520,7 @@ flowchart LR
 
 | # | 解读到的内容 | 证据 | 落到 |
 |---|---|---|---|
-| QP1 | **`ncols2=3` GQA 打包补丁**（`patches/0001-t2-001-gqa-packing-sm70.patch`，改 `fattn-vec.cuh`，+71/−21 行）：把 3 个共享同一 KV 头的 Q 头打进一个 block。声明 **128K KV DRAM 流量 26.37 -> 8.59 GB per token（−67.4%）**、**decode 16.45 -> 23.83 tok/s（+44.86%）**、KLD 0.000000 / 100% top-1 | A（补丁 + README 表，作者自测） | **N8** |
+| QP1 | **`ncols2=3` GQA 打包补丁**（`patches/0001-t2-001-gqa-packing-sm70.patch`，改 `fattn-vec.cuh`，+71/−21）：把 `ncols` 拆成 `ncols1 x ncols2`，3 个共享同一 KV 头的 Q 头打进一个 block；守卫原文 `packing_supported = (type_K==F16 || type_K==BF16) && (type_V==F16 || type_V==BF16)`；理由是 D=256 时量化路径要 ~252-255 寄存器（实测 30 STL + 17 LDL）。⚠️ **只改 `Q->ne[1]==1` 的 VEC 分支 ⇒ 对我们 n_q=8 的生产 verify 无作用** | **C**（数字只在 README，仓库内**无任何 benchmark 脚本/日志/trace**，不可复核） | **N8-vec**（思想可借）/ **N8T**（我们真正要做的） |
 | QP2 | ★ **现役选择器只打包 2 个 Q 头（ncols2=2）** ⇒ GQA ratio 6 的 KV 重读冗余是 **3 遍不是 6 遍**（26.37/8.59 = **3.07** 精确吻合） | 补丁 commit message 原文 | **N8** + **修正 Z1 先验预测**（204 -> 102 KiB） |
 | QP3 | ⚠️ 该补丁**只对未量化（F16/BF16）KV 开启**（寄存器压力），q8_0 不在覆盖范围 | 补丁 commit message + diff 守卫 | **K1**、**N13** —— 这条把 N8 与 KV dtype 绑在一起了 |
 | QP4 | 单卡 V100-SXM2-32GB 实测：**128K** stock 16.49 / 补丁 no-mtp 23.83 / **MTP 42.22 tok/s**；**8K** MTP 62.41 tok/s | README 表 | **K3**、**T4**（MTP 是 DFlash2 之外的另一条草稿路线） |
