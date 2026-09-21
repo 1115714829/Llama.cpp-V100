@@ -2776,7 +2776,7 @@ static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx
         if (res || memcmp(&graph->node_props[i], &prop, sizeof(prop)) != 0) {
             if (getenv("GGML_CUDA_GRAPH_DEBUG") != nullptr) {
                 static int n_dbg = 0;
-                if (n_dbg < 10) {
+                if (n_dbg < 3 || n_dbg % 2000 == 0) {
                     fprintf(stderr, "[GRAPH] prop diff #%d node=%s op=%s new_ne=[%lld,%lld] old_ne=[%lld,%lld] new_data=%p old_data=%p\n",
                             n_dbg, cgraph->nodes[i]->name, ggml_op_name(cgraph->nodes[i]->op),
                             (long long) cgraph->nodes[i]->ne[0], (long long) cgraph->nodes[i]->ne[1],
