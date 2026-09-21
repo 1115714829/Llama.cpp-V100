@@ -1,4 +1,24 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
+> ## ⏱ 5 分钟接手块（2026-09-21 会话末定格）
+>
+> **状态**：本地 `llama.cpp` **干净 at `c2d716519`**（0 修改）；服务器 = canonical 源码 + 仅 A4 探针（`GGML_CUDA_FA_SPLIT_FLOOR`，默认关，已归档 `patches/0004`）；
+> 实验补丁 `patches/0001..0006`；研究仓库最新提交见 `git log`（含 `PLAN-to-180ts.md`）。
+>
+> **权威数字（正式口径，四次实测离散 <0.5%）**：tg **98.12 / 98.70 / 98.88 / 98.88 t/s**，AL 5.55/4.22/6.38，**57.6 ms/轮**，greedy sha256 **f3edac19...**（同配置逐位可复现）。
+> 长上下文（§21）：8K 24.9 -> 256K **53.0 ms/token**（+113%，斜率 0.113 us/KV-token）；256K+DFlash2 投机 = 34.13 t/s。
+>
+> **每轮预算（§18.9 闭合到 56.6 ms）**：权重 12.1 + **AR 7.3**（事件计时 53 us x 138）+ M8 增量 6.5 + M1 其他 5.5 + alloc 2.2 + **draft 13.6** + selector 2.7 + **未归因 6.7**。
+>
+> **下一步只有两条路**：① **等你批准**的四项结构性工作（P-A AR 入图 / P-B draft 算子融合 / P-C mask-KV 分桶 / P-D 长上下文 attention 内核，判据见 `PLAN-to-180ts.md`）；
+> ② 不需批准的收尾项：6.7 ms 余量的三处门控计时（采样器 / 投机接受记账 / 服务器簿记）、树里 7 处 `[RT]` 探针规整。
+>
+> **第一批命令**：
+> ```
+> ssh -o BatchMode=yes root@192.168.50.235 'nvidia-smi; systemctl is-active vllm-1cat llmscope'
+> cd /root && env CARDS=0,1,2 SPLIT=tensor L=/root/libdir-instr P2P=1 TAG=chk NPRED=512 bash /root/p60-ab-harness.sh   # 复现权威数字
+> tail -3 /tmp/lc-par.log /tmp/a4.log /tmp/d256.log    # 本轮长上下文实测留档
+> ```
+> **勿重做（已证伪）**：见文末"不做清单"与 `PLAN-to-180ts.md` §4。
 > ## ★★ 2026-09-21 DSH 会话实况（优先于本文件其余内容）
 >
 > **权威顺序**：本节 > `AUDIT-2026-09-20-dsh.md` > `SESSION-2026-09-20-measurements.md`（逐条实测与纠正，§0-§11 与 **§16**）> 其余。
