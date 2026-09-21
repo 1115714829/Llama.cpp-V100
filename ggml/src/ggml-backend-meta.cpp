@@ -2134,6 +2134,9 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     static constexpr size_t mt_max_dev = 8;
     static int64_t t_mt_devj_us[mt_max_dev] = {0};
     static int64_t n_mt_skips     = 0;
+    static int64_t t_mt_sig_us    = 0;
+    static int64_t t_mt_fgrun_us  = 0;
+    static int64_t t_mt_fgcap_us  = 0;
     static int64_t n_mt_computes  = 0;
     static int64_t n_mt_nodes_sum = 0;
     static int64_t n_mt_hist[4]   = {0}; // <20, 20-60, 60-150, >150 us
@@ -2708,7 +2711,11 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     bool fg_done = false;
 
     if (fg_ready) {
+        const int64_t fg_t0 = mt_enabled ? ggml_time_us() : 0;
         const uint64_t fg_sig = ggml_backend_meta_capture_sig(cgraph, backend_ctx);
+        if (mt_enabled) {
+            t_mt_sig_us += ggml_time_us() - fg_t0;
+        }
 
         int fg_hit = -1;
         for (size_t s = 0; s < n_capture_slot; s++) {
@@ -2744,7 +2751,11 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                     break;
                 }
             }
-            if (!fg_seen) {
+            // GGML_META_CAPTURE_FIRST: when the scheduler did not have to rebuild the graph the same
+            // buffers are certain to come back, so record on the first sighting instead of paying for
+            // one more plain loop over every subgraph.
+            static const bool capture_first = (getenv("GGML_META_CAPTURE_FIRST") != nullptr);
+            if (!fg_seen && !(capture_first && !needs_rebuild)) {
                 backend_ctx->capture_seen[backend_ctx->capture_seen_next] = fg_sig;
                 backend_ctx->capture_seen_next = (backend_ctx->capture_seen_next + 1) % n_capture_slot;
             } else {
@@ -2760,9 +2771,14 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                     fg_began++;
                 }
                 enum ggml_status st = GGML_STATUS_SUCCESS;
+                const int64_t fg_r0 = mt_enabled ? ggml_time_us() : 0;
                 if (ok) {
                     st = run_subgraphs();
                 }
+                if (mt_enabled) {
+                    t_mt_fgrun_us += ggml_time_us() - fg_r0;
+                }
+                const int64_t fg_e0 = mt_enabled ? ggml_time_us() : 0;
                 for (size_t j = 0; j < fg_began; j++) {
                     void * e = nullptr;
                     if (backend_ctx->capture_end(backend_ctx->backend_configs[j].backend, &e) && e != nullptr) {
@@ -2770,6 +2786,9 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                     } else {
                         ok = false;
                     }
+                }
+                if (mt_enabled) {
+                    t_mt_fgcap_us += ggml_time_us() - fg_e0;
                 }
                 if (ok && st == GGML_STATUS_SUCCESS) {
                     const size_t s = backend_ctx->capture_next;
@@ -2855,7 +2874,7 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                 ij_med = srt[srt.size()/2];
                 ij_max = srt.back();
             }
-            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f%s ar=%.3f ms/call | prologue=%.3f (%.1f%%) | dev_hist_us n=%lld min=%lld med=%lld max=%lld | <20=%lld 20-60=%lld 60-150=%lld >150=%lld | nodes/sub=%.1f skipped=%lld%c",
+            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f%s ar=%.3f ms/call | prologue=%.3f (%.1f%%) | dev_hist_us n=%lld min=%lld med=%lld max=%lld | <20=%lld 20-60=%lld 60-150=%lld >150=%lld | nodes/sub=%.1f skipped=%lld sig=%.3f fgrun=%.3f fgcap=%.3f%c",
                     (long long) n_mt_calls,
                     (double) n_mt_sub / (double) n_mt_calls,
                     (double) n_mt_ar / (double) n_mt_calls,
@@ -2876,6 +2895,9 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                     (long long) n_mt_hist[3],
                     (double) n_mt_nodes_sum / (double) (n_mt_computes ? n_mt_computes : 1),
                     (long long) n_mt_skips,
+                    (double) t_mt_sig_us / k,
+                    (double) t_mt_fgrun_us / k,
+                    (double) t_mt_fgcap_us / k,
                     10);
         }
     }
