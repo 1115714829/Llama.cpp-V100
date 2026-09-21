@@ -4818,6 +4818,10 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
             }
 
             for (int i = 0; i < cgraph->n_nodes; i++) {
+                // every index must get one start and one stop pair, including nodes that are skipped below
+                if (opt_on && i > 0) {
+                    CUDA_CHECK(cudaEventRecord(opt.ev_stop[cuda_ctx->device][i - 1], cuda_ctx->stream()));
+                }
                 ggml_tensor * node = cgraph->nodes[i];
                 if (opt_on) {
                     CUDA_CHECK(cudaEventRecord(opt.ev_start[cuda_ctx->device][i], cuda_ctx->stream()));
@@ -4904,6 +4908,10 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                 if (!is_concurrent_event_active) {
                     try_launch_concurrent_event(node);
                }
+            }
+            if (opt_on && cgraph->n_nodes > 0) {
+                CUDA_CHECK(cudaEventRecord(opt.ev_stop[cuda_ctx->device][cgraph->n_nodes - 1], cuda_ctx->stream()));
+                opt.n_rec[cuda_ctx->device] = cgraph->n_nodes;
             }
         }
 
@@ -5062,6 +5070,15 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
         }
 
         CUDA_CHECK(cudaStreamBeginCapture(cuda_ctx->stream(), cudaStreamCaptureModeRelaxed));
+    }
+
+    // Reset the op-timing record count for this call: the meta backend runs many graphs per ubatch,
+    // so the events recorded here must be queried before the next call reuses the same slots.
+    {
+        ggml_cuda_op_timing & opt = ggml_cuda_op_timing_get();
+        if (opt.enabled && !use_cuda_graph && (size_t) cuda_ctx->device < opt.n_rec.size()) {
+            opt.n_rec[cuda_ctx->device] = 0;
+        }
     }
 
     ggml_cuda_graph_evaluate_and_capture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);

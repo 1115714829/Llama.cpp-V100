@@ -325,6 +325,13 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
     if (!ggml_is_quantized(type)) {
         return false;
     }
+    // GGML_CUDA_MMVQ_MAX_BATCH raises the batch size for which MMVQ is preferred. On Volta a verify
+    // batch larger than the compile-time cap otherwise falls into MMQ, which is far slower for Q8_0.
+    static const int64_t mmvq_max_batch = []() {
+        const char * env = getenv("GGML_CUDA_MMVQ_MAX_BATCH");
+        const int64_t v = env ? atoll(env) : (int64_t) MMVQ_MAX_BATCH_SIZE;
+        return v < 1 ? (int64_t) MMVQ_MAX_BATCH_SIZE : (v > 64 ? (int64_t) 64 : v);
+    }();
     // k-quants cost more to decode and mvq redoes that per column, so MMQ wins sooner.
     // Only list quant-types MMQ supports, others would fall back to cuBLAS.
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && cc == GGML_CUDA_CC_ADA_LOVELACE) {
@@ -334,7 +341,7 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
             case GGML_TYPE_Q3_K:
                 return ne11 <= 6;
             default:
-                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                return ne11 <= mmvq_max_batch;
         }
     }
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && cc == GGML_CUDA_CC_BLACKWELL) {
@@ -348,7 +355,7 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
             case GGML_TYPE_Q6_K:
                 return ne11 <= 7;
             default:
-                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                return ne11 <= mmvq_max_batch;
         }
     }
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && cc == GGML_CUDA_CC_DGX_SPARK) {
@@ -356,7 +363,7 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
             case GGML_TYPE_Q2_K:
                 return ne11 <= 6;
             default:
-                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                return ne11 <= mmvq_max_batch;
         }
     }
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && cc == GGML_CUDA_CC_ORIN) {
@@ -368,7 +375,7 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
             case GGML_TYPE_Q6_K:
                 return ne11 <= 1;
             default:
-                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                return ne11 <= mmvq_max_batch;
         }
     }
     if (GGML_CUDA_CC_IS_NVIDIA(cc) && cc == GGML_CUDA_CC_VOLTA) {
@@ -378,7 +385,7 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
             case GGML_TYPE_Q4_K:
                 return ne11 <= MMVQ_VOLTA_MAX_BATCH_SIZE_K;
             default:
-                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                return ne11 <= mmvq_max_batch;
         }
     }
     if (GGML_CUDA_CC_IS_CDNA(cc)) {
@@ -408,7 +415,7 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
                 case GGML_TYPE_IQ4_XS:
                     return ne11 <= 6;
                 default:
-                    return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                    return ne11 <= mmvq_max_batch;
             }
         }
         switch (type) { // tuned for CDNA2
@@ -421,10 +428,10 @@ bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
             case GGML_TYPE_Q6_K:
                 return ne11 <= 5;
             default:
-                return ne11 <= MMVQ_MAX_BATCH_SIZE;
+                return ne11 <= mmvq_max_batch;
         }
     }
-    return ne11 <= MMVQ_MAX_BATCH_SIZE;
+    return ne11 <= mmvq_max_batch;
 }
 
 // Device constexpr: returns the max batch size for the current arch+type at compile time.
