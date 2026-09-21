@@ -811,6 +811,7 @@ struct ggml_backend_sched {
     struct ggml_backend_sched_split * splits;
     int n_splits;
     int splits_capacity;
+    uint64_t last_graph_fp; // fingerprint of the graph the current splits were built from
 
     // pipeline parallelism support
     int n_copies;
@@ -1948,6 +1949,7 @@ void ggml_backend_sched_free(ggml_backend_sched_t sched) {
 
 void ggml_backend_sched_reset(ggml_backend_sched_t sched) {
     GGML_ASSERT(sched);
+    sched->last_graph_fp = 0; // force a re-split after a reset
     // reset state for the next run
     if (!sched->is_reset) {
         ggml_hash_set_reset(&sched->hash_set);
@@ -1989,6 +1991,23 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
     return true;
 }
 
+// Fingerprint of the graph content: node pointers, shapes and buffers. A graph with the same
+// fingerprint produces the same splits, so the split + allocation pass can be skipped.
+static uint64_t ggml_backend_sched_graph_fingerprint(const struct ggml_cgraph * graph) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = h * 0x100000001b3ull + (uint64_t) graph->n_nodes;
+    h = h * 0x100000001b3ull + (uint64_t) graph->n_leafs;
+    for (int i = 0; i < graph->n_nodes; i++) {
+        const struct ggml_tensor * t = graph->nodes[i];
+        h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t;
+        h = h * 0x100000001b3ull + (uint64_t) t->ne[0];
+        h = h * 0x100000001b3ull + (uint64_t) t->ne[1];
+        h = h * 0x100000001b3ull + (uint64_t) t->ne[2];
+        h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t->buffer;
+    }
+    return h;
+}
+
 bool ggml_backend_sched_alloc_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
     GGML_ASSERT(sched);
     GGML_ASSERT((int)sched->hash_set.size >= graph->n_nodes + graph->n_leafs);
@@ -1997,10 +2016,54 @@ bool ggml_backend_sched_alloc_graph(ggml_backend_sched_t sched, struct ggml_cgra
     sched->cur_copy = sched->next_copy;
     sched->next_copy = (sched->next_copy + 1) % sched->n_copies;
 
-    ggml_backend_sched_split_graph(sched, graph);
+    // The graph uid is reassigned on every split, so fingerprint the content instead (node
+    // pointers, shapes and buffers): the same content produces the same splits and can be reused.
+    // Opt in with GGML_SCHED_SPLIT_CACHE for now; default stays unchanged.
+    static const bool split_cache = (getenv("GGML_SCHED_SPLIT_CACHE") != nullptr);
+    const uint64_t graph_fp = split_cache ? ggml_backend_sched_graph_fingerprint(graph) : 0;
+    const bool graph_unchanged = split_cache && graph_fp == sched->last_graph_fp && sched->n_splits > 0;
+
+    static const bool split_timing = (getenv("GGML_SCHED_SPLIT_TIMING") != nullptr);
+    // the KV cache has its own scheduler with small copy graphs: keep big (main decode graph)
+    // and small (KV cache copy graphs) apart, otherwise the totals are ambiguous
+    static int64_t  t_split_us[2]    = {0, 0};
+    static int64_t  t_alloc_us[2]    = {0, 0};
+    static int64_t  n_sched_calls[2] = {0, 0};
+    static int64_t  n_split_calls[2] = {0, 0};
+    static uint64_t dbg_uid_before = 0, dbg_uid_after = 0, dbg_last = 0;
+    const int big = (graph->n_nodes > 200) ? 1 : 0;
+    const int64_t t0 = split_timing ? ggml_time_us() : 0;
+    dbg_uid_before = graph->uid;
+    dbg_last = sched->last_graph_fp;
+
+    if (!graph_unchanged) {
+        ggml_backend_sched_split_graph(sched, graph);
+        sched->last_graph_fp = graph_fp;
+        n_split_calls[big]++;
+    }
+
+    const int64_t t1 = split_timing ? ggml_time_us() : 0;
 
     if (!ggml_backend_sched_alloc_splits(sched)) {
         return false;
+    }
+
+    if (split_timing) {
+        t_split_us[big]   += t1 - t0;
+        t_alloc_us[big]   += ggml_time_us() - t1;
+        n_sched_calls[big]++;
+        dbg_uid_after = graph->uid;
+        if ((n_sched_calls[0] + n_sched_calls[1]) % 256 == 0) {
+            fprintf(stderr, "[SCHED] BIG calls=%lld splits=%lld cached=%lld split=%.1f us/call alloc=%.1f us/call | SMALL calls=%lld splits=%lld cached=%lld split=%.1f alloc=%.1f | uid_before=%llu uid_after=%llu last=%llu nodes=%d cache=%d\n",
+                    (long long) n_sched_calls[1], (long long) n_split_calls[1], (long long) (n_sched_calls[1] - n_split_calls[1]),
+                    n_sched_calls[1] ? (double) t_split_us[1] / n_sched_calls[1] : 0.0,
+                    n_sched_calls[1] ? (double) t_alloc_us[1] / n_sched_calls[1] : 0.0,
+                    (long long) n_sched_calls[0], (long long) n_split_calls[0], (long long) (n_sched_calls[0] - n_split_calls[0]),
+                    n_sched_calls[0] ? (double) t_split_us[0] / n_sched_calls[0] : 0.0,
+                    n_sched_calls[0] ? (double) t_alloc_us[0] / n_sched_calls[0] : 0.0,
+                    (unsigned long long) dbg_uid_before, (unsigned long long) dbg_uid_after,
+                    (unsigned long long) dbg_last, graph->n_nodes, (int) split_cache);
+        }
     }
 
     sched->is_alloc = true;
