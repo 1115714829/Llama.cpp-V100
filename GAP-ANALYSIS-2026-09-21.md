@@ -139,6 +139,54 @@
 | 256K prefill 895 t/s / TTFT 293 s | **D=256 尾块精确 split-KV**（按 Q 长度分 64/32/16/8/4/2 路） | Q=64/K=245760 **4.306 ms vs 40.675 ms（9.45x）** |
 | 每轮 29.4 ms 主机循环（53%） | **只捕获单形状 CUDA 图** + 主机侧小算子优化 | 主机侧优化单独 **+19.4%**（内核未动） |
 
+## 7. ★★★ 汇总：我们必须补的缺口 + 我们做错了的地方（三路调研终版）
+
+### 7.1 ⚠️ 代码级发现：我们的 DFlash2 verify 路径每轮把整条 KV 反量化成 f16
+链路（主线已核对我方行号）：
+```
+fattn.cu:644-650   Q->ne[1]*gqa_ratio_eff = 8*2 = 16 <= 16  => 8-token verify 走 TILE（不是 VEC）
+fattn.cu:706-710   TILE 要求 need_f16_K/V = true
+fattn-common.cuh:1026-1088  每次调用对整条 K 和 V 做 to_fp16
+```
+=> 在 256K 上这是 **读 1.06 B + 写 2 B + 读 2 B** 的 KV 往返，**而且每轮都做**（AL 5.55，每轮 8 token verify）。
+另一条：`fattn-vec.cuh:106-111` 的 `head/gqa_ratio` 索引 + `blocks_num.z = ntiles_z_gqa * K->ne[2] * Q->ne[3]`
+（VEC 走 ncols2=1 => ntiles_z_gqa = gqa_ratio = 6）=> **同一 KV 头的 6 个 Q 头各读一遍全量 KV**。
+**动作（最小、只读诊断）**：在 `ggml_cuda_get_best_fattn_kernel` 里对 `D==256 且 Q->ne[1]>1` 打印选中的 kernel 与 K->ne[1]，
+一次 A/B 即可证实 256K verify 上确实发生 TILE + f16 反量化。**这是本轮最便宜、可能最值钱的一条。**
+
+### 7.2 缺口清单（按优先级）
+
+| 优先级 | 缺口 | 证据 | 建议动作 |
+|---|---|---|---|
+| **P0** | 「HMMA 天花板 1.36x」口径错误，据此排除了整条低比特线 | 1.36x 是 Q8_0 **在自身格式内**的余量（`HANDOFF.md:443`，合成形状，AUDIT E5 已标注）。换 4-bit 后同卡**权重吞吐**上限 **1.70-2.11x**；但端到端仍只有 **+10~13%**（权重流仅占 22%） | 把 AGENTS §1 / HANDOFF §6.3 的表述就地改成「Q8_0 格式内余量；换 4~5bpw 后端到端 +10~13%」。**仍然不是主线** |
+| **P1** | 主机侧：**metadata 缓存 + 状态指纹失效**（直接打我们 53% 的循环） | `v100-skinny gpu_model_runner.py:531-536,570-617,675-688`：缓存 metadata 对象（alias 同批 buffer），失效条件是 **`(req_id, mamba_state_idx, block_lens)`** —— 正是 GDN 递归状态视图；实测**稳态 75/97 字段逐字节不变** | ① 照抄 `_sm70_e5_diff_probe` 写 ggml 版（graph 构建对象树逐叶快照 + delta），先拿到我们自己的「哪些 ne/nb 在变、变成什么」清单（纯诊断）② 分两类处理：内容变但形状/地址不变 -> 预分配 + 原地 `copy_`/`fill_`；形状真变 -> 用状态指纹在**输入数据**里表达，不进图 key ③ **不要一上来做整轮单图** |
+| **P2** | DFlash2 selector 留在 CPU（4.3 ms/轮 = 7.7%） | `ninfer src/ops/candidate_selector/bf16/dflash2_selector_volta.cu:29-112`（约 80 行有效代码，1 block/row、256 线程）+ `candidate_selector.h:11-45` 完整 K=1..15/B=1..8 契约与精确数学 | 按契约写 ggml 等价 device kernel；**RNG 必须换 counter-based**，否则图重放会漂 |
+| **P3** | 没有 4-bit TC 路径；且误以为必须新增量化类型 + 加载时重排 | `nvfp4_volta_qpn_gemm.cuh:21-35,105-115`：**不重排权重**，而是对激活施加同一置换（两次 `__byte_perm`）——*the permutation is a relabeling of the reduction*；`q4_volta_qpn_gemm.cuh:36-40`：Q4 nibble 序**天然就是 B-fragment 序**，0 条 pack 指令 | 先做 q4_0/q4_K 的 QPN decode kernel（**复用现役 GGUF 布局，不动格式**），激活侧置换按 ggml 的 j/j+16 交织重推 `__byte_perm` 常量；geometry 逐形状扫，不要全局默认 |
+| **P4** | 缺「每多一张卡到底买到多少」的体检 | ninfer 单卡（1-token prompt、varied 语料、INT8 KV）2K 无投机 29.28 / MTP-K3 67.66 / 8K 92.74 / 32K 55.04。我们 3 卡 99.18 | 同一份语料跑我们自己的 no-spec / DFlash2 / 单卡 三臂。**若远小于 3x，allreduce + 图管理就是净损耗，应先修 P1 而不是加卡** |
+| **P5** | 缺「k 随 context 扫描」 | `v100-skinny results/ctx_depth_20260819.md`：4 卡 k=7 从 0.5k 的 127.4 掉到 65k 的 54.7（2.33x），同臂 no-spec 只掉 1.32x；**k=3 在 65k 达 76.26，比 no-spec 的 65.46 还快 16.5%** | k 是**每请求杠杆**，不是 boot 参数 |
+
+### 7.3 ★ 我们可能做错了的地方（七条，按严重度）
+
+1. **自写 WMMA 原型（90 GB/s、慢 6.2x）选错了 API 与映射，却用它否定了整条路线。**
+   `flash-attention-v100 include/mma_m16n16k16.h:5-16` + `utils/docs/volta.md:139,143` 明说：sm_70 上 `nvcuda::wmma` **既没有 ldmatrix（sm_75 才有）也没有 swizzle**。
+   `v100-skinny docs/qpn_race_notes.md:30-34` 记录他们的 v1/B_ring 也是因 **K 切分**而死；**赢法是 QP 切 N、A-stationary**。
+   => **我们继续在 m16n16k16 + smem 暂存上做原型，等于重复他们的死路。**
+2. **用 Q8_0（8.5 bpw）作唯一生产格式，把 1.73x 的字节差当成不存在。**
+   每卡字节：我们 **9.67 GB/卡**（3 卡）；v100-skinny **4.21 GB/卡**（4 卡，close accounting）；ninfer 单卡 23.72 GB 全模型（MLP 是 NVFP4）。**per-rank 字节数是它们的 2.3 倍。**
+3. **「图属性抖动只能靠静态形状/整轮单图根治」过于悲观。** v100-skinny 用「缓存 metadata + 状态指纹失效 + 原地改写」就修掉了，并量化到「稳态 75/97 字段逐字节不变」。
+   我们连「哪些字段在变」的系统清单都还没有（有差异探针，但没有 per-field byte-diff 报告）。
+4. **KV 只做精度选择，没做旋转。** ninfer 对 INT8 group-64 KV 的 K 与 Q 都做 **D256 归一化 Hadamard**（我们 head_dim 恰好 256）。
+   反向证据同样有力：FP8 KV 在 SM70 上掉到 scalar paged，**代价 +4.82 ms/轮**；而权重 QPN2->QPN8 只 +1.08 ms/轮 => **KV 的 dtype 比权重的 dtype 更值钱。**
+5. **归因工具是二等公民。** ninfer 把 `decode_host_exposed_seconds` / `decode_device_wait_exposed_seconds` 写进公开计时契约；我们在源码里留 7 处 env-gated `fprintf`。这直接导致要花几天才能定「21.8 ms 提交窗口」。
+6. **selector 留在 CPU。** 我们并行化（23.45->4.3 ms）就收工；ninfer 有现成 GPU 版本，把 7.7% 主机时间变成 0，且顺带 graph-safe。
+7. **「瓶颈在 VEC/TILE 的有效带宽只有 105 GB/s、远低于 roofline 800」可能把「冗余流量」当成了「低效」。**
+   若同组 6 个 CTA 的重复读有一部分落到 DRAM，真实 DRAM 流量是 **105 x (2~6) = 210-630 GB/s**，已贴着 V100 实用 roofline。
+   => **先测真实 DRAM 流量或做 grid.z=H_kv 的对照实验，再决定要不要重写内核。**
+
+### 7.4 可复核性说明（子代理已标注举证缺口）
+`skinny_kernels.cu:1390` 引用的 `results/qpn_matrix_20260817.csv`、ninfer 的 `bench/ops/nvfp4_qpn2_splitk_sweep.cu`（标注 deleted）等数字**无法在仓库内复核**。
+可复核的是 `results/kernel_matched_20260819.csv` + `benchmarks/kernel_matched_bench.py` 这一对。**引用时请只用可复核的那部分。**
+
 ## 4. 待深挖（子代理正在做）
 - `v100-skinny fork_patches/gdn_attn.py`：**GDN 投机状态的快速元数据构建**，作者自测 **-1.4 ms/step**，
   消掉 **21 次 device sync + 约 70 次 copy** —— 我们的 direct 抖动源正是 **GDN 递归状态视图**，这条高度相关。
