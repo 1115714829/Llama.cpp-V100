@@ -1617,7 +1617,28 @@ target 序列 `1 0 0 1 1 1 1 1 1 1 1 1 1 0 0 1 1 1 1 1 1 1 1 1`（长串停在�
    **Round 104 实测补充**：同一次运行里同时开 `GGML_META_HOST_TIMING` 与 `GGML_CUDA_GRAPH_DEBUG`（`/tmp/meta2.txt`，TAG=metadiag2），
    `[META]` 复现一致（calls=192：total=18.543 loop=16.087 **dev=13.313** ar=2.770 prologue=2.456），
    但 **`[GRAPH] calls=... capture/replay/direct` 汇总行没有出现**（日志里只有 `[GRAPH] prop diff #......` 行 340 条，那个计数器已到 406000）。
-   => **本次运行的 capture/replay/direct 比例仍然未知**，「92 µs ≈ 一次 direct 调用」这个假设**尚未被验证**。
+   ✅ **更正（Round 105）：汇总行其实打出来了，是我上一轮的 grep 被 §3.13 的引号陷阱吃掉引号**（模式退化成 `GRAPH.`）=> 误判。
+   无引号重取（`grep -a -e calls=`）：
+   ```
+   [GRAPH] calls=30208 capture=1596 replay=18495 direct=10117 decision_us=138011 per_call=4.6 avg_nodes=39.9 last_nodes=78
+   ```
+   **对上账了**：`3 x 49.3 x N ≈ 30208` => 该点 meta 调用数 N ≈ 205，即 `dev` 的分母与 GRAPH 的 `calls` **是同一批调用**。于是：
+
+   | 量 | 值 | 说明 |
+   |---|---:|---|
+   | `dev` / 次设备调用 | **约 90 µs** | 13.31 ms / (3 x 49.3) |
+   | GRAPH `per_call`（只含 decision） | 4.6 µs | 5% |
+   | **decision 之后的部分** | **约 85 µs** | 95% |
+
+   **capture / replay / direct 比例 = 5.3% / 61.2% / 33.5%**。
+   即：**三分之一的设备调用根本没走 CUDA 图重放，而是在主机上逐节点派发**（direct 路径，约 40 节点）。
+   按 0.335 x 约 200 µs + 0.612 x 约 20 µs + decision 4.6 µs ≈ 85 µs 估算，**与实测 90 µs 吻合**。
+
+   => **这是目前找到的最大一块可回收开销**：若 direct 占比能压到接近 0（全部走重放），
+   `dev` 可从约 90 µs/次降到约 20-25 µs/次 => 每个 meta 调用省约 10 ms => **每轮约省 10 ms（约 18%）**。
+   direct 的触发条件在 `ggml-cuda.cu:4700-4711`（属性与缓存图不一致 => `use_cuda_graph` 保持 false => 直接执行），
+   因此**减少图属性抖动**（形状/指针稳定性）就是直接的收益路径 —— 与 P-C、以及 A2 那条「递归状态视图抖动」是同一个根。
+   pbdiag 那次的 direct 占比是 18%（15071/82688），本次 33.5% => **这个比例本身在漂**，需要在官方口径下复测确认。
    下一版探针要修：`ggml-cuda.cu:4740` 的打印条件是 `g_calls % 256 == 0`，长跑里应该会打；没打出来说明该分支没走到或 `gdbg_t0 == 0`，需查清后再测。
    **副产品**：`prop diff` 大量命中 `cache_r_l*`（VIEW）与 `conv`/`SCALE`/`GET_ROWS` 节点 —— 与 §24/A2 时期「递归状态视图在抖动」的结论一致，
    但注意这些 diffs 的 `new_ne == old_ne` 且 `new_data == old_data`，**属性其实没变**，说明该探针的判定条件过宽（会误报），引用时需谨慎。
