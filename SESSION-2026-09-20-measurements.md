@@ -934,6 +934,22 @@ ggml_build_forward_expand(gf,
 **三查**（error 行数为 0、有 `Built target` 行、二进制标记串非 0）。修好后：`BUILD3_RC=0`、`error lines: 0`、md5 `2c123419...`、**marker = 1** ✓。
 => 这次是 AGENTS §4.18 的"二进制标记串校验"救的场（若只看 BUILD_RC 就会把两个臂都当成有效测量）。
 
+### 18.8 A2 第一次上机：**逐位中性（正确性门通过）**，8K 无影响（符合预测）
+
+A2 = 递归状态写入改索引式（`ggml_set_rows` + 每次调用填 `s_write`）+ `can_reuse` 去掉 head 依赖。构建：`A2_RC=0`、error 0 行、`libllama.so` -> `06adb036`（CUDA 库不变 ✓）。
+
+| 项 | 基线（臂 A，canonical） | **A2（无条件版）** |
+|---|---|---|
+| MEDIAN_TG | 98.12 / 98.70 | **98.89** |
+| AL（3 prompt） | 5.55 / 4.22 / 6.38 | 5.55 / 4.22 / 6.38（同） |
+| **greedy sha256** | f3edac19... | **f3edac19...（逐位相同 ✓✓）** |
+| target `[RT]` | reuse=270 rebuild=24 alloc=636 ms | reuse=270 rebuild=24 alloc=641 ms |
+| draft `[RT]` | reuse=0 rebuild=556 | reuse=0 rebuild=556（**无变化，符合预测**：draft 无递归状态） |
+
+=> **正确性门通过且 8K 逐位中性**（这是本改动的核心安全性质 ✓）；**A2 的价值只能在 prefill 上**（每块一次的图分配），
+   已排队"同库 A/B"（`GGML_RS_INDEX_WRITE` 门控，8K 两臂 + **32K prefill 两臂**，后者读 `rebuild`/`alloc_us`）验证。
+=> 若 prefill 也无改善，则按纪律**回退 A2**（无收益的改动不留在树里），并把"prefill 每块重建的真实原因"（候选：maszk/KV 视图随 n_kv 变化）写成下一条线索。
+
 ### 18.7 R1 终审（受控 A/B，事件计时）：**证伪**
 
 两臂同库同协议、都开 `GGML_CUDA_AR_TIMING`（事件计时 = GPU 可见）：
