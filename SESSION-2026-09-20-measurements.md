@@ -1580,6 +1580,41 @@ split 未变时保留旧 uid，用「op/type/ne/nb/data/view/op_params/sources/f
 风险画像与给 target 做同样的事**完全不同**：draft 只有 5 层 / 1.14 GB，多一份 compute arena 的代价很小；
 而 target 的权重已占 7.3 GB/卡（16 GB 卡），不能这么干。
 收益上限约 **1.8-3.9 ms/轮**（取决于注入步形状是否稳定）=> 约 3-7%，**不足以单独解决问题**，但如果 META 探针显示 sched 路径确实值这个钱，它可以作为组合拳的一项。本次若先查，可以省掉一轮的自行推导，
+
+#### 25.10 ★★★ 两个判定性实验的结果（Round 103）：**P-A 被彻底排除，靶心是 `dev`**
+
+##### A. `LLAMA_GRAPH_SLOT_DEBUG`（子代理执行，`/tmp/p60-slotdbg-server.log`）：假设**成立**
+draft 24 次槽号序列 `1 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0`（call>=5 起**严格交替**）=> **hits 0/24、`reuse=0 rebuild=108`**；
+target 序列 `1 0 0 1 1 1 1 1 1 1 1 1 1 0 0 1 1 1 1 1 1 1 1 1`（长串停在同一槽）=> hits 14/24、`reuse=51/72`（62-71%）。
+
+**子代理还发现一个第二因（重要）**：draft call=3/4 的 `prev_active` 与 `res` **是同一指针却仍 `hit=0`** => `res->can_reuse(gparams)` 本身返回 false；target 侧也有 5/24 次如此。
+=> **只把单指针改成按槽 track，并不能让 draft 的 reuse 立刻变高。** 进一步坐实「路线 A 不值得做」（与 #28549 的设计意图一致）。
+
+##### B. `GGML_META_HOST_TIMING`（主线执行，`/tmp/meta-probe.txt`）：**AR 只占 15%，`dev` 占 72%**
+稳态（calls=192）：
+```
+[META] calls=192 sub/call=49.3 ar/call=48.3 | total=18.830 loop=16.379 dev=13.584 ar=2.791 ms/call | prologue=2.450 (13.0%)
+```
+| 成分 | ms/call | 占比 |
+|---|---:|---:|
+| **`dev`**：三层 `ggml_backend_graph_compute_async`（每子图 x 3 设备） | **13.58** | **72%** |
+| `ar`：主机侧 `comm_allreduce` | 2.79 | 15% |
+| `prologue`：`total - loop`（含 `needs_rebuild` 重建） | 2.45 | 13% |
+| 合计 `total` | 18.83 | 100% |
+
+**三条结论**：
+1. **P-A（把 AR 挪进图）作为性能杠杆正式作废**：AR 主机时间只有 **2.79 ms/call**，即使降到 0 也只有约 5% 轮时；
+   且 R1 已证明主机侧 AR 节省不转化为轮时（TP3 比 TP2 的 enqueue 多 4.4 ms 却总轮时更少）。**此项以后不再投入。**
+2. **真正的靶心是 `dev` = 13.58 ms/call（72%）**。`sub/call=49.3` => 每 call 约 49 子图 x 3 设备 ≈ 148 次设备调用
+   => **约 92 µs/次**；而 `[GRAPH]` 探针测到 CUDA 后端自身只要 **3.8 µs/次**（§24）。**相差 24 倍** —— 那 11 ms 的未归因就在这里。
+   下一步要查的是「为什么经过 meta 后端这一层，每次调用变贵了」，而不是算子本身。
+3. ⚠️ **本探针的口径缺陷（我自己写的，必须记住）**：`[META]` 的静态变量是**函数级**的，target 与 draft 两个 meta 后端**共享同一组计数器**，
+   故 `sub/call=49.3` 是两者混合平均，**不是 target 单独的值**；早前文档里的「139 子图」也**未被本探针证实**，需重新核实。
+   下一版探针应把计数按 `backend` 指针分桶。
+
+**由此确定的下一步（取代此前猜测）**：查清 `dev` 那 92 µs/次里 meta 后端这一层额外做了什么
+（`ggml_backend_graph_compute_async` 包装、事件/同步、`push_data`/copy-back、以及 `bcj.cgraphs[i].cgraph_main` 的真实节点数），
+而不是继续在整轮图捕获结构上赌。
 而且能直接拿到 #28549/#25406 这两个已成文的设计与验证方法。
 
 #### 25.8 ★★ 口径重算：**每轮的瓶颈首先在主机侧，不在 GPU**（Round 98）
