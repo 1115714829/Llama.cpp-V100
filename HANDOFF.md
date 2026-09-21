@@ -19,8 +19,10 @@
 > **先手是 Z1-Z5 零代码量测**（ctx 斜率 / FA kernel 只读诊断 / n_max 扫描 / KV dtype / split 模式<已完成>），必须排在结构性改动之前。
 >
 > **下一步（按序，每条都带现成证据/脚本）**
-> 1. **收 Z1 的 128K 与 128K-DFlash2 两臂** —— 判据**已预先写在** `Z1-PREREG-2026-09-21.md` §5.5：
->    128K 无投机 ~45 t/s ⇒ KV 仍被隐藏（N1/N8T 在 128K 以下无价值）；~24 t/s ⇒ KV 开始显形。
+> 1. ⚠️ **Z1 的 ctx 扫描（8K/32K/128K）已全部作废**（R160）：harness 的 prompt 只有一句话，`--ctx-size` 只分配不填充，
+>    三个臂其实在同一条件下 decode。**正确的深度测试已做成 turnkey 脚本：`bash /root/z-depth.sh`**
+>    （用 `llama-bench -d {8192,32768,131072}`，臂间 drop_caches，busy 守卫，`-ts` 用斜杠；输出 `/tmp/z-depth.txt`）。
+>    它回答的问题：**decode 时间到底随真实上下文深度增长吗** —— 这是判 N1/N8T 值不值得投 336 行 kernel 的唯一依据。
 > 2. **Z2 探针臂**：编译代理在等机器，一次编译带两个探针（`GGML_CUDA_FA_KERNEL_DEBUG` + `GGML_META_KEY_DEBUG`）。
 >    要看两件事：`[FAK]` 确认 8-token verify 走 **TILE** 且 `n_kv % 256 == 0`（决定 `use_gqa_opt` 成不成立）；`[MKEY]` 判 CUDA 图 key 是否在旋转容器间交替。
 > 3. **阶段一第一项 = N6b（形状稳定化）** —— §2.7 证明它是 150 的**硬前提**（没有它阶段一只有 tg 128）。

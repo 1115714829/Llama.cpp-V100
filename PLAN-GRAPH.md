@@ -798,6 +798,8 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
       ㊽ 教训：**「改了哪个参数」不等于「那个参数真的起作用了」** —— 上机前必须确认实验条件真被改变。
          与 R155/R159 同源：都是「表面参数/二手描述」与实际语义脱节。
       ㊾ 正确的深度测试：`llama-bench -d <depth>`，或先用长 prompt（`/tmp/prompt256k.txt`）填满 KV 再测。
+      ㊿ 已把它做成 **turnkey 脚本 `/root/z-depth.sh`**（`bash -n` 通过、已上传）：llama-bench -d 三档 + 臂间 drop_caches + busy 守卫 + `-ts` 斜杠，
+         输出 `/tmp/z-depth.txt`。**教训固化成可执行物，而不是只写在文档里。**
 ```
 
 ## 5. 作业纪律（血泪）
