@@ -1179,6 +1179,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         static const bool st_enabled = (getenv("LLAMA_SPEC_TIMING") != nullptr);
         static int64_t st_fetch_us = 0;
         static int64_t st_work_us  = 0;
+        static int64_t st_topk_us  = 0;
+        static int64_t st_gate_us  = 0;
         static int32_t st_n        = 0;
         const int64_t t_fetch0 = st_enabled ? ggml_time_us() : 0;
 
@@ -1193,10 +1195,9 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         // the block positions are independent, so rank them in parallel; the arithmetic per position is
         // unchanged (same order, same operands), so the resulting candidates are identical
         const int32_t n_thread = std::min<int32_t>(n_tokens, 8);
-        auto work = [&](int32_t i_beg, int32_t i_end) {
+        auto work_topk = [&](int32_t i_beg, int32_t i_end) {
             for (int32_t i = i_beg; i < i_end; ++i) {
                 const float * logits = logits_all[i];
-                const float * embd   = embd_all + (size_t) i * n_embd_dec;
 
                 int32_t * ci = cand.data()  + (size_t) i * top_k;
                 float   * ui = unary.data() + (size_t) i * top_k;
@@ -1222,45 +1223,74 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                     ci[k] = ids[k];
                     ui[k] = vals[k];
                 }
-
-                // gate = selector_hidden^T x hidden_state
-                float * gi = gate.data() + (size_t) i * rank;
-                for (int32_t k = 0; k < rank; ++k) {
-                    float s = 0.0f;
-                    for (int32_t d = 0; d < n_embd_dec; ++d) {
-                        s += sel_hidden[(size_t) k * n_embd_dec + d] * embd[d];
-                    }
-                    gi[k] = s;
-                }
             }
         };
 
-        if (n_thread <= 1) {
-            work(0, n_tokens);
-        } else {
+        auto run_parallel = [&](int32_t n_work, auto && fn) {
+            const int32_t n_t = std::min<int32_t>(n_work, 8);
+            if (n_t <= 1) {
+                fn(0, n_work);
+                return;
+            }
             std::vector<std::thread> pool;
-            pool.reserve((size_t) n_thread);
-            for (int32_t t = 0; t < n_thread; ++t) {
-                const int32_t i_beg = (int32_t) ((int64_t) n_tokens *  t      / n_thread);
-                const int32_t i_end = (int32_t) ((int64_t) n_tokens * (t + 1) / n_thread);
-                if (i_beg < i_end) {
-                    pool.emplace_back(work, i_beg, i_end);
+            pool.reserve((size_t) n_t);
+            for (int32_t t = 0; t < n_t; ++t) {
+                const int32_t beg = (int32_t) ((int64_t) n_work *  t      / n_t);
+                const int32_t end = (int32_t) ((int64_t) n_work * (t + 1) / n_t);
+                if (beg < end) {
+                    pool.emplace_back(fn, beg, end);
                 }
             }
             for (auto & th : pool) {
                 th.join();
             }
-        }
+        };
+
+        run_parallel(n_tokens, work_topk);
+        const int64_t t_topk1 = st_enabled ? ggml_time_us() : 0;
+
+        // gate = selector_hidden^T x hidden_state, rank-major: one selector row is read once and reused
+        // for every block position. Each dot product keeps its original accumulation order, so the
+        // values are bit-identical to the position-major form.
+        auto work_gate = [&](int32_t k_beg, int32_t k_end) {
+            for (int32_t k = k_beg; k < k_end; ++k) {
+                const float * row = sel_hidden.data() + (size_t) k * n_embd_dec;
+                for (int32_t i = 0; i < n_tokens; ++i) {
+                    const float * embd = embd_all + (size_t) i * n_embd_dec;
+                    // four partial sums shorten the FMA dependency chain; the reduction order is fixed
+                    float s0 = 0.0f, s1 = 0.0f, s2 = 0.0f, s3 = 0.0f;
+                    int32_t d = 0;
+                    for (; d + 4 <= n_embd_dec; d += 4) {
+                        s0 += row[d + 0] * embd[d + 0];
+                        s1 += row[d + 1] * embd[d + 1];
+                        s2 += row[d + 2] * embd[d + 2];
+                        s3 += row[d + 3] * embd[d + 3];
+                    }
+                    float s = (s0 + s1) + (s2 + s3);
+                    for (; d < n_embd_dec; ++d) {
+                        s += row[d] * embd[d];
+                    }
+                    gate[(size_t) i * rank + k] = s;
+                }
+            }
+        };
+
+        run_parallel(rank, work_gate);
+        const int64_t t_gate1 = st_enabled ? ggml_time_us() : 0;
 
         if (st_enabled) {
             st_fetch_us += t_fetch1 - t_fetch0;
             st_work_us  += ggml_time_us() - t_fetch1;
+            st_topk_us  += t_topk1 - t_fetch1;
+            st_gate_us  += t_gate1 - t_topk1;
             st_n++;
             if (st_n % 32 == 0) {
-                LOG_INF("%s: selector cpu per round = fetch %.2f + work %.2f ms (threads=%d, n_tokens=%d)\n",
-                        __func__, st_fetch_us/1e3/32.0, st_work_us/1e3/32.0, (int) n_thread, (int) n_tokens);
+                LOG_INF("%s: selector cpu per round = fetch %.2f + topk %.2f + gate %.2f ms (threads=%d, n_tokens=%d rank=%d)\n",
+                        __func__, st_fetch_us/1e3/32.0, st_topk_us/1e3/32.0, st_gate_us/1e3/32.0, (int) n_thread, (int) n_tokens, (int) rank);
                 st_fetch_us = 0;
                 st_work_us  = 0;
+                st_topk_us  = 0;
+                st_gate_us  = 0;
             }
         }
     }
