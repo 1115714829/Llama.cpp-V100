@@ -831,6 +831,24 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
   **host us/call** 与 **GPU 可见 us/call（rank0 的 ev0..ev1）**；三种规模：164 KB（在役尺寸）/ 1 MB / 10 MB。
 - **判据**：164 KB 下 1000 轮 **0 mismatch**、**spin timeout 0**、GPU 可见 **<=15 us**（NCCL 在役 68-95 us）。
 
+### 18.1 子代理取证：1cat 的 allreduce **确实在捕获图内**（回答 R1/R2 取舍）
+
+- 机制：**CUDA-IPC 共享内存 push，每次调用一个 kernel，不走 NCCL**
+  （`csrc/custom_all_reduce.cu:492` -> `csrc/custom_all_reduce.cuh:1905`；SM70/V100 TP4 push 变体 `sm70_cross_device_reduce_1stage_push<4>` 定义在 `.cuh:762`、launch 在 `.cuh:1950-1953`；
+  IPC 缓冲在 `__init__` 建一次：`custom_all_reduce.py:296-302`、`:341-347`，并在 `capture()` 里集群级注册 `:386-418`）。
+- **关键证据（在不在图内）**：`custom_all_reduce.cuh:1944-1955` 的 push kernel **只在 `status == cudaStreamCaptureStatusActive` 时才 launch**；
+  注释原文："The push protocol amortizes peer polling across captured collective chains. A lone eager call stays on the ordinary registered-buffer pull path."
+  => 该实现是**为"活在捕获图里"而设计的**。
+- 量化：NSYS 图节点桶 `docs/design/sm70_dflash2_target_graph_20ms.md:308-311`：**TP4 all-reduce 128 节点 / 2.313 ms**（在 1257 节点的 target 图内）
+  => **约 18 us/次**；另有 `:454` "1.277 ms TP4 push all-reduce"。轮时锚点 `sm70_quasar_nvfp4_dflash2_acceptance.md:125-128` = **17.552 ms 均值**。
+- allreduce **不在任何 split 列表**（`vllm/config/compilation.py:756-779` 只含 attention/GDN；`:1143` `splitting_ops`）=> **不打断图**。
+- 生产是 TP4 + push AR **默认开**（`vllm/envs.py:277`、`:280`，默认值 "1"）。
+- **对我们的含义**：
+  1. 目标是"**每次 AR 约 18-25 us 且主机侧零轮询**"。我们现状 68-95 us => 138 次/轮可省 **约 9-13 ms/轮**。
+  2. 完整复刻（AR 进图）在 llama.cpp 里需要 meta 后端不再在 AR 处切图（上游架构级，风险高）；
+     **但先做到"主机侧零轮询的自定义 AR"即可拿到大部分收益**（AR 仍是主机调用，但每次只发 1 个 kernel）=> 这正是 §18 小样在测的东西。
+  3. 若小样达到 ~20 us，则预期：57.6 ms/轮 -> **约 46-48 ms/轮**（tg 96 -> 约 115-120）。
+
 ### 17.1.1 反推纠正：`rebuild` 的增长来自 **prefill 分块**，不是解码轮退化
 
 用新数据算：`rebuild` 与 prefill 分块数**精确吻合**
@@ -842,6 +860,21 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
    **不是**"解码轮随上下文变慢"。=> 工作流 A2 的作用域应重新定位为 **TTFT/prefill 抓手**（64K prefill 39.25 s 里估计有数秒是图分配），
    解码轮的主机侧开销仍以 ~2.4-5 ms/轮计（与 8K 同量级）。
    => A2 的改法不变（索引式写 + 让连续同形状分块复用图），但**预期收益记在 prefill/TTFT 上，不要记在 decode 上**。
+
+### 17.1.2 TP 度数 @64K：**TP4 反而更差 => 保持 TP3**
+
+| CTX=65536，q8_0 | TP3（卡 0/1/2） | TP4（卡 0/1/2/3） |
+|---|---:|---:|
+| MEDIAN_TG | **42.38 t/s** | 37.55 t/s（-11%） |
+| AL（中位） | 2.79 | 2.68 |
+| **ms/轮** | **65.8** | **71.4（+8.5%）** |
+| prefill | 1352 t/s | 1318 t/s（-2.5%） |
+| AR 均值 | **431.6 us** | 527.2 us（**+22%**） |
+| rebuild / alloc | 329/530、8.0 s | 333/530、9.8 s |
+
+=> 即使每卡权重从 9.02 GiB 降到 6.76 GiB、每卡 KV 通量减少，**仍更慢**：因为 AR 从 3 卡变 4 卡后每次更贵（+96 us x 138 次/轮）
+   => **AR 主导的结论再次被独立证实**（与 §16.11 的账本一致）。
+=> **配置结论：短/中上下文保持 TP3**。保留意见：256K 时 KV 项比 64K 大 4 倍，平衡点可能移动，未测（成本高）。
 
 ### 17.2 结论
 
