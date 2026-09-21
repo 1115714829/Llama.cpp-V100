@@ -394,6 +394,75 @@ gate = 10.5M MAC / 8 线程 = 每 MAC 约 2.1 ns（约 8 周期）=> **标量累
    在 llama.cpp 当前架构下无法用局部补丁消除；要根治只能走 1cat 的路线（静态形状 / 整轮单图捕获），属大改动。
    这条结论同时解释了：`cached=0`、arena 无效、以及 `GGML_SCHED_SPLIT_CACHE` 无法生效。
 
+---
+
+## 9. 验收标准逐条对账（2026-09-21 状态）
+
+| 验收标准 | 起点（项目最初） | 现在（本轮实测） | 结论 |
+|---|---|---|---|
+| **1) 主口径 tg**（Q8_0 + DFlash2 n=7, ctx 8192, 官方采样, 3 prompt, drop_caches） | **95.20 t/s**（58.9 ms/轮, AL 5.55） | **96.43 / 99.37 t/s**（两臂, AL 5.55, 离散 3.0%） | 略升；**距 >=180 仍差 ~1.9x** |
+| 1) 每轮 ms（= AL / tg） | 58.9 ms | **57.6 / 55.9 ms** | 目标 ~20 量级，未达 |
+| 2) 32K prefill | 1520.45 / 1952.69 | **2169.87 / 2180.70** | +11.1%（FA 表） |
+| 2) 128K prefill | 999.11 | **1355.65 / 1357.22** | **+28.6 ~ +35.8%** |
+| 2) **256K prefill** | **370**（旧记录）/ 632.95（本会话改动前） | **895.93 t/s** | **+142% vs 370**；+41.6% vs 改动前 |
+| 2) **TTFT@256K** | **672 s** | **293 s** | **-56%** |
+| 2) decode@256K | 33.97 | **34.13 t/s** | 持平（**未改善，待办**） |
+| 3) 正确性门 | - | 所有 A/B 两侧 **greedy sha256 逐位一致**（f3edac19...02ca34） | 通过 |
+| 4) 纪律 | - | 同源 A/B + 四库 md5 + 二进制标记 + drop_caches 正式臂 + 两臂离散度 | 通过（并新增 AGENTS §4 第 18-21 条） |
+| 5) 范围 | - | 改动只在 llama.cpp/；已提交 7 个 commit（llama : ... + Assisted-by: DSH），未 push | 遵守 |
+
+**相对项目最初：tg 55.95 -> 96.4-99.4 = +72% ~ +78%**（两侧都开 DFlash2 投机解码）。
+**未达成的部分**：主口径 180 t/s（差 ~1.9x）、每轮 ~20 ms、256K decode。
+
+### 9.1 push 式 allreduce 的落地状态（本轮）
+
+- 微基准路线**两次挂死**（ar_bench2 的 memset-in-graph 竞态；ar_bench4 的 300 s 零输出超时），
+  已**停掉微基准自证**这条路 —— 改用**生产路径内置的 `[AR]` 计时**做判据（`GGML_CUDA_AR_TIMING=1` 直接给出单次集合通信延迟），
+  这比体外微基准更贴近真实（含设备偏斜）。
+- 已实现并接入（`ggml/src/ggml-cuda/allreduce.cu`，env 开关 `GGML_CUDA_AR_PUSH=1` + `GGML_CUDA_ALLREDUCE=internal`）：
+  - 设备 IPC/UVA 三卡一次性 push+reduce 融合 kernel（每块独立到达 epoch，**只增不减 => 可被 CUDA graph 捕获重放**）；
+  - 每个设备 3 槽位 + 每块 flags + 每块 epoch + 超时标志，**全部在 init 期分配**（避免图捕获中 cudaMalloc）；
+  - 仅对 **3 卡 + F32 + <=8 MB** 的张量生效，其余自动回退（解码张量 164 KB ✓，prefill 大张量回退）。
+- 已知风险：`__threadfence_system()`（POWER9 上可能很贵，这正是微基准想量的东西）；
+  若 A/B 显示收益不足，可再试设备域栅栏（但必须先用正确性门验证）。
+
+### 9.2 push 式 allreduce：实测不通过，已回退（成果存档）
+
+双臂（同一套库 37d46800，唯一变量 = GGML_CUDA_ALLREDUCE=internal + GGML_CUDA_AR_PUSH=1）：
+
+| 臂 | MEDIAN_TG | [AR] 单次延迟 | greedy |
+|---|---:|---:|---|
+| A（NCCL 对照） | **77.76** | **68.4 us** | 正确（f3edac19...） |
+| B（internal + push） | **0.00** | **161.4 us** | **错**：content_len=0、sha256=e6e226d0... |
+
+- 结论：push 内核**能跑起来**（构建/启动/无崩溃），但**归约结果错误**且**比 NCCL 慢 2.4 倍**（161.4 vs 68.4 us），
+  也远慢于体外微基准的 59 us（生产内核比微基准多一次 __threadfence_system()，且 40 个块的 flags 挤在同一缓存行）。
+- 处置：**回退**（allreduce.cu + ggml-cuda.cu 的三卡门卫），完整实现存为
+  patches/0002-push-allreduce-experimental.patch（28856 B）。默认路径与已验证状态保持一致。
+
+### 9.3 图 arena 分槽：无收益，已回退（同样存档）
+
+按批大小分槽的 arena（src/llama-context.{h,cpp}，默认生效）实测对 direct/capture 计数与 tg 均无影响
+（原因见 8.12：单 scheduler + 守卫），属"无收益却改变行为"的改动 => **回退**，
+存为 patches/0003-graph-arena-per-batch-size-experimental.patch。
+保留并提交的是 ggml-backend.cpp 的 [SCHED] 探针（env 关闭即零成本，且给出了 8.9 的关键数字）。
+
+### 9.4 FA 的 TILE/MMA 线索：核对后判为死路
+
+fattn.cu:644-651：Volta 上 Q->ne[1] * gqa_ratio_eff <= 16 走 TILE（注释：小矩阵上张量核不划算），
+本模型 gqa_ratio_eff=2 => **nb<=8 恰好落在 TILE**。这**解释了 FA 表改动为什么只影响 prefill、解码零变化**。
+但 M5 的微基准显示 TILE@nb=8 = 10.1 TFLOPS vs MMA@nb=16 = 18.4 / @nb=64 = 30.4 —— 这是**不同批量**的对比，
+上游阈值本身合理 => **不改分发**。256K decode（34 t/s）的真正限制是 KV 带宽（q8_0 下每 token 每卡约 5.7 GB ≈ 6.3 ms）+ 权重读取。
+
+### 9.5 教训（写进纪律）
+
+**分布式内存协议必须先过"确定性单元测试"（3 卡、已知输入、比对期望和），再上端到端。**
+本轮顺序错了：两个微基准都挂死（memset 竞态 / 自旋超时），我跳过单测直接端到端 => 得到"能跑但结果错"的臂，
+既费时间又留下危险代码（幸而它始终在 env 开关后面）。
+
+
+
+
 
 
 
