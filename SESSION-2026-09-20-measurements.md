@@ -460,6 +460,50 @@ fattn.cu:644-651：Volta 上 Q->ne[1] * gqa_ratio_eff <= 16 走 TILE（注释：
 本轮顺序错了：两个微基准都挂死（memset 竞态 / 自旋超时），我跳过单测直接端到端 => 得到"能跑但结果错"的臂，
 既费时间又留下危险代码（幸而它始终在 env 开关后面）。
 
+---
+
+## 10. draft/target 图每轮失效的**精确根因**与修法（下一轮直接可做）
+
+### 10.1 根因（代码级，一行定位）
+
+属性差异探针（GGML_CUDA_GRAPH_DEBUG）的统计是 src_ne 116 / src_data 46 / other 120，样本节点全是 GDN/卷积类；
+顺着这些节点找到写入侧：
+
+- delta-net-base.cpp:490-496（卷积状态）与 :514-520（rollback 分支）：
+  conv_state_update = ggml_view_2d(conv_states_all, row_count, n_seqs, nb1,
+      (s_slot * mem_size + **kv_head**) * row_size)，随后 ggml_cpy(conv_state_last, conv_state_update)；
+- llama-graph.cpp:3480-3498（递归状态 cache_r 的写入）同样是 view + 偏移里带 **rs_head**。
+
+=> **视图偏移里含滚动缓存头指针（head）**，而 head 随序列前进 => **每轮偏移都变 => 这些视图的属性变化 =>
+包含它们的整张子图被判"属性已变" => 逐节点直提（direct）**。
+这就是 draft 每轮 +13.6 重捕获 / +82 直提（约 12.3 ms）的来源，也**同时挡住 P1（静态形状）与 P2（整轮单图捕获）**，
+因为两者都要求图跨轮稳定。注意：这不是 llama.cpp 的 bug —— 捕获的图里偏移是常量，偏移变了就必须重捕获，这是**正确行为**。
+
+### 10.2 修法（结果等价、有先例、机械）
+
+llama.cpp 对**注意力 KV 早就用了索引式写入**：llama-kv-cache.cpp:1318-1350 的 cpy_k ->
+`ggml_set_rows(ctx, k, k_cur, k_idxs)`，其中 k_idxs 是**图输入**（build_input_k_idxs:1409）=> 图里没有会移动的偏移 ✓。
+
+把递归状态也照这个模式改：
+
+1. **llama-graph.h**（llm_graph_input_rs，:262-276）：新增 `ggml_tensor * s_copy_dst;`（**I64** [n_rs]，与 KV 的 k_idxs 同型），
+   以及需要的 main/extra 视图；`s_copy`（I32，读取侧）保持不变。
+2. **llama-graph.cpp**：build_rs_inp_impl(:3502) 里创建 s_copy_dst 并 ggml_set_input；
+   `llm_graph_input_rs::set_input`(:329) 里填入**目标行号**（= s_slot * mem_size + head + j，j 为序列下标）；
+   build_rs 的写入(:3480-3498) 由 cpy(view(offset)) 改成 `ggml_set_rows(s, src, s_copy_dst_view)`。
+3. **delta-net-base.cpp**（build_conv_state，:490-521）：同样把 conv_state_update 的 cpy(view) 换成 set_rows，
+   行号 = s_slot * mem_size + head + j。
+4. **（可选）llama-memory-recurrent.{h,cpp}**：加一个 "目标行号" 计算 helper，避免在图形层重复公式。
+
+**为什么这个改动安全**：写入的**数据与目标位置完全相同**，只是寻址方式从"偏移视图"变成"索引张量" =>
+数值结果逐位相同 => 用 greedy sha256 即可判定（预期不变），再用 AL 不劣化兜底。
+**预期收益**：draft 侧约 -10~12 ms/轮（direct/capture 计数应大幅下降，draft_decode 13 -> 约 3 ms），
+并且**解锁 P1/P2**（静态形状、整轮捕获）=> 这是通往 180 t/s 的必经一步。
+
+**验证判据（一次跑测即可判定）**：GGML_CUDA_GRAPH_DEBUG=1 下
+`[GRAPH] direct=` 每轮值应从约 66 降到个位数，`draft_decode` 从 13 ms 降到约 3 ms，greedy sha256 不变。
+
+
 
 
 
