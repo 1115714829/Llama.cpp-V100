@@ -29,6 +29,27 @@ use_cuda_graph = true;      // 4711
 ```
 即：**只要缓存 CUDA 图的属性与新图不一致，就退回 direct 执行。**
 
+## 3b. ★ 因果链已闭合（Round 110，`ggml-cuda.cu:2743-2776`）
+```cpp
+if (cgraph->uid != 0 && cgraph->uid == graph->uid) { return false; }   // uid 快路径：uid 没变才算「无属性变化」
+graph->uid = cgraph->uid;
+for (i < n_nodes) { memcpy(&prop.node, cgraph->nodes[i], sizeof(ggml_tensor)); ...memcmp... }
+```
+完整链条：
+```
+process_ubatch 重建图（draft 每次 / target 24 次）
+  -> ggml_backend_sched_alloc_graph -> split_graph 重新分配每个 split 的 uid（ggml-backend.cpp:1588）
+  -> uid 快路径失效 -> 走 O(n) 全量 memcmp
+  -> memcmp 比的是整个 ggml_tensor（含 data 指针），sched 重分配使指针移动 => 必然不等
+  -> properties_changed = true -> direct 执行 + warmup_complete = false（下次还需连续 2 次稳定）
+```
+**结论：P-B（draft 每次重建）与 P-E（14% direct）是同一个根因。** draft 的 `reuse=0` 不只白花 3.6 ms 的 alloc，
+还每轮制造大量 uid 变化 => 属性抖动 => direct。**修其一即打两个目标。**
+（更正：Round 100/101 曾把 draft `reuse=0` 判为「#28549 的有意设计、上限只有 3.9 ms/轮」—— 那**只算了 alloc，漏掉了它对 direct 的连带影响**。）
+
+⚠️ **上限**：即使照 PR #25406 把 uid 稳定下来，**步骤 5 的指针移动仍会让 memcmp 不等**。
+所以还需要**分配稳定**（静态形状 / 不重分配），这就把 P-C 与静态形状路线接了进来。
+
 ## 4. 第一步：把「为什么退回 direct」问清楚（必须先做）
 现成的 `GGML_CUDA_GRAPH_DEBUG` 属性差异探针**会误报**：Round 104 实测它打印的 `prop diff` 行里
 `new_ne == old_ne` **且** `new_data == old_data`，属性其实没变（340 行里大量如此）。**不要用它当依据。**
