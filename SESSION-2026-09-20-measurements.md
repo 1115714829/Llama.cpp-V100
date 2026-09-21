@@ -1508,6 +1508,26 @@ ggml-backend.cpp:942: pre-allocated tensor (output.weight) in a buffer (Meta()) 
 - 留档 target 的逐步值：`[RT] target decode+sync` = 48.8 / 33.7 / 35.6 / 37.3 / 32.3 / 29.4 / 43.7 / 41.6 / 32.3 ms/轮（前几段含热身，稳定段 **29-37 ms/轮**）。
 - 纪律补充：判定图复用**必须同时看两行 `[RT] perf`**（`grep -a -h "RT. perf" <log>` 全取，不要 `tail -1`）。
 
+#### 25.8 ★★ 口径重算：**每轮的瓶颈首先在主机侧，不在 GPU**（Round 98）
+把 §25.7 的四个计数器按「每轮」摊开（draft 556 次 process_ubatch / 288 轮 = 每轮约 2 次；target 294 / 288 ≈ 1 次）：
+
+| 每轮主机侧开销 | target | draft | 合计 |
+|---|---:|---:|---:|
+| `graph_compute` 内（`[RT]` 的 `enqueue_us`；**异步提交窗口，不是 GPU 时间**） | 20.7 ms | **10.8 ms** | **31.5 ms** |
+| `alloc_graph`（sched 分配） | 2.25 ms | **3.62 ms** | **5.9 ms** |
+| `build_graph` | 0.15 ms | 0.25 ms | 0.4 ms |
+| 合计 | 23.1 ms | 14.7 ms | **约 37 ms** |
+
+- 而 `draft_decode`（`llama_decode(ctx_dft)` 墙钟）是 **13.60 ms/轮**，与上表 draft 的 14.7 ms 基本相等
+  => **draft 的 13.6 ms 几乎全是主机时间，不是 GPU 在算**（此前一直按「draft 前向慢」理解，方向错了）。
+- 每轮 GPU 侧工作量级约 30 ms（§18.9 的权重流 + AR + M8 增量），主机侧约 37 ms，实测轮时 56 ms
+  => 两者**重叠得很差**，主机路径至少与 GPU 路径一样大。与 AGENTS §1「本项目的瓶颈恰恰在主机侧」一致。
+- **这直接改写优先级**：省「主机侧每次提交 / 每次分配」比省 GPU 上的算子更有价值。
+  1cat 的整轮 fullgraph（一次图启动，替代我们每轮 417 次 `graph_compute` + 556 次 sched rebuild）正是打这个的；
+  P-A 的真正内容也应是**合并 139 个切图边界**（减少提交次数），而不是「AR 从 53 us 降到 25 us」。
+- ⚠️ 口径沿革：旧账本（§18.9，闭合到 56.6 ms）把 13.6 ms 记成「draft 前向」、7.3 ms 记成「AR」；
+  本节给的是**主机/GPU 二分**口径，两者不冲突但**不能相加**（`enqueue_us` 与 GPU 时间重叠）。
+
 
 
 
