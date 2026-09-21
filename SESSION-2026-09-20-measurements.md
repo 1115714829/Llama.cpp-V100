@@ -814,6 +814,38 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 | 图 rebuild 比例 | 178/367 = 48% | 179/357 = 50% | 24/294 = 8% |
 | alloc_us（含 prefill） | 4472 ms / 367 轮 | 4246 ms / 357 轮 | 2.44 ms/轮（纯解码） |
 
+## §19 A2/A3 共同根因已定位（一个修法打两个目标）—— 2026-09-21
+
+### 19.1 证据（源码核实）
+
+1. **图的复用被 head 卡住**：`src/llama-graph.cpp:345-361` `llm_graph_input_rs::can_reuse()` 里
+   `res &= head == mctx->get_head();`（`:357`）=> **只要滚动 head 变了，递归状态输入就不能复用** =>
+   上层 `alloc_graph` 只能重建图（`rebuild` 计数上升、`alloc_splits` 变贵）。
+2. **head 被编进图的写入路径**：`src/models/delta-net-base.cpp:491-493` 与 `:515-518`
+   用 `ggml_view_2d(ctx0, conv_states_all, row_count, n_seqs, nb[1], (s_slot*mem_size + kv_head) * row_size)`
+   作为 conv/state 的写入目标 => **视图的数据指针随 head 变化** => 图指纹（节点指针/视图）每次都不同 => 重建。
+3. **修法所需的机制已存在**：`llm_graph_input_rs::set_input()`（`:329-343`）已经在做"**每次调用把值写进设备张量**"
+   （它现在只用于 `s_copy` 的行索引）=> 把写入改成**索引式**（`ggml_set_rows` 路线，KV cache 已有同样用法
+   `src/llama-kv-cache.cpp:1318-1350`）后，图里只留下**固定的张量**，head 只在 `set_input` 里改**索引值** =>
+   图可跨轮复用（`can_reuse` 去掉 head 依赖，改为比较索引张量的形状）。
+
+### 19.2 为什么值得做（两个目标一次拿下）
+
+| 目标 | 现状（实测） | 预期 |
+|---|---|---|
+| **prefill / TTFT**（长上下文，§17.1.0） | 64K prefill 39.25 s，其中 `alloc_us` 合计 8.0 s（约 20%）；rebuild 与分块数吻合（312 块 -> 329 次） | **-15~20% prefill 时间**（256K 时 TTFT 293 s 量级同比例） |
+| **draft 侧每轮图管理**（主指标） | draft 13.0-14.6 ms/轮，`reuse=0 / rebuild≈269`（rule 20 的结构性事实） | 若 draft 的递归状态同样依赖 head，则**每轮可省 8-12 ms**（=> 57.6 -> 约 46-50 ms/轮） |
+
+=> **A2 与 A3 是同一个修法的两面**，优先级仅次于 A1（AR）。
+
+### 19.3 改动面（估计，开工前先小步验证）
+
+- `src/models/delta-net-base.cpp`：conv/state 写入改索引式（新增一个小索引张量，或在现有 rs 输入里加一路）。
+- `src/llama-graph.cpp`：`llm_graph_input_rs` 增索引张量、`can_reuse` 去掉 head 依赖、`set_input` 写入索引值。
+- `src/llama-memory-recurrent.*`：暴露 `s_copy`/`head` 的索引语义（让主机侧能填索引值）。
+- 验证判据：**同配置 greedy sha256 逐位不变**（本改动不应改变数值，只改变图的结构复用）+
+  `rebuild`/`alloc_us` 显著下降 + ms/轮下降 + AL 不劣化。
+
 ## §18 A1 工作流（AR 结构性改造）已启动：设备侧 push AR 小样
 
 **工件**（2026-09-21，Round 46）：
@@ -850,6 +882,28 @@ P0 阶段用 llama-bench 得到"f16 KV 优于 q8_0"（32K prefill +3.2% / decode
 3. **GPU 侧在役尺寸（160 KB）只是打平**（37-48 vs 37 us），1 MB 时 NCCL 更快（55 vs 93）=> **R1 单独不够**。
 4. 1cat 的 18 us/次是**图内**数字（设备端等待，无主机 gap；`custom_all_reduce.cuh:1944-1955` 只在 capture 时启用 push kernel）。
    => **R1（主机侧更便宜）预期 +5~12%；要拿满必须 R2（入图）**，而 R2 需要元后端不在 AR 处切图（上游架构级，风险高，需用户批准）。
+
+### 18.3 A1 集成已落地（env 门控，默认行为不变）
+
+**改动（三个文件，全部在 `llama.cpp/` 内，ASCII）**：
+- `ggml/src/ggml-cuda/allreduce.cuh`：新增不透明类型与三个接口
+  `ggml_cuda_ar_device_{init,free,allreduce}`（与既有 `ggml_cuda_ar_pipeline_*` 同风格）。
+- `ggml/src/ggml-cuda/allreduce.cu`：新增**设备侧 push AllReduce**（小样 v2 协议原样搬入）
+  - `ggml_cuda_ar_dev_push_kernel`：块 k 把本块 chunk 发布到每个对端（peer access），逐块 flag（`atomicExch(write) + volatile read(spin)`），
+    块 k 只等对端块 k；**无网格级屏障**；自旋上限 `1<<22` 且超时计入 `err`。
+  - slot/epoch：`SLOTS=4`，`slot = (epoch-1) % 4`，flag 比较 `>= epoch`，epoch 单调递增 => **跨迭代复用安全**（小样已 1000 轮验证）。
+  - 容量 `cap = 262144` floats/分片（1 MiB）：**超过容量的调用返回 false**，交给常规实现（=> prefill 的大张量仍走 NCCL/BF16 路径）。
+  - 只接受 **F32 + 连续 + 同元素数** 的张量，非 `GGML_TENSOR_FLAG_COMPUTE` 的分片发布 0（与 NCCL 路径的 memset 语义等价）。
+- `ggml/src/ggml-cuda/ggml-cuda.cu`：`comm_context` 加 `ar_device` 字段、析构释放、
+  `ggml_backend_cuda_comm_init_device()`（**只在 `GGML_CUDA_AR_DEVICE` 存在时启用**）+ `try_allreduce_device`，
+  并在 `comm_init_nccl` 开头尝试；失败则照旧回退 NCCL => **未设 env 时行为与上游逐位相同**。
+
+**验收口径（重要）**：本改动**改变归约顺序** => greedy sha256 会变（与 §16 的 KV dtype 同理），
+因此**不能用逐位 sha256 做门**；按 goal 验收标准 3 对本类改动用：**AL 不劣化 + 每配置 >=2 臂 + 报 ms/轮**，
+外加"sha256 在同配置内可复现"作为稳定性检查。
+
+**待跑**：`build-instr` 编译（`/tmp/ardev-build.log`）-> 冒烟（`GGML_CUDA_AR_DEVICE=1` 起服务、看 `[AR] ar_us_avg` 是否从 68-95 us 下降）
+-> 正式 A/B（关/开各 >=2 臂，drop_caches，报 AL 与 ms/轮）。
 
 ### 18.1 子代理取证：1cat 的 allreduce **确实在捕获图内**（回答 R1/R2 取舍）
 
