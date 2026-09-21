@@ -1657,6 +1657,20 @@ target 序列 `1 0 0 1 1 1 1 1 1 1 1 1 1 0 0 1 1 1 1 1 1 1 1 1`（长串停在�
      所以属性抖动不仅让当次退化成 direct，还**顺带废掉下一次**的机会 => 约 17,000 次抖动 = 约 17,345 次 direct。
    - 探针打印的 `uid` 在持续变大（`#15000 uid=18636`、`#16000 uid=19628`、`#17000 uid=20843`）=> 与 **PR #25406 指出的 `split_graph` 每次重切都重新分配 uid** 完全一致（§25.9 ④）。
    - 折算：**约 21 次属性变更/次 meta 调用**、约 **59 次/轮**。
+   - **★★ 因果链已闭合（Round 110，读 `ggml-cuda.cu:2743-2776`）**：`ggml_cuda_graph_update_required` 有一条 uid 快路径 ——
+     ```cpp
+     if (cgraph->uid != 0 && cgraph->uid == graph->uid) { return false; }   // 2749-2754：uid 没变 => 不算属性变化
+     graph->uid = cgraph->uid;                                             // 2756
+     for (i < n_nodes) { memcpy(&prop.node, cgraph->nodes[i], sizeof(ggml_tensor)); ...memcmp... }  // 2764-2776
+     ```
+     而 `split_graph` **每次重切都给 split 重新分配 uid**（PR #25406，§25.9 ④）=> **uid 快路径打不中，只能走 O(n) 全量 memcmp**；
+     而 memcmp 比的是整个 `ggml_tensor` 结构体（含 `data` 指针）=> sched 重分配一移动指针，memcmp 就必然不等 => `properties_changed = true`。
+   - **完整链条**：`process_ubatch` 重建图（draft **每次**、target 24 次）-> `alloc_graph` -> `split_graph` 重发 uid
+     -> uid 快路径失效 -> 全量 memcmp -> 指针已变 -> 属性变化 -> **direct 执行 + `warmup_complete=false`**（下一次还要再稳定两次）。
+   - **这条链把两个我以为无关的结论合并了**：
+     **P-B（draft 每次重建图）与 P-E（14% direct）是同一个根因** —— draft 的 `reuse=0` 不只是花掉 3.6 ms 的 alloc，
+     它还在每轮制造大量 uid 变化 => 属性抖动 => direct。**修掉 draft 的重建，同时打两个目标。**
+   - 注意上限：即使 uid 稳定（PR #25406 的做法），**步骤 5 的指针移动仍会让 memcmp 不等**，所以还需要分配稳定（静态形状/不重分配）。
    - **下一步确切动作**：给 `ggml_cuda_graph_update_required` 的逐节点比较加 env 门控（`GGML_CUDA_DIRECT_DEBUG`），
      打出「是哪个 tensor 的哪一项属性变了（旧值/新值）」，按频次排序 —— 这决定是能靠“稳定指针/形状”消除，还是必须走静态形状。
    下一版探针要修：`ggml-cuda.cu:4740` 的打印条件是 `g_calls % 256 == 0`，长跑里应该会打；没打出来说明该分支没走到或 `gdbg_t0 == 0`，需查清后再测。
