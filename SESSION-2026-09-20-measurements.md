@@ -1537,7 +1537,49 @@ split 未变时保留旧 uid，用「op/type/ne/nb/data/view/op_params/sources/f
 两者的共同短板：**交替形状时指纹/uid 也在交替 ⇒ 都打不中**。这正是 draft 的处境（target 每轮 1 次调用所以能中）。
 => 若要继续这条线，正确做法是**把「按指纹缓存」从 1 份扩成 2 份**（对应两个槽），而不是改 `gf_res_prev_active`。
 
-**⑤ 方法教训（写进纪律）**：否定一个自己的修法之前，**先查上游 PR / issue**。本次若先查，可以省掉一轮的自行推导，
+**⑤ 方法教训（写进纪律）**：否定一个自己的修法之前，**先查上游 PR / issue**。
+
+##### 25.9.1 #28549 的完整 diff 已取回（Round 101）——`reuse=0` 是**上游设计的预期行为**
+用 `https://api.github.com/repos/ggml-org/llama.cpp/pulls/28549/files` 取到全文，与我们的树**逐字一致**。关键三处：
+```cpp
+// llama-context.h
+-    llm_graph_result_ptr gf_res_prev;
++    // Separate arenas give batches with and without outputs distinct CUDA graph cache keys.
++    std::array<llm_graph_result_ptr, 2> gf_res_prev;
++    llm_graph_result * gf_res_prev_active = nullptr;
+```
+```cpp
+// llama-context.cpp: get_gf_res_prev()  —— 这就是 #28549 新增的函数
++llm_graph_result * llama_context::get_gf_res_prev() {
++    auto & res = gf_res_prev[n_outputs > 0];
++    if (!res) { res.reset(new llm_graph_result(gf_res_reserve->get_max_nodes())); }
++    return res.get();
++}
+```
+```cpp
+// llama-context.cpp: process_ubatch —— 复用条件里显式加了 active 判定
+-    auto * res = gf_res_prev.get();
++    auto * res = get_gf_res_prev();
+-    if (!graph_reuse_disable && res->can_reuse(gparams)) {
++    if (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) {
+     } else {
++        gf_res_prev_active = nullptr;
+         ... rebuild ...
++        gf_res_prev_active = res;
+```
+
+**结论（本轮定论）**：
+1. `gf_res_prev_active` 这个单指针**是 #28549 自己加的**（不是历史遗留），它的作用就是「只允许复用当前在 sched 里已分配的那张图」。
+2. 因此**「两个槽严格交替」与「复用」在 #28549 的设计里天然互斥** —— draft `reuse=0` 是**预期行为**，不是回归、不是 bug。
+3. #28549 用「放弃 sched 级复用」换「CUDA 图缓存键稳定」，其收益自述只有 **RTX 5090 + MTP3 上 4-5%**；
+   我们因此**不能指望在这条线上拿到大收益**：draft 侧可回收的上限就是 `alloc_us`（3.62 ms/轮）+ `build_us`（0.25 ms/轮）。
+4. 主线 Round 98 判「路线 A（把 active 改成按槽数组）不安全」**与 #28549 的设计意图完全一致**，该判定维持。
+
+**由此收敛出的唯一低风险改法（记录待评估，本轮不动手）**：
+给 **draft 上下文**配**两份 sched**（`sched` 按 `n_outputs > 0` 选），这样两个槽各自保持「已分配」，`gf_res_prev_active` 的语义不变。
+风险画像与给 target 做同样的事**完全不同**：draft 只有 5 层 / 1.14 GB，多一份 compute arena 的代价很小；
+而 target 的权重已占 7.3 GB/卡（16 GB 卡），不能这么干。
+收益上限约 **1.8-3.9 ms/轮**（取决于注入步形状是否稳定）=> 约 3-7%，**不足以单独解决问题**，但如果 META 探针显示 sched 路径确实值这个钱，它可以作为组合拳的一项。本次若先查，可以省掉一轮的自行推导，
 而且能直接拿到 #28549/#25406 这两个已成文的设计与验证方法。
 
 #### 25.8 ★★ 口径重算：**每轮的瓶颈首先在主机侧，不在 GPU**（Round 98）
