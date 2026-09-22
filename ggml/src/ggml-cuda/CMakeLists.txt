@@ -120,6 +120,11 @@ if (CUDAToolkit_FOUND)
                              ${GGML_SOURCES_CUDA}
                             )
 
+    # sm70 vendor headers (cute/cutlass) resolve includes relative to this root
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sm70-vendor")
+        target_include_directories(ggml-cuda PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/sm70-vendor")
+    endif()
+
     if (GGML_CUDA_GRAPHS)
         add_compile_definitions(GGML_CUDA_USE_GRAPHS)
     endif()
