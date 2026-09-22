@@ -1,4 +1,35 @@
 # HANDOFF — llama.cpp V100 / SM70 专项优化项目交接
+> ## ★★ 最新定格（2026-09-21 Round 197-199 —— 优先读这段；下面 Round 169 的定格已被部分改写）
+>
+> **当前基准 B2（已采用，记在 `BASELINE-LEDGER.md`）**：tg **100.95 / 88.30 / 129.12**，AL 5.55/4.22/6.38，**ms/轮 54.98/47.79/49.41（均 50.73；同配置复现 50.78-51.33，离散约 1%）**。
+> = B1（9 个自建 commit）**+ FGC = meta 整调用单图捕获**（env `GGML_META_FULLGRAPH=1`；`[META] sub/call 47.6 -> 3.2`、`total 9.64 -> 3.87 ms/call`；四臂同源 ABBA，sha256 门 `f3edac19...` 未破，两特性臂差 0.02%）。
+>
+> **E16 轮时拆解（零改码实测 `LLAMA_ROUND_TIMING_SYNC=1`，账目闭合）**：
+> target 阶段 **36.86 ms/轮**（主机 enqueue 8.40 + **GPU 28.44**）+ draft 6.13 + selector 5.16 + 其余约 2.5 = **50.65 ≈ 实测轮时**。
+> ⇒ **AL 5.55 下的地板 = 42.2 ms ⇒ tg 上界 132**（即使主机时间全部消失）⇒ 150 t/s 只能靠**砍 target GPU 的 28.44** 或**抬 AL**。
+> ⇒ 加 sync 只让轮时贵 0.4 ms ⇒ 目标 GPU 本来就不与别的工作重叠（「靠重叠隐藏」不是选项）。
+>
+> **本轮否证（灰色名单，不得重走）**
+> - **TP4（FGC 后重测）**：均值 ms/轮 51.86/51.90 vs TP3 50.86/50.91（慢 2%），AL 还掉 ⇒ 权重/卡 9.68 -> 7.25 GB **没买到 target 时间**。
+> - **RBSKIP（指针指纹跳过 meta rebuild）**：控制 50.79/50.78 vs 特性 **51.94/51.81（慢 2.3%）**，scheduler alloc 反而 +11% ⇒ 代码保留但两个 env 必须保持不设。
+> - **Q4_K_M（E14）**：每轮反而更长（58.6 vs 55.8 ms）、AL 5.55 -> 4.55 ⇒ k-quant 在 Volta 上每字节 GPU 时间更多，**权重字节不是约束**。
+> - **草稿块扩展（n_max 14/15）**：target 首次 decode 即 `ggml.c:1805 GGML_ASSERT(obj_new)`（固定 arena 耗尽）⇒ 与 E6 五次 abort 同源；抬高 AL 这条路目前被 arena 卡住。
+> - **TP6 结构性不可用**（4 个 KV 头无法 6 分）；**延迟 AR / 设备端 AR** 见 E10/E11。
+>
+> **下一步（按赔率排序）**：① target GPU 28.44 的构成（带宽约 22 + 每个 verify token 约 1.24 ms 计算）⇒ 只有张量核 / 更快的 Q8 内核能动它；
+> ② 一轮串**两块草稿**（8+8 = 16 verify，仍只 1 次 target 前向）把 AL 抬到约 9 —— 需改 `common/speculative.cpp`（约 100 行）并绕开上面的 arena 限制；
+> ③ 串行链残余：target 主机 8.40 + draft 6.13 + selector 5.16 ≈ 20 ms。
+> ⚠️ **「438 GB/s / 权重流 40%」的旧口径要修正**：22.07 ms/token 里含固定开销（AR 边界 + 注意力 + 主机重叠），不能整笔算成权重流。
+>
+> R200-R204 补充（最新，先看这段）：FGC 收益已独立复现（非 FGC 54.33 vs FGC 50.91-51.20 ms/轮，-6.3%）=> 基准 B2 均值 ms/轮 50.9-51.2。
+> 逐算子表（真实形状，CUDA0）：解码 MUL_MAT n=1 达 678-820 GB/s（峰值 900 的 76-91%）=> 解码矩阵乘已无内核空间；
+> FLASH_ATTN_EXT（D=256/24头/n_q=512）= 108972 us、11.7 GB/s 属病态 => 预填充（第二大缺口 2162 vs 3567-4069）主嫌疑。
+> 捕获路径拆解：sig 0.103 / fgrun 0.272 / fgcap 0.442 / loop 2.798 / prologue 1.118 ms/call。capture-first 不采用（-0.4%，噪声内）。
+> TP5/TP6 用 FGC+sync 探针重测：target 阶段 TP3 37.2 / TP5 41.0 / TP6 43.4-47.5 ms => 加卡仍不买时间。
+> 草稿模型：我们用的就是官方 z-lab 的 Q4_K_M（字节数吻合），官方评测其 AL 最高（5.39 vs Q8_0 5.13 / BF16 5.28）=> 没搞错，不建议换。
+> 陷阱：GGML_META_FULLGRAPH=0 也会开启功能（getenv 只看存在不看值），要关就完全不设。
+> 提交：e05cc362e / 0383248ca / 6c4452462。
+>> **现场**：`libdir-instr` = FGC 构建（`libllama-common.so 306441226d9ff1dbe374093dcbfedad5`、`libggml-base.so b1751a8b4fa3d99d336e560b4e9b00fd`、`libggml-cuda.so ea09324fd031ee676c020d2552bcb13e`）；实验 env 全不设时即 B2。本地未提交改动已存档 `wip-fullgraph.patch`（4 文件）。
 > ## ★ 最新定格（2026-09-21 Round 169 - 读这一段就够）
 >
 > **目标（用户重申）**：tg **>= 150 T/s**（= AL 5.55 下 **ms/轮 <= 37.0**，现 55.5）；180 / ~20 ms 是上界；对标 1cat 17.463 ms/轮。**报数必须 tg 与 ms/轮 并列**。

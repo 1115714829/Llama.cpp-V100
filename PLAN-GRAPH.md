@@ -122,6 +122,9 @@ flowchart TD
     N5["N5 P2-6 RMS_NORM+SCALE 融合<br/>去~480次launch"]:::todo
     N6["N6a metadata 缓存本身<br/>R149: 只值 -2~-3 ms (仅省 prologue)"]:::todo
     N6B["N6b ★形状稳定化(GDN 递归状态视图构造)<br/>R149: 它才决定 -7~-9 ms 能否兑现<br/>= N6a 的使能项"]:::next
+    E4V["✗ E4 判决 (R180): draft 图 0% 复用是【结构性】的, 不是 bug<br/>三道门**任一**即判 0%: (1) res = gf_res_prev[n_outputs>0] 两槽, 但<br/>gf_res_prev_active 只有**一根**裸指针 (llama-context.h:374)<br/>=> 注入(logits 全 false, 槽0) 与块(logits=true, 槽1) 交替 = 每次换图;<br/>(2) allow_reuse (llama-graph.h:827-831) 明确禁止 token/embd 互斥<br/>(注入只带 embd, 块只带 token); (3) n_tokens 不等 (8.86 变 vs 8.00)<br/>否证: 按槽位各记 active 也救不了 -- sched 只有单份缓冲, miss 路径<br/>sched_reset(:1405) 已把另一张图的分配释放成悬垂<br/>=> 『让 draft 图可复用 = 潜在 ~15 ms/轮』**该奖赏不存在**<br/>那 7.4 ms/轮 (alloc 1.9 + enqueue 5.5) = 每轮必须重建两张图的代价<br/>唯一可动形态 = 每轮 2 次 decode 合成 1 次 (fused, spec.cpp:1396)<br/>≈ -3.7 ms/轮 (53.6 -> ~50, tg 97 -> ~104), 不是 7.4<br/>target 的 92% 由同一机制解释(每轮一次, 形状恒定) => 0%/92% 同源"]:::no
+    E5V["★★ E5 实测 (R182-183): meta 主机账被改写 + 唯一够本的款子<br/>口径更正: [META] 打的是**累计均值**, 前 ~2000 次 compute 全是 prefill 且全 direct<br/>=> R174 的 total 21.28 / dev 17.44 **作废**; 稳态实测 **total 10.66 / dev 7.19 ms/call**<br/>sub/call=47.5, ar/call=46.5, 149 compute/call; 每次 AR 47.7us<br/>[GRAPH] 稳态: **replay 85.4% / direct 12.6% / capture 2.0%**; props changed >=17000 (13.7%) 与 direct 一一对应<br/>成本模型: 125x30us + 20.6x281us + 3.4x300us = 10.56 vs 实测 10.66 ms/call (吻合)<br/>=> **direct 20.6 次 x 281us = 5.8 ms/call x 3.27 decode/轮 = 19 ms/轮** (53.6 -> ~34.6, **tg ~150**)<br/>决定性一行: prop diff #712000 node=node_0 MUL_MAT new_ne=[5120,1] **old_ne=[5120,38]**<br/>= **同一个 CUDA 图 key 被两种形状轮流使用** = 上游 **#28652** 标题逐字对应<br/>832 meta calls ~= 850 decode => **target 与 draft 共用同一个 meta 后端上下文**"]:::hot
+    E6V["E6 判决 (R185-186): direct 的根因 + 一次失败<br/>[FPSTAT] 实测 832 calls: same_as_prev=0 distinct=24 max_count=266<br/>=> N6a 的单槽(紧邻一次)缓存**结构上永不命中** (追溯解释它实测无效)<br/>=> 图内容只有 24 种, 最高频占 32% => 多槽/内容感知轮转**理论上能兑现**<br/>对照可复现性: e6c0a/e6c0b tg **96.46/96.45 (差 0.01%)**, FPSTAT 逐位相同<br/>x 三个变体全部 abort: ggml-backend-meta.cpp:2144 GGML_ASSERT(bcj.nodes[i])<br/>(1)fp%N 选槽+命中不 reset (2)再加立即提交 stc_compute_index (3)保留无条件 reset 只改槽位<br/>=&gt; **否证: stc_compute 索引不可自由重选** (buffer_simple_tensor 依赖<br/>per-container 状态; 提交点在 :1332 另一个函数)<br/>下一手: 内容感知 2 路轮转(索引永在 {0,1}, 不跳 reset) env GGML_META_FP_SLOTS<br/>WIP 存档 wip-slot-cache.patch; 机器已还原(libdir-instr = libdir-c0)"]:::warn
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%<br/>⚠️ R159: ninfer 那个 op **不是 drop-in** ——<br/>它的契约是「路径选择」(predecessor/successor<br/>codebook 的 K 步链, candidate_ids+unary_scores<br/>+projected_hidden, 16 候选), 与我们的<br/>CPU selector 语义不同 => 需要先做语义映射"]:::todo
     N8["N8-vec GQA read-once —— **R165 同源斜率否定**<br/>6 遍冗余同样没有变成 DRAM 流量<br/>（与 N8T 同因：L2 吸收）"]:::no
     N8T["N8T TILE ncols2 2->3/6 —— **R165 实测否定**<br/>同源斜率 0.070/0.094 us/ctx-token<br/>= 等价于 KV 只读 1 遍 @435 GB/s<br/>=> 指令级的 3 遍/6 遍**没有落到 DRAM**<br/>（L2 吸收了冗余）=> 做它收益约 0<br/>配方仍留档于 §3.6（issue #28761 约束 ncols<=32）"]:::no
@@ -187,6 +190,105 @@ flowchart TD
   E1 ==>|图内 AR 才可能| N11
   E2 ==>|图安全前置| N11
   E3 ==>|先搞清哪些字段在变| N11
+    E4V ==>|否证 draft 侧复用; 只剩 fused 一条| N11
+    E5V ==>|19 ms/轮: 候选 A 多槽 / 候选 B 形状敏感 key| N11
+    E6V ==>|判据已实测; 实现待解容器契约| N6B
+    E7V["x E7 判决 (R189): 形状敏感 CUDA 图 key -- 机制成立, 性能为零<br/>四臂同源 A/B (env GGML_CUDA_GRAPH_KEY_SHAPE, 只动 ggml-cuda.cu)<br/>**direct 17345 -&gt; 13806/13811 (-20.4%)**, replay +3.6% (机制与诊断逐项吻合)<br/>**但 tg: C0 均值 97.40 vs 特性均值 97.31 (-0.09%, 噪声内)**, ms/轮 56.8 vs 57.0<br/>=&gt; 删掉约 1 s 主机工作(臂时 6.8%)**一点没省**<br/>=&gt; **撤销 E5 的 direct =&gt; 19 ms/轮**; 计数器增减不能当墙钟代理<br/>=&gt; 新纪律: 不得再从'省主机时间'推收益; 主机侧改动必须同臂量边际<br/>不采用 (有 +0.7us/compute 与图对象代价); 以该前提为依据的结构性改动同时停<br/>上游坐标: #28652(OPEN) / #28666(关未并, 唯一改 key 的尝试)"]:::no
+    E7V -.->|否证: direct 不在关键路径| E6V
+    E7V ==>|新判据: 关键路径是主机还是 GPU?| SPIN["SPIN 判定实验 (已结清, 见 E8V)"]:::ok
+    E8V["★★ E8 判决 (R191): 主机时间在关键路径上 -- 拿到标定杠杆<br/>四臂同源: spin=0 vs spin=3000us (GGML_META_HOST_SPIN_US)<br/>p1 5262.5 -&gt; 5762.8/5748.0 ms; p2 6486/6488 -&gt; 7143/7147; p3 2718.8/2716.6 -&gt; 3005.1/2980.4<br/>**对照两臂差 0.001%**; 四臂 sha256 f3edac19... 全一致<br/>=&gt; ms/轮 +5.4/+5.5/+5.7 (注入 9.9) =&gt; **穿透率约 55%**<br/>=&gt; **每 1 ms/call 主机时间 约等于 1.8 ms/轮**<br/>=&gt; 要到 37.0 ms/轮 需砍约 11 ms/call, 而总共只有 10.66 =&gt; **必须几乎砍光**<br/>=&gt; 与 E7 不矛盾: direct 只是主机时间一小块 => 关键是那 10.66 是什么"]:::hot
+    E8V ==>|把 10.66 拆成三块| E9V
+    E8V -.->|否证: 计数器增减不是墙钟代理 (E7)| E7V
+    E9V["★★ E9 判决 (R192, 见 E9-DEV-BREAKDOWN.md): dev 拆分<br/>两臂同源 (dev1/dev2, 8281/8282), MEDIAN_TG 97.81/97.09, sha256 门未破<br/>**dev 三卡完全对称**: dev0=2.441 dev1=2.290 dev2=2.292 ms/call (不是掉队卡)<br/>每次 compute (n=118884, 142.9 次/call): min 6 / **中位 24** / max 16367 us<br/>**双峰**: &lt;20us 43% + 20-60us 43% = **86% 便宜**; **&gt;150us 占 11.7% (13963 次)**<br/>反解: 长尾吃掉约 3.1 s (53%), 均值约 224 us/次<br/>**11.7% &gt;150us 与 [GRAPH] 的 12.6% direct 精确对应** =&gt; direct 单价约 224 us (原估 281 基本正确)<br/>但 E7 删 20% direct 零收益 =&gt; **长尾被 GPU 重叠吃掉** (E8 那 45% 未穿透的来源)<br/>=&gt; **靠 replay 治长尾不可靠; 减固定次数才直接命中 86% 主体**<br/>折算(1.8x): 主体&lt;60us 2.4 ms/call =&gt; ~4.4 ms/轮; ar 2.21 =&gt; ~4.0; prologue 1.25 =&gt; ~2.25"]:::hot
+    E9V ==>|优先级 1: 减子图数/合并切分| N11
+    E9V ==>|优先级 2: 图内 AR (46.5 次主机启动消失)| E1
+    E9V ==>|优先级 3: prologue 重建| N6B
+    E9V -.->|不可靠: replay 治长尾| E7V
+    E10V["x E10 判决 (R195, 子代理 b7316892): 延迟 AllReduce (GGML_META_DELAY_AR) 在本负载上【结构上不可能】<br/>[DLY] 探针实测: target call **n=4950 节点 / 129 个 PARTIAL 边界**, 269/269 **del=0**<br/>linear_attn_out-N gap=8 首消费者 RESHAPE; attn_output-N gap=7 首消费者 ADD; ffn_out-N gap=78/44 首消费者 ADD<br/>draft call n=648 / 11 边界 / uses=3 / del=0; result_output uc=0 在末尾<br/>=&gt; 被归约的值永远被紧邻的下一个节点消费 =&gt; 连上游 MoE 折叠 get_i_delayed (2104-2258) 也从不触发<br/>=&gt; 依赖条件: 唯一 use + 该 use 是求和 ADD + 中间节点 MIRRORED 安全; 且折叠只能折进那个 sum 自己的 AR<br/>=&gt; **优先级 1 (减子图数/合并切分) 用上游现成机制走不通**; 源码已还原 md5 9dbb5135e8eaf057f9e58c2fcd44a9b1"]:::no
+    E11V["x E11 判决 (R195, 复核 /tmp/g4-ab.log + /tmp/aron.log): 设备端/内部 AllReduce 路线【死】<br/>g4-ab ARM-A (NCCL): tg=98.12 AL=5.55 ar_us_avg=53.0 **sha256 f3edac19... = 门值**<br/>g4-ab ARM-B (device AR): tg=94.45 ar_us_avg=61.5 (timed 14645 vs 20193) **sha256 69207026... 门破**<br/>aron (device-side push AR enabled): tg=89.80 **sha256 69207026... 门破**, 且 aroff2 对照臂 LAUNCH_FAILED<br/>=&gt; 既更慢又改变数值 =&gt; 不采用; 单次 AR 的 47.7us 压不动, 而次数已被 E10 证明减不动"]:::no
+    E9V -.->|优先级 1 的现成机制已否证| E10V
+    E9V -.->|优先级 2 的一半已否证| E11V
+    FGC["★★★ FGC (R196-R197 **已上机, 采用**): meta 整调用单图捕获 = 1cat fullgraph 路线 -> 见 BASELINE-LEDGER B2<br/>**同源四臂 ABBA (唯一变量 env GGML_META_FULLGRAPH): 均值 ms/轮 54.35/54.14 -> 50.73/50.72 (-6.5%)**<br/>tg p1/p2/p3 = 99.83/80.59/115.78 -> 100.95/88.30/129.12 (p2 +9.6%, p3 +11.5%); 四臂 sha256 f3edac19... 全一致<br/>机制: [META] sub/call 47.6->3.2, ar/call 46.6->3.2, total 9.64->3.87, dev 6.30->1.40, ar 2.21->0.33 ms/call<br/>[RT] target enqueue 18.34->8.68 ms/轮; draft enqueue+alloc 5.42->1.70 ms/轮<br/>但**穿透率只有约 25%** (主机少 14 ms/轮, 轮时只少 3.6) => 轮时已被别的东西占住<br/>实测结构 (读 ggml-backend-meta.cpp:2520-2581 + [DLY]/[RT]): **target 一次调用 = 130 子图 x 3 卡 = 390 次图启动 + 129 次 NCCL AR**<br/>=&gt; 主机账本: target enqueue **18.8-20.7 ms/轮** (6074133/294) + draft 2 次调用 **7.5 ms/轮** (含 alloc 1.8 + build 0.12)<br/>若整调用捕获成每卡 1 张图: 主机 26 ms/轮 =&gt; ~0.1 ms/轮, 且 AR 进图后 GPU 侧启动延迟也消失<br/>难点: 指针必须跨调用稳定 (draft 556/556 rebuild = 每轮都换) + NCCL 必须在 capture 内可用 + 需抑制 CUDA 后端自身的 per-subgraph 捕获<br/>待判: GPU 真实忙碌率 (UTIL 臂在飞) -- 它决定天花板"]:::hot
+    E10V ==>|优先级 1/2 都走不通 =&gt; 换层面| FGC
+    E11V ==>|同上: 不能再靠改 AR 实现| FGC
+    UTIL["★★ R196 实测 (nvidia-smi 100ms 采样 + 活动窗口对齐, 见 /tmp/ut.log + /tmp/util-*.csv): **主机是限流项**<br/>**无投机臂 (SPEC=--spec-type none): 时序几乎全是 &gt;=55% =&gt; GPU 约 95% 忙碌**, MEDIAN_TG 44.92 (22.26 ms/token)<br/>=&gt; 22.07 ms/token 与 438 GB/s 是**真实 GPU 工作**, 不是主机假象 (438/权重流 40% 的两阶段诊断仍成立)<br/>**投机臂 (ut1/q8c): 时序里大量 30-55% 与空隙 =&gt; 轮内 GPU 约 35-45% 空闲**<br/>=&gt; 55.3 ms/轮 里约 20-25 ms 是 GPU 空转 = 串行等主机 =&gt; 与 E8 的 19.2 ms/轮 定量吻合<br/>=&gt; 天花板 = GPU 忙碌约 30-33 ms/轮 =&gt; tg 上界约 168-185, **前提是主机不再挡路**"]:::hot
+    E9V ==>|先量 GPU 到底忙不忙| UTIL
+    UTIL ==>|达标路径 = 杀主机串行| FGC
+    Q4A["x Q4_K_M 目标权重臂 (R196, 同库同口径 A/B: q4a 17.11 GB vs q8c 29.05 GB, NODROP 热加载)<br/>**权重减半不但没省时间, 每轮反而更长**: ms/轮 Q4 = 60.1/56.7/59.0 (均值 58.6) vs Q8 = 57.0/53.6/56.7 (均值 55.8)<br/>AL 同时下降: Q4 = 4.55/3.81/5.62 vs Q8 = 5.55/4.22/6.38 =&gt; tg 75.72/67.14/95.29 vs 97.32/78.78/112.44<br/>GPU 忙碌率反而更高 (util-q4a 时序几乎全是 #, q8c 有大量 = 与空隙) =&gt; **Q4_K_M 每个字节的 GPU 时间更多 (k-quant 反量化在 Volta 上不划算)**<br/>=&gt; **撤销 'LOWBIT 砍一半字节 = 省 10.4-13.8 ms/轮'**; 权重流不是投机轮里的约束<br/>greedy sha256 两边都是 f3edac19... (同一门值) =&gt; 短 greedy 看不出质量差, 但 AL 掉 15-18% 是真的"]:::no
+    UTIL ==>|否证: 权重字节不是约束| Q4A
+    E16["★★★ E16 (R198, 零改码实测: LLAMA_ROUND_TIMING_SYNC=1): 轮时拆解**闭合**<br/>target ctx **sync_us/rounds = 10836496/294 = 36.86 ms/轮**, 其中 enqueue 8.40 =&gt; **GPU 28.44**<br/>draft ctx 6.13 (214601/35); selector 5.16; sampler+其余约 2.5<br/>**36.86+6.13+5.16+2.5 = 50.65 = 实测轮时 50.7 =&gt; 账目闭合**<br/>三臂同源 (SYNC 关/开/关) 50.73/51.16/50.65 =&gt; 加 sync 只贵 0.4 ms =&gt; **目标 GPU 本来就不与别的工作重叠**<br/>=&gt; **AL 5.55 地板 = 42.2 ms =&gt; tg 上界 132** (主机全部消失也不够)<br/>=&gt; 150 t/s 只有两条路: 砍 target GPU 的 28.44 (每卡字节 或 有效带宽) 或 抬 AL"]:::hot
+    FGC ==>|轮时拆解 (sync 探针)| E16
+    TP4B["x TP4 判决 (R198, FGC 之后重测, 四臂同源 ABBA, 同库同 env): **仍然不采用**<br/>tp3a/tp3b 均值 ms/轮 **50.86/50.91**; tp4a/tp4b **51.86/51.90** (慢 2%)<br/>且 AL 从 5.58/4.25/6.38 掉到 4.23/3.97/6.08; sha256 变为 ccc284e4...(换卡数必变, 同配置内两臂完全一致)<br/>★ **R217 补齐: TP5 与 TP6 的门值都是 `69207026...`** (= **原版 b11053 基线的门值**, 见 goal-phase1-findings.md:22; E11 的 device-AR 臂也落在它上面)<br/>=&gt; 三个谱系: `f3edac19...` = 改造后的树(B2,TP3) / `ccc284e4...` = TP4 与 layer split / `69207026...` = 原版基线 + device-AR + TP5/TP6<br/>R217 复现 ms/轮: **TP3 51.2 / TP4 51.6 / TP5 53.9 / TP6 60.6** =&gt; 自 TP4 起单调变差 (又一次独立复现「加卡不买时间」)<br/>=&gt; **权重/卡 9.68 -&gt; 7.25 GB 一点没买到 target 时间** = 与 E14 同源<br/>=&gt; 与 E14 合起来: **28.44 ms 不是权重带宽瓶颈** (否则 TP4 应掉到约 21)<br/>=&gt; 卡数这条路封死 (TP6 另有 4 个 KV 头无法 6 分的结构问题)"]:::no
+    ALUP["★★★ 由 E16 决定的主攻: **抬 AL** (tg 与 AL 成正比)<br/>现 AL 5.55; 1cat 的 AL 只有 4.06-5.21 却快 3 倍 =&gt; 缺口在轮时不在 AL, 但轮时已有 28.44 硬地板<br/>方案: 一轮串**两块草稿** (8+8=16 verify, 仍只 1 次 target 前向)<br/>预期 +8 verify 约 +7-10 ms, +1 草稿块约 +3 ms =&gt; AL 5.55 -&gt; 约 8.5-9.5<br/>=&gt; 轮时 62-66 =&gt; tg 约 136-161"]:::hot
+    E16 ==>|地板 = target GPU| TP4B
+    E16 ==>|另一条路| ALUP
+    HROOM["★ R200: **arena 根因定位 + 修复** (meta buffer 的 compute 容器按 16x 模型 ctx 定尺)<br/>n_max=14 时 target 首次 decode 撞 `ggml_new_object: needed 754032 &gt; available 753664`<br/>backtrace: ggml_backend_buffer_init_tensor -&gt; 容器 ctx, **只差 1 个 tensor (368 B)**; 容器总共 2048 个槽<br/>=&gt; 上游假定「每个静态 tensor 最多 16 个 view」在块变长时不成立 (选择器/GDN 的 shape 工作是 per-token 的)<br/>=&gt; 已把 headroom 改成可调 (默认 32 = 2x, env GGML_META_COMPUTE_HEADROOM) =&gt; **加长掩码块的 AL 路线重新打开**<br/>盈亏平衡 p &gt; 0.125; 第一块接受率 = 5.55/7 = 0.79 =&gt; 若 OOD 位置保持, AL 约 11 =&gt; tg 约 150-158"]:::hot
+    ALUP ==>|先解开 arena 限制| HROOM
+    BLK14["x AL 路线判决 (R201, headroom 修好后四臂同源 ABBA): **加长掩码块不划算**<br/>hr7 (8 verify): AL **5.58/4.25/6.38**, ms/轮 **55.72/48.49/49.65 (均 51.26)**, tg 中位 100.1<br/>hr14 (15 verify, n_max=14): AL **6.47/6.06/8.24** (确实涨了! OOD 掩码位置接受率 13-27%), 但 ms/轮 **78.47/70.05/70.88 (均 73.0)**, tg 中位 86.3<br/>=&gt; target 阶段 **37.01 -&gt; 55.13 ms** (sync/rounds 12735075/231) = **每 verify token 1.24 -&gt; 2.59 ms**<br/>=&gt; 盈亏平衡接受率 p &gt; 0.1009 x 2.59 = **26%**, 只有 p3 勉强够 =&gt; **三档全部不如基准**<br/>=&gt; 结论: (a) **headroom 修复有效**, 加长块能跑; (b) 去噪器确实能外推到 OOD 位置; (c) 但 **verify token 的边际代价随批量强烈超线性**, 抬 AL 买不到速度<br/>=&gt; 串草稿块同理 (同样要 16 token verify) =&gt; **AL 路线整体关闭**; 150 只能从 target GPU / 主机 / 链上砍"]:::no
+    HROOM ==>|解开后实测| BLK14
+    OPS["★★ R203 逐算子表 (test-export-graph-ops 导出真实形状 -> test-backend-ops perf --test-file, CUDA0)<br/>**解码 MUL_MAT n=1: 70-1536 us, 678-820 GB/s** =&gt; 已到 V100 峰值(900) 的 76-91%, **解码矩阵乘没有内核空间**<br/>预填 MUL_MAT n=512: 12.8 TFLOPS ≈ FP32 峰值 82%<br/>**FLASH_ATTN_EXT (D=256/24头/n_q=512): 108972 us, 11.7 GB/s = 病态 (差两个数量级)**<br/>GATED_DELTA_NET 913us (49.4 GB/s); SSM_CONV/CONCAT/SILU/RMS_NORM 55-110us (386-705 GB/s)<br/>=&gt; 与 E16 自洽: 8-token target GPU 28.44 ≈ 17.3(矩阵乘,n=8 559 GB/s) + 9.4(非矩阵乘)<br/>=&gt; **解码侧已近硬件极限; 最大的未开发矿脉在预填充的 FA n_q&gt;1** (第二大缺口 2162 vs 3567-4069)"]:::hot
+    E16 ==>|量化每一块还剩多少空间| OPS
+    HMMA["★ R207 在飞 (子代理 37e83355): **sm70 预填充 Q8_0 -> FP16 张量核 GEMM**<br/>动机 (实测): 预填充 ffn_gate (m=17408,k=5120,n=512) = 1502 us = **60.8 TFLOPS ≈ INT8 dp4a 峰值 62.8 的 97%** =&gt; 已贴 roofline<br/>而 **V100 FP16 张量核 125 TFLOPS ≈ 2x dp4a** =&gt; 这就是 1cat 预填充领先 1.65-1.88x 的来源<br/>已否证的注意力侧 (别重做): PR #27997 的 sm70 tile 配置 (-1.2% / -4.2%), KV f16 vs q8_0 (无差别)<br/>★★ **R211 路线转向 (子代理实测)**: 手写 `m8n8k4` 当前形态只有 **26.7 TFLOPS** (纯寄存器 0 spill 也是 26.7) 而 **cuBLAS 在同一颗芯片上是 103 TFLOPS** (C16F 103.0 / C32F 101.3, 用同一套 m8n8k4 指令)<br/>&gt;= 26.7 **不是指令天花板**而是**占用率** (V100 每 SM 4 个张量核, 1 warp/SM 上限约 125/4 = 31, 与实测 26.7 吻合)<br/>**⇒ 收益来自「用 cuBLAS」而非「手写 mma」** ⇒ 新形态: Q8_0 权重**逐层反量化成 FP16** -&gt; 走**已有 fp16 cuBLAS 路径**, env `GGML_CUDA_SM70_HMMA_Q8`, 只挂 `ne11&gt;=64`, 只动 `ggml-cuda.cu`<br/>⚠️ 两条硬约束: ① **16 GB 卡装不下 19.4 GB 整模型 FP16 副本** ⇒ 必须逐层复用同一块 scratch; ② **每 ubatch 重反量化一次** ⇒ `-ub 2048` 时 pp8192 付 4 次约 216 ms (6.7%), 故 A/B 要同时测 `-ub 8192`<br/>预登记期望: pp8192 **2524 -&gt; 3300-3400**, pp32768 **2165 -&gt; 2900-3100**<br/>验收: pp8192 或 pp32768 提升 &gt;=5% (>=2 臂报 ± 与 r) + 解码不回退 + sha256 门<br/>基线: pp8192 **2524.55 ± 4.63** / pp32768 **2164.72 ± 3.19** / pp8192@d100k 1031.49 ± 0.51<br/>★★ **R209 弹药已找到（见 3.2.3 / NF10）**: `v100-refs/ninfer-v100` 里有 **Volta 门控（sm_70）的 W8G32 `mma.sync.m8n8k4` 融合反量化 GEMM，而 W8G32 ≡ Q8_0**（int8 码 + 每 32 元素一个 fp16 scale）<br/>含 int8-&gt;half2 **魔数解码**（每 2 元素 2 条指令、无 int-&gt;float）、**无 ldmatrix** 的 fragment 加载器、smem 行填充 `kXPad=8`、K 循环**单 barrier**<br/>=&gt; 「q8_0 要新写 34 字节块解包分支」这条**对矩阵乘已不成立**（对注意力仍成立，见 3.2.9）；且 Large-T 版是 sm_80+（`ldmatrix`），**别往 Volta 搬**"]:::hot
+    OPS ==>|瓶颈已定量: dp4a roofline| HMMA
+    HMMA -.->|若不收敛: 全部还原并入灰色名单| OPS
+    FGCCONF["★ R204 FGC 独立复现 (本轮有一个真非-FGC 对照臂: 漏设 env)<br/>非 FGC: sub/call 47.6, total 9.66 ms/call, 均值 ms/轮 **54.33**<br/>FGC: sub/call 3.2, total 3.88, 均值 ms/轮 **50.91-51.20** =&gt; **-6.3%** (与 E15 的 -6.5% 一致)<br/>⚠️ **陷阱: GGML_META_FULLGRAPH 用 getenv()!=nullptr 判断 =&gt; 设为 0 也照样开启; 要关就完全不设**<br/>捕获路径拆解 (新计数器): sig=0.103 / fgrun=0.272 / fgcap=0.442; loop=2.798; prologue=1.118 ms/call (主要是 24 次 rebuild)"]:::ok
+    FGC ==>|复核收益| FGCCONF
+    CFIRST["x R204 capture-first (env GGML_META_CAPTURE_FIRST): **不采用**<br/>策略: !needs_rebuild 时第一次见到签名就录制, 省掉一次 plain loop<br/>四臂 ABBA: 控制 51.20/51.16 vs 特性 51.00/50.93 =&gt; **-0.4%, 落在同日噪声带 (0.7%)**<br/>=&gt; 又一次: 计数器变化 != 墙钟收益; 代码保留, env 默认不设"]:::no
+    FGCCONF ==>|下一步试: 首次即录制| CFIRST
+    CURVE["★ R214 **预填充曲线的机制变化 (新线索)**<br/>二次模型 (8K+32K 两点定) 在 **256K 上低估 2.5x**: 模型 282 s vs 实测约 708 s (370 t/s)<br/>并且**不存在任何 (a,b) 能同时拟合 8K/32K/256K** (强行拟合 256K 则 32K 差 30%)<br/>=&gt; **32K 与 256K 之间有机制变化, 最可能是注意力** (与 R203 把 FLASH_ATTN_EXT 标成病态 11.7 GB/s 同源)<br/>=&gt; 对**用户真实的 256K agent 场景**比 GEMM 更值钱; 对当前 32K 标尺注意力只占约 19%<br/>判别 (已并入子代理扫描): `-p 8192,32768,65536,131072` 看 log-log 是**平滑幂律**还是**有拐点**<br/>★★ **R215 按卡归一更正**: 1cat 的 3567-4069 是 **4 卡**, 我们全是 **3 卡** =&gt; 32K prefill 真实缺口约 **1.40x** (我们 721 t/s/卡 vs 1010-1017), **不是 1.65-1.88x**<br/>★★ **R218 翻案: 那个 256K 点是 `248901 token / 672.2 s` 的真实请求, 而 harness 启动行根本没有 `-ub` =&gt; 它跑在默认 ub=512 上; 我们的基线是 `-ub 2048`**<br/>=&gt; **「32K→256K 机制变化」的首要解释改为「ub 口径差」** (佐证: p0.log 那批也无 -ub, 其反解 b=6.58e-9 恰好是 -ub 2048 组 b=2.68e-9 的 2.5 倍, 与「低估 2.5 倍」同倍数)<br/>⚠️ 但用 ub=512 参数外推仍乐观 29% =&gt; 长上下文**还有**一个未解释项 (量级远小)<br/>★★ 现货假设 (待测): 按 -ub 2048 外推 n=248901 = **259 s (961 t/s)**, 实测 370 t/s =&gt; **对用户 256K 场景可能比 32K 的 1.4x 更值钱**; 但这是 8 倍外推, 必须实测<br/>实验: ① 长度扫描**必须锁死 `-ub 2048`**; ② **长长度 ub 对照** `-p 65536,131072` x `-ub 512/2048/8192`<br/>★ **待测 (零改码, 已派): 预填充的 TP 扩展性** —— TP3/TP4/TP6 的 pp32768 之比是否约 4/3; 明显小于 4/3 =&gt; TP 开销在吃预填充, **上 4 卡就是现货**"]:::cond
+    DEQ -.->|GEMM 之外的另一半| CURVE
+    OPS ==>|R203 的 FA 病态项| CURVE
+    DEQ["★ R213 **新主轴 A' (已派子代理): 去掉「每次 matmul 的全量反量化」**<br/>**A1** 零改码: `test-backend-ops perf -o MUL_MAT` 扫 ne11 8..2048 看 **64 处跳变** + `GGML_CUDA_CUBLAS_COMPUTE_TYPE=f32` 交叉验证<br/>**A2** 零改码 (**可能白捡**): **`-ub` 扫描** 512/2048/8192/16384 —— 反量化是**每次 matmul 的固定开销、与 n 无关** =&gt; ubatch 越大摊得越薄, 且 cuBLAS 大 n 效率更高<br/>**A3** 一行改码: env 放大 `MMQ_DP4A_MAX_BATCH_SIZE` =&gt; 预填充改走 **MMQ 融合 dp4a (不建 F16 副本)** 对打; 打平即说明反量化≈免费<br/>~~**A4** 仅在有真头寸时: 融合反量化+HMMA 内核 / F16 副本缓存~~ **← R215 已否证, 作废**<br/>★★ **R215 实测 (子代理同源 A/B, 库 md5 89fe01bd... 已变+标记串在)**: 把「Q8_0 -&gt; F16 反量化 + cuBLAS」**显式实现一遍**得 **pp8192 2523.66(控) vs 2504.18(特性) = -0.8%**, **pp32768 2163.16 vs 2153.60 = -0.4%**<br/>=&gt; **默认路径本来就是这件事** (读码已证), 重写一遍自然换不到东西<br/>★★ **R216 把代价直接量出来了 (同库同形状 m=4096,n=512,k=14336)**: f16 纯 cuBLAS **880.84 us / 68.26 TFLOPS** vs q8_0 现状 **1090.11 us / 55.16 TFLOPS** =&gt; **算子级 -19%, 即 209.3 us/call**<br/>验算: 62.4 MB 读 + 117.4 MB 写 = 179.8 MB, 按 900 GB/s 应 200 us, 实测 209 us =&gt; **有效带宽约 860 GB/s (峰值 95%) = 已在带宽墙上, 只能少做几次不能做快一点**<br/>=&gt; 端到端 (每卡 TP3, 27.9 GB/ubatch, -ub 2048 => 4 个 ubatch = 112 GB 约 124 ms) = **仅 3.8%**; `-ub 8192` 能拿回约 **2.9%** =&gt; **不足以解释 1.4x 缺口**<br/>⚠️ **撤销跨形状对比**: 「裸 cuBLAS 103 vs 现状 60.8」是两个形状 (n=8192 vs n=512), **不得再引用**<br/>★ 可证伪预测: 两点二次拟合 `t = 3.742e-4*n + 2.678e-9*n^2` =&gt; **8K 注意力占 5.5%, 32K 占 19.0%, 相等点在 n≈140K** =&gt; **预测 pp65536 ≈ 1820 t/s** (两点定两参数无误差估计, 只是假设)"]:::hot
+    DISPATCH ==>|甲成立: 本来就是 cuBLAS-F16| DEQ
+    DEQ -.->|若无头寸| HMMA
+    MMVQWIDE["★★★ R224 **被关闭的 AL 路线应当重开**: R202 的「MMVQ 不支持 9-16 批量」是**错的**<br/>根因: `mmvq.cu:1199` 只实例化 `case 1..8`, 其余 **`GGML_ABORT`** =&gt; 当时看到的 `tg=0/PARSE_FAIL` 是**进程 abort**, 不是算错也不是不支持<br/>补 case 所需一切都在: `calc_rows_per_block`/`calc_nwarps`(含 **Volta 分支**) 对 ncols&gt;8 都有 `default: return 1`<br/>**默认零行为改变** (env 不设时 `MMVQ_MAX_BATCH_SIZE`=8 =&gt; 新分支不可达)<br/>粗估 (非测量): 15-token 验证回到 MMVQ 每 token 代价 =&gt; tg **约 108/101/140** (现 100.95/88.30/129.12), **p3 已接近硬指标**<br/>⚠️ 编译代价: 每个量化类型各实例化一次 =&gt; 用 `if constexpr (type == GGML_TYPE_Q8_0)` 收窄<br/>**已上机判决 (R228): 假设证伪** —— 同形状 env 开/关对照: n=9 **+7.4%** / n=12 **+44.1%** / n=15 **+65.6%** / n=16 **+84.3%** (n<=8 两臂同为 MMVQ, ±1-2% 是噪声本底)<br/>=&gt; **MMQ 耗时几乎与 n 无关, MMVQ 随 n 线性涨** (= 源码注释 *mvq redoes that per column*) =&gt; **宽 ncols 走 MMVQ 更慢**<br/>=&gt; **R224 的假设证伪; R202 在效果上是对的; BLK14 的关闭有了第二个独立理由**<br/>=&gt; **已全部还原并验证** (三文件回 .orig md5, LIB_MARKER_R224=0)"]:::no
+    MMVQWIDE ==>|若成立: 抬 AL = 唯一还能到 150 的路| BLK14
+    MMVQWIDE -.->|更正 R202 的关闭理由| MMVQCAP
+    UBLEVER["★★ R222/R223 + **R239/R240 定案 = 预填充成果 U1** **`-ub` 是预填充的零改码杠杆**: 同库同会话 pp32768 **1691.81 ± 1.52 (ub512) -&gt; 2162.44 ± 1.78 (ub2048) = +27.8%**（R222 表: 64K 1.25x / 128K 1.21x / 256K 约 1.18x）<br/>⚠️ **不是纯赚**: 同库同会话解码 **50.25 (ub512) / 50.22 (ub1024) / 51.36 (ub2048) ms/轮** ⇒ ub2048 用 **-2.2% 解码** 换 **+27.8% 预填充**; ub1024 解码零代价<br/>**门在两种 ub 下都是 f3edac19…**（短 prompt 下 ub 不改计算图 ⇒ R219 的「必须重新确立门」担心不成立）<br/>⚠️ `-b 8192 -ub 8192` **abort**（`ggml-backend-meta.cpp:1726 GGML_ASSERT(bufs.back() != nullptr)` = 显存不足）⇒ 大 ub 有硬上限<br/>⚠️ 生产 unit（只读红线）没有 -ub ⇒ 只能由用户自己加 override"]:::ok
+    UBLEVER -.->|生产服务与 harness 都没写 -ub| UBLEVER2["⚠️ **生产 `llama-server.service`(只读) 与 harness 都无 `-ub`/`-b` =&gt; 跑在默认 512**; 而 **`n_ubatch` 被 `n_batch` 钳制** (`-b` 默认 2048) =&gt; **`-ub 8192` 被静默钳到 2048**(实测 +0.11%, 噪声内)<br/>=&gt; 要再往上必须 `-b` 一起提, 但 R223 有界预测只值 **4-5%** (C=79.7 ms/ubatch)"]:::cond
+    DEQ ==>|反量化只是 C 的 32ms, 另有 48ms 成分不明| UBLEVER
+    BUCKET["⚠️ R231 **分相括号不是稳定桶**: 同配置两臂 tg 都约 100, 而 `draft_decode` **6.03 vs 13.67 (2.27x)**、`selector` **5.19 vs 2.78 (1.87x)**<br/>=&gt; 时间在括号间搬家 =&gt; **E16 的分相分解桶间边界不可靠**, **不能从分相里挑最大的块来优化**<br/>=&gt; 可靠的是**函数内部探针** (selector 内部三段 1.74/1.89/1.89 ms/次) 或**整轮总时长差**<br/>另: `inject timing gather 0.36-0.78 + copy 0.07 + submit 1.44 = 约 1.9-2.3 ms/次 (layers=5)`; `draft ctx t_eval=0.0` **不可用**<br/>&gt;= **规矩: 选目标只用内部探针或整轮总时长; 收益必须用整轮总时长验**"]:::hot
+    SELCPU["★★ R230 **selector 的 5.16 ms/轮 拆开了**: `[SPEC] selector=` 的括号内**只有** `build_dflash2_selector_cpu` 一行 (`speculative.cpp:1514-1535`)<br/>同臂交叉核对: 内部三段恒为 **约 1.8 ms/次** (fetch 0.06 + topk 0.71 + gate 1.05, rank=256/8tok/5120)<br/>=&gt; **逐臂的 5.19 / 2.04 / 2.78 差别是「每轮调用次数」(约 3 / 1 / 1.5), 不是单次成本**<br/>=&gt; 热点: **gate 10.5M FMA 仅 1.2 GFLOPS/线程 (标量)**; topk 2M 次扫描 + 每 token 两次 vector 分配<br/>★ **安全约束**: 源码注释要求**逐位一致** (same order, same operands) =&gt; 向量化必须**跨 token** (8 条 lane 各按原顺序累加), 不是点积内并行<br/>预期 (估算): 单次 1.8 -&gt; 约 0.7 ms =&gt; 每轮省 **1.1-3.3 ms (2-6.5%)**"]:::hot
+    E16 ==>|其 selector 5.16 ms 的分解| SELCPU
+    SELCPU -.->|若不收敛则不动| PB
+    OPS8["★★ R229 **验证批 (n=8) 的逐算子账 (新能力: `test-export-graph-ops -ub 8` + `perf --test-file`)**<br/>**MUL_MAT 2867 us** (其中 **LM head `result_output` = 2165.60 us**, 1.27 GB 权重 / 2.17 ms = 586 GB/s)<br/>**FLASH_ATTN_EXT 5249.82 us** (单个 op, n_q=8, **n_kv 未知**); **MUL/ADD/RMS_NORM/SILU/SSM_CONV/... 合计约 40 us = 基本为零**<br/>=&gt; **E16 的「非矩阵乘 9.4 ms」是错误归因**: 逐元素总和仅 0.04 ms; 目标阶段是**矩阵乘主导** (按层数乘开 FFN ~21.6 + 投影 ~8 + LM head 2.2 = 约 32 ms vs 实测 28.44)<br/>=&gt; **选项 (a) 没有靶子**; 剩下唯一未知量 = **FA 在真实 n_kv 下的份额** (导出里那个 5.25 ms 的 n_kv 未知, 乘 16 层得 84 ms 与实测矛盾)"]:::hot
+    E16 ==>|改写其非矩阵乘分解| OPS8
+    OPS8 ==>|LM head 2.17 ms/轮, 除非减少 logits 位置数否则无空间| UBLEVER
+    SELCPU2["★★ R232/R233 **selector 向量化已落地 = B3（采用，当前基准）**<br/>改法: topk 换定长数组 + 块嵌入转置 embd_T + work_gate 里 8 lane(= 8 个位置) 手工展开, **每 lane 保持原累加顺序 = 设计上逐位一致**<br/>内部探针(可靠口径): gate **0.84/0.84/0.89/0.88 -&gt; 0.55/0.55/0.56/0.55 = -0.33 ms/次 (-37%)**; selector 三段合计 **1.52 -&gt; 1.21 ms/次**<br/>整轮(5 臂, 顺序交叉): 标量均值 **50.64** vs 向量均值 **50.22** = **-0.42 ms/轮 (-0.8%)**, 四臂 sha256 全 = f3edac19... 门未破<br/>**B3 = tg 102.09 / 89.22 / 130.72, ms/轮 54.36 / 47.44 / 48.48 (均值 50.22)**, 取代 B2(50.73)<br/>⚠️ 用户 2026-09-22 纠正: 我原判「端到端小于臂离散 ⇒ 不记采用链」是**错的** —— **点估计为正就必须采用并记一笔, 离散只当注脚**"]:::ok
+    SELCPU ==>|R232/R233 落地| SELCPU2
+    PASSCOST["★★★ R234/R235/R236 **一轮 = 一次 8-token 目标前向（决定性拆账）**<br/>同源两臂: 无投机 r235NS tg 41.61/42.78/42.76 = **23.4-24.0 ms/token**（与 E13 的 22.07 一致 ⇒ 服务路径没退化）; 投机 r235SP tg 102.51/89.44/131.08、ms/轮 **54.36/47.44/48.48**（= B3 最好单臂）<br/>**口径更正: llama-bench 的 `-p` 绝对值被高估约 17 ms/次**（pp1 40.3 而服务 n=1 只有 23.4; 若按 n 缩放则 pp8 会是 187, 与实测 52.6 矛盾）⇒ **只引用同框架内的差**<br/>曲线(`-r 8`, d0/d8192 的 ms): n=1 **40.3/42.2**、2 42.1/43.6、4 44.0/46.2、8 **52.6/56.1**、16 79.1/82.2、32 100.3/107.0、64 **235.6/242.2**; n=1..8 拟合 = **38.5 + 1.8n**<br/>逐算子(R236, 单卡 q8_0 m=4096 k=14336): n=1 **82.10 us (715 GB/s)** -&gt; n=8 **111.66 us (526 GB/s) = 仅 1.36x** ⇒ 「MMVQ 每列重读权重」不成立<br/>强制 MMQ(ne11&gt;=5) pp8 **111.12**(72.0 ms, -22%)、全 MMQ **132.66**(60.3 ms) ⇒ **换内核是负收益, 只能在 MMVQ 内部调**<br/>=&gt; 每轮账: **verify 约 36-43 + draft 5.94 + selector 1.5 + 主机暴露约 10**; 服务有效带宽 438 GB/s vs 逐算子 715 GB/s 的差额 = **约 130 次 AR(估约 6.5 ms) + 注意力 + 启动间隙**"]:::hot
+    OPS8 ==>|R234/R235 把它接到整轮口径| PASSCOST
+    SELCPU2 ==>|它的 1.2 ms 已不是主项| PASSCOST
+    PASSCOST ==>|R237 靶子: n=5..8 的 nwarps| NWARPS
+    PASSCOST ==>|主机侧: target enqueue 8.36 ms/call| HOSTX
+    PASSCOST ==>|同一曲线的 n&gt;=64 段| PPCLIFF
+    NWARPS["x R237 **否证: nwarps 4 比 2 更慢** —— 算子级 q8_0 n=8 **111.66 -> 119.83 us (+7.3%)**、pp8@d8192 **142.49 -> 137.80 t/s (-3.3%)**、pp16 不动<br/>已还原（`patch-nwarps.py 2`, 与 /root/mmvq-c4.cu.orig 逐字节相同）<br/>=&gt; **n=5 拐点的机制不是 nwarps, 而是 ncols=8 时的寄存器压力**（每线程 8 组 y + 16 累加器）; 加 warps 只放大 smem 归约<br/>=&gt; 要吃 526 -> 715 GB/s 的 30% 差额 **只能重写内核**（参考 ninfer w8_volta_mma_gemm.cuh: mma.sync.m8n8k4 + 融合反量化 = 节点 HMMA 的 decode 版）<br/>⚠️ 首次 r237 因补丁脚本路径错且脚本没 exit ⇒ **两个作业并发 build/install** ⇒ PERF_RC=139 / BENCH_RC=135（§4.37）; 已重做<br/>**R244 把第二个参数也否证了**: rows_per_block 2 -&gt; 1（ncols 5..8）⇒ q8_0 n=8 **111.66 -&gt; 156.43 us (+40%)**、pp8@d8192 **-21%**（n=1/n=3/n=512 不动）⇒ **526 GB/s 是这个内核结构的固有值**（靠 2 行分块摊薄 y 重读）; 已还原 + 复现门 f3edac19…（R245, MEDIAN_TG 101.12）<br/>=&gt; **两个方向都到局部最优** ⇒ 剩下的唯一路 = **换内核结构**; 设计已写成 **`DESIGN-W8VOLTA-MMA.md`**（新内核文件 + 一处 dispatch + env GGML_CUDA_SM70_MMA_Q8，**等用户批准**）"]:::no
+    HOSTX["★★ R235 **主机侧新头寸**: target `[RT]` **enqueue 8.36 + alloc 2.14 + build 0.14 = 10.6 ms/call**（无投机臂只有 2.85/0.30/0.02）<br/>draft 侧 rounds=556 = **2.04 次/轮**, 3.58 ms/call ⇒ **7.3 ms/轮**<br/>算术吻合: **24/294 次重建**摊出来 = 270 次约 4 ms + 24 次约 50 ms = 2.28 s vs 实测 2.46 s ⇒ **重建轮是主机侧的大头**<br/>&gt;= 与 E8 的约 55% 穿透率相乘 ⇒ 每轮约 10 ms 暴露"]:::hot
+    REBUILD["★★★ R246/R247 **"每轮重建图"的价码被量出来了: 单次重建 23.2 ms, 24 次/臂 = 每轮 2.05 ms（约 4% tg）**<br/>= 关掉图复用（`LLAMA_GRAPH_REUSE_DISABLE=1`）: **50.34 -&gt; 71.63 ms/轮**（tg 101.74 -&gt; 73.96），两臂门都是 f3edac19…（数值不变）<br/>反解: 复用一次的轮 48.45 ms vs 重建一次的轮 71.63 ms; `[RT]` 重建轮 **build 1.73 + alloc 15.6 + enqueue 13.0 = 30.3 ms** vs 复用轮 10.8 ms ⇒ **钱在 `alloc_splits`**<br/>重建来自两处（R246 探针）: ① prompt 分块/收尾形状各异（42/30/60/38/4，约 12 次/臂 ⇒ 单槽缓存必 miss）② 验证轮 9 次 `can_reuse` 因 `kq_mask->ne[0] == n_kv` 越界失败（约 209 ms/臂）<br/>=&gt; **推翻旧账**: HANDOFF §5 把"多形状 decode graph 缓存"判为"上限 2%，放弃" ⇒ 实测 **4%**，**回到候选**<br/>=&gt; 修法都要动单槽 sched（E6 五次 abort）或 mask 定尺 / 统一分块 ⇒ **中等偏大改动，先问用户**"]:::hot
+    E4 ==>|把它的 7.4 ms/轮 重新定价| REBUILD
+    REBUILD ==>|与 PASSCOST 的账并列| PASSCOST
+    GALLOCR["★★★ R248/R249/R250 **主机侧最大的一笔: sched 每次调用都走慢路径 = 重新 reserve + 对 3 张卡各一次 device synchronize（约 5 ms/call）**<br/>R248 `[SCHED]`: BIG **split 228-257 us/call、alloc 4770-5212 us/call**（每次调用都付）; SMALL alloc 437-492<br/>=&gt; 贵的是 **alloc** 不是 split ⇒ 旧 split cache（`GGML_SCHED_SPLIT_CACHE=1`: 50.27 -&gt; 50.29 = 零效果、探针 `cached=0`）本来就救不了<br/>R249（`GGML_SCHED_DEBUG_REALLOC=1`）**abort 留下证据**: `ggml-backend.cpp:1625 unexpected graph reallocation (graph size = 66, nodes = 66, leafs = 31)`<br/>=&gt; `ggml_gallocr_alloc_graph()` 失败 ⇒ 走 `1614-1639` 慢路径: **`ggml_backend_synchronize` x3 + `ggml_gallocr_reserve_n`**<br/>R250b 计数器: 一臂 **total=560 次 realloc**（同臂 `[SCHED]` 调用 512）⇒ **约每次 sched 调用一次** ⇒ **每轮把 3 张 GPU 全同步 2-3 次 = 跨调用无法流水** = E13「GPU 35-45% 空闲」/E8「主机穿透 55%」的**机制落点**<br/>=&gt; **R251/R253 两层根因定案**: `needs_realloc` 内部几乎不触发（`nodes_diff=0 leafs_diff=0 grow=2..3`，肇事者只是 DFlash2 的 `inp_target_features`）；慢路径成因分开计数 = **`bic=556 allocfail=4`** ⇒ **99.3% 是 `backend_ids_changed`**（`||` 短路 ⇒ 此时 `ggml_gallocr_alloc_graph()` 根本没被调用；它自身只有一个失败返回 `ggml-alloc.c:1065`）<br/>=&gt; **链条**: 每轮交替 4-6 种图（目标验证 659 节点 / draft 注入 / draft 块 / KV 拷贝 66 节点 / prompt 分块）⇒ 逐节点后端编号向量与上一张图必然不同 ⇒ **每次调用都 sync x3 + 重算整套 buffer 方案（约 5 ms/call）**<br/>=&gt; 修法（结构性，先问用户）: ① **只在真重分配时才同步**（现在无条件同步；最小改动）; ② 按图指纹缓存分配方案（单槽 -&gt; 最近 4-6 张图各自记账）; ③ 统一图形状（prompt 分块 / mask 定尺，属 R246/R247 线）"]:::hot
+    HOSTX ==>|它才是那约 10 ms 暴露的落点| GALLOCR
+    GALLOCR ==>|与 PASSCOST 的账并列| PASSCOST
+    PPCLIFF["★★ R234 **预填充在 n=64 处的分派拐点（首次直接量到）**: pp64 = **235.6 ms** vs pp32 = 100.3（**按次** 2.35x, 但**按 token 只有 3.68 vs 3.13 ms = +17%**; 到 n=512 又回落到 0.396 ms/token）<br/>= 分派链在 `ne11 &gt;= 64` 落到 `mul_mat_cublas`（每次调用全量反量化成 F16）<br/>⚠️ 我最初写成「断崖 2.35x」是**按次而非按 token 比**, 已就地更正<br/>&gt;= 与 R216「反量化已在带宽墙上、只能少做几次」一致"]:::hot
+    PPCLIFF -.->|同属预填充第二缺口| UBLEVER
+    FFNDOWN["★ R221 **新头寸 (此前无任何节点覆盖): `ffn_down` 形状在 cuBLAS 里差约 33%**<br/>子代理独立微基准 (`cublasGemmEx`, C32F/C16F 两次都给): W[17408,5120]xX[8192,5120] = **103.0 / 101.3**; QKV 101.5; W[4096,14336] 96.2 / 82.0<br/>但 **W[5120,17408]xX[8192,17408] (`ffn_down`) 只有 67.8** =&gt; 比其它形状差约 **33%**<br/>而它占 GEMM FLOPs 约 **21%** =&gt; 折算端到端约 **4%**<br/>属于「换 cuBLAS 算法 / cublasLt heuristic」类, **不是内核改写** =&gt; 成本低<br/>⚠️ 口径: 单形状微基准, 尚未进真实图"]:::hot
+    OPS ==>|预填充 GEMM 的下一步| FFNDOWN
+    FFNDOWN -.->|若 algo 能修, 与反量化无关| DEQ
+    DISPATCH["⚠️ R212 **开放问题: 预填充到底在跑 MMQ(dp4a) 还是 cuBLAS-F16?**<br/>触发: R211 的转向建立在「ffn_gate 60.8 TFLOPS ≈ dp4a 峰值 62.8 的 97% ⇒ 在跑 dp4a」上, 但**源码不支持这个前提**<br/>证据: `mmq.cu:334` `return !fp16_mma_hardware_available(cc) || ne11 &lt; 64`, 而 `common.cuh:327` 对 sm_70 返回 **TRUE**<br/>=&gt; 按源码 Volta+Q8_0 应是 **`ne11 &gt;= 64` 落 cuBLAS**; 且 `ggml-cuda.cu:1763` **`mul_mat_cublas` 自带量化 src0 反量化成 F16**<br/>⇒ 甲: 早就在跑 cuBLAS =&gt; 缺口是「每次 matmul 现反量化整张权重」, 不是「dp4a vs 张量核」<br/>⇒ 乙: 仍在 MMQ =&gt; 另有分支抢先 (疑 CMake `GGML_CUDA_FORCE_MMQ`), 改动只需约 3 行<br/>★★ **R213 已定论: 甲成立** —— CMakeCache 两个 FORCE 开关**都是 OFF**; `mmf.cu:135` 对量化类型直接 return false; `mmvq` 要 ne11&lt;=8; `mmq` 要 ne11&lt;64<br/>=&gt; **n&gt;=64 一直走 `mul_mat_cublas`**, 且它 `:1585-1608` **每次调用都 alloc + 全量反量化整张权重成 F16**<br/>=&gt; **「给 mmq 加 sm70 mma 路径」已无意义**(n&gt;=64 根本不到 mmq), 子代理已叫停并要求还原源码<br/>=&gt; **真缺口 = 那 40%**: 60.8 (llama.cpp 路径) vs **103 TFLOPS (裸 cuBLAS)**, 差在「每个 matmul 一次全量反量化」"]:::ok
+    HMMA -.->|前提待验证| DISPATCH
+    OPS ==>|R203 该行已更正| DISPATCH
+    PB["★ R210 **draft 侧「11 ms 浪费」这个数字已过期，降级**（防下一轮追幽灵）<br/>Round 178 记的 *draft 前向 13.8-14.4 ms（1.14 GB 应 2.6 ms）* 是 **FGC 之前**的口径<br/>E16 的 post-FGC 轮时拆解里 **draft 阶段只剩 6.13 ms/轮**（target 36.86 + draft 6.13 + selector 5.16 + 其余 ~2.5 = 50.65）<br/>=&gt; 可砍的上限从 ~11 ms 缩到 **~3.5 ms**（且这 3.5 里还含真实的 2.6 ms 权重流）<br/>=&gt; **DFlash2 线自己的头号项不再是它**；`[RT]` 实测 draft enqueue+alloc 已由 FGC 从 5.42 压到 1.70 ms/轮<br/>=&gt; 与 E4（draft 图 0% 复用是结构性的）叠加后：draft 侧**已无 10 ms 级现货**"]:::no
+    PB -.->|过期数字的来源| E16
+    FGC ==>|把 draft enqueue 5.42 -&gt; 1.70| PB
+    MMVQCAP["x R202 (内核级): 把 MMVQ 批量上限做成可调 (env GGML_CUDA_MMVQ_MAX_BATCH, 默认不变)<br/>动机: `#define MMVQ_MAX_BATCH_SIZE 8` => **8 token 正好卡上限, 9 个以上掉进 MMQ** (Q8_0 走 MMQ 是 -31%)<br/>=> 猜想: hr14 的 +2.59 ms/token 不是批量变贵, 而是**换了内核**<br/>实测: cap=16 + n_max=14 两臂 **tg=0 / PARSE_FAIL** (15 token 验证在 MMVQ 下不出结果), 控制臂 100.07 正常<br/>=&gt; 内核不支持该批量 =&gt; **AL 抬升的两条路都关闭** (MMQ 太慢 / MMVQ 不支持)<br/>=&gt; 150 t/s 只能从 target GPU 的 28.44 或链上的 20 ms 里砍"]:::no
+    RBSKIP["x RBSKIP 判决 (R199, 四臂同源 ABBA, 同库同 env): **不采用 (+2.3%)**<br/>控制 rbs0/rbs3 均值 ms/轮 **50.79/50.78** (= B2 复现); 特性 rbs1/rbs2 **51.94/51.81** (**慢 2.3%**)<br/>两侧 sha256 门都未破 (f3edac19...) =&gt; 跳过 rebuild 语义上没算错, 但**反而更慢**<br/>且 scheduler 的 alloc 反而升高: target 633937 -> 705433 (+11%), draft 995075 -> 1098725 (+10%)<br/>=&gt; 结论: FGC 之后 meta rebuild 已不是瓶颈 (它在 8% 的调用里发生但被 GPU 吃掉), 直方图式的 host 归因再次失效<br/>代码保留但**两个 env 必须保持不设**; 新增的 skipped= 字段保留作探针"]:::no
+    FGC ==>|host 里最大的单项| RBSKIP
+    E6V -.->|否证: 容器索引不可自由重选| N11
+    E5V -.->|判据 FPSTAT distinct| N6B
+    E5V -.->|上游 #28652/#28666 同一条线| Z8
+    E4V -.->|同一根因: 形状不稳定| N6B
+    E4V -.->|归入主机侧总账| METATAX2
   E4 ==>|换来整个 T=4 解码栈| T4
   T4["T4 路线: n_max=3 复用 jusko T=4 栈<br/>q8 TC kernel / Q5_X4 / Q6_W4R4"]:::cond
   MT1["★ MT1 R151 实测发现: 我们的 target GGUF 自带 MTP 头<br/>(blk.64.nextn.eh_proj/enorm/hnorm/shared_head_norm<br/>+ blk.64.ffn_up/down)，加载器报 unused 忽略<br/>= draft-mtp 路线零下载成本可用"]:::next
@@ -223,6 +325,49 @@ flowchart TD
   REFS -.-> X3
   REFS -.-> X1
   REFS -.-> C1
+  TRAP["★★★ R258 **基础设施陷阱（先读这条再动手）**<br/>`/mnt/3.84t/v100-opt/llama.cpp` 是**陈旧副本**（打补丁不生效）<br/>真开发树 = `/root/llm/test/v100-opt/llama.cpp`（本地 HEAD 与它 md5 一致）<br/>`/mnt/.../build-instr` 的 CMakeCache 指向 /root ⇒ nvcc 编的是 /root 源码<br/>harness 默认 `L=/mnt/3.84t/v100-opt/libdirs/libdir-instr` = **过期库**(64317717/d283439c)<br/>=> 必须显式 `L=/root/libdir-instr`；改动后必须 `strings <lib> | grep -c <标记串>` 验证"]:::hot
+  NCU8["★★★ R259 ncu 把 n=8 的 MMVQ 定死: **不是带宽受限**<br/>dram 两边都 63 MB；L2 只 1.7x；**warp 指令 7.44M -> 26.16M (3.5x)**<br/>= **每条 dp4a 付 7.2 条线程指令**（y 载入 + 5 条 scale 换算 + 地址）<br/>n=8 只有 547 GB/s（n=1 是 751 = DRAM 顶），issue 46%<br/>L1 扇出 17x（每 lane 读一行、行间距 15 KB）"]:::hot
+  RPB["x R258b `rows_per_block` 2->4/8/16（Volta ncols 5..8）<br/>首轮三臂因 TRAP 全废；机制：y 读取次数 =(row,token) 对数<br/>rpb 变大时 CTA 数同比变小 => **总流量不变** ⇒ 此杠杆结构上无效<br/>(与 R237 nwarps / R244 rpb->1 合起来 = 该内核参数已局部最优)"]:::no
+  W8V["x R260 **Volta MMA kernel**（DESIGN-W8VOLTA-MMA 的 decode 版）: 已实现且**数值正确**<br/>置换探针 + fp64 对拍（maxabs 3.5e-2 / ref 110.7 = f16 舍入预期）<br/>673 µs(lane=row) -> 320(8 lane 协作+smem) -> **238**(split-K=8+预取一块) vs 现役 **111 µs**<br/>ncu: lane=row 版 **16.8x L1 扇出**(33.0M sectors)、No-Eligible 92.7%、3.0 warps/scheduler<br/>★★ 判决性: **ptxas 拒绝 `m8n8k4.s8`**（`Illegal matrix shape`；`m16n8k16` 要 sm_80）<br/>= **sm_70 没有 int8 张量核** ⇒ mma 必付 ~2 指令/值的 int8->f16 解码，<br/>而 **dp4a 对权重编码是零解码** ⇒ mma 的理论优势被解码成本吃光<br/>= V100 上 Q8_0 + n<=8 的 mma 路线**架构性不成立**（非调参问题）"]:::no
+  MMVQW["★ **MMVQ-WIDE（下一轮 kernel 候选，直接来自 R259 的数字）**<br/>把 `vec_dot_q8_0_q8_1` 加宽 VDR 2 -> 8: 一个线程吃完整 32 值块<br/>=> 8 条 dp4a 只付**一次** scale（7.2 -> 约 2.5 inst/dp4a）<br/>估算 warp 指令 26.16M -> 约 9M；改动小（vecdotq.cuh + mmvq.cu 各 20-30 行）<br/>只对 Q8_0；**会改累加顺序 ⇒ 必须重立门值**；先做算子级 perf（20 s 出数）"]:::next
+  SRETRY["x R261 sched 快路径重试 `GGML_SCHED_RETRY_ALLOC`: **ok=0/563**<br/>四臂 ABBA 同源 100.96 / 101.18 / 102.00 / 102.32，门全 `f3edac19…`<br/>计数器 `bic=563 retry=563 **ok=0** bad=0` ⇒ **一次都没成功**<br/>= 单槽 gallocr 的 `needs_realloc` 每轮必真（一轮在 4-6 张节点数不同的图间交替）<br/>= **慢路径是必需的**；便宜修法穷尽 => 只剩多槽/按指纹的 gallocr（= E6V 那条线）"]:::no
+
+  OPS --> NCU8
+  NCU8 --> RPB
+  NCU8 --> W8V
+  HMMA -.->|其 decode 版已否证| W8V
+  NCU8 ==>|数字直接指向的唯一方向| MMVQW
+  W8V -.->|同一根因: 没有 int8 mma| MMVQW
+  MMVQW ==>|先算子级 perf 再上机| PASSCOST
+  GALLOCR --> SRETRY
+  SRETRY -.->|只剩多槽这一条| E6V
+  SRETRY -->|慢路径确认为必需| GALLOCR
+  TRAP --> RPB
+  TRAP --> W8V
+  TRAP -.->|所有上机实验的前提| G
+  W8V -.->|RAM 实测 7.2 inst/dp4a 的另一个解释面| PASSCOST
+
+  KVCT["x R263 **KV 类型 A/B: 每 ubatch 反量化整条 KV 的假设被证伪**<br/>代码确实 O(n_kv)/ubatch（`fattn-common.cuh:1026-1088` to_fp16 整条 K/V）<br/>但 f16 KV（**零转换**）在 131K **慢 31%**: 1271.21 -> 879.36 t/s<br/>8K/32K 两者相同（+0.8%/+1.0%）⇒ 转换不是墙<br/>⇒ 长上下文是**注意力读 KV 的字节数**在说话（也不是纯带宽）<br/>⚠️ 口径: 账本旧值 pp32768=2162.44 是 `llama-bench` 默认 **f16 KV**；q8_0 KV 实测 1920.27"]:::no
+  FA78["★★★ R264 **预填充真正的墙（带名字的逐算子表，单卡 -ub 2048，合计 470.3 ms）**<br/>**`FLASH_ATTN_EXT(D=256,24头,n_q=2048,n_kv=262144) = 368757 µs = 78.4%**<br/>LM head(`result_output` 248320x2048) 66518 µs = 14.1%<br/>全部 MUL_MAT 加起来约 **5%**（ffn_gate 4766 / ffn_out 4737 / Qcur_full 3419 / node_13 2792 ...）<br/>FLOPs 550 GFLOP / 0.369 s = **1.49 TFLOPS = FP16 峰值 125 的 1.2%**<br/>折算 256K 预填充: 16 层约 357 s（实测 672 s）⇒ **370 t/s 的主因**<br/>⇒ 与 R203「FA 11.7 GB/s 病态」同一件事；这是**最大单一 kernel 缺口**"]:::hot
+  FAD256["★ **FA-D256（下一手主攻）—— R266 零改码诊断已完成**<br/>[FAK] 32K 预填充: **kernel=MMA_F16 D=256 n_q=2048 n_kv=32768 kv_type=8(Q8_0) need_f16_K=1 need_f16_V=1**<br/>decode: kernel=VEC n_q=1 need_f16=0（与旧账一致）；pp32768 q8_0=**1924.40 ± 4.71**<br/>**分派（读码）**: Volta + gqa=6 -> `switch_ncols1 ncols2=2` -> n_q=2048 落 **ncols1=32, ncols2=2, ncols=64**<br/>Volta D256/64 配置: nthreads=128 occ=2 **nbatch_fa=32** K2=128 V2=128 combine=128 nstages=2 Q_in_reg=**false**<br/>`launch_fattn(..., stream_k=true)`；split-KV/combine **非主因**: ntiles_KV=n_kv/32（32K=1024 档、256K=8192 档），combine/fixup 是尾部小核；墙在 **MMA_F16 本体扫全量 KV + 每 ubatch 整条 to_fp16**（1.49 TFLOPS）<br/>**JS4 门控不直接命中本形状**: 要求 nbatch_V2==**64**（我们 128）、n_q **&lt;1024**（我们 2048）、且 small_tp 路径还要求 f16 KV + n_kv&gt;=64K<br/>**JS2** `fattn-q8-volta.cuh` 仍是 smem 反量化参考；**JS3 常量照抄已被 X16 否证** (-1.19%)<br/>下一步（按赔率）: ① 算子级拆时间: to_fp16 vs MMA 本体 vs combine ② 若 to_fp16 占大头则试 f16 KV 长上下文（R263 已示 131K f16 更慢，须重测 32K/256K 分段）③ 结构: 移植 JS4 需先改门控匹配我们的 nbatch_V2/n_q，或改走 JS2 独立 kernel"]:::next
+
+  NCU8 --> FA78
+  FA78 ==>|84% 在注意力+LM head| FAD256
+  JS4 -.->|R266: 门控 nbatch_V2=64 且 n_q&lt;1024, 不直接命中| FAD256
+  JS2 ==>|smem 反量化参考实现| FAD256
+  FAKP["R266 [FAK] 实测: 预填 MMA_F16 need_f16=1/1; decode VEC"]:::ok
+  FAKP ==> FAD256
+  FASPLIT["R267 算子级: 真实形状 n_q=2048 n_kv=262144 = **371.3 ms** (f16 KV, 无 to_fp16)<br/>n_q=1 = 5.2 ms / 193 GB/s<br/>=> **墙= MMA_F16 主核本身**; to_fp16 估 <1 ms; combine 尾核可忽略<br/>上游 #28761: D=256 长 KV 需更大 Q-tile (sm_75 tile64 +19~50%)<br/>sm70-attn: prefill-only, 只收 F16/Q4_0 (**拒 q8_0**), 声称 +39.9%@176k (C级)<br/>sglang dense D256: BM=64 BN=32; 尾块 split-KV 表 (SG3)"]:::hot
+  FASPLIT ==> FAD256
+  SM70P["sm70-attn 移植候选 (需改 KV 类型或扩 q8_0): fattn-sm70-d256.cu<br/>门: Volta + D=256 + q>=256 + mask + F16/Q4_0 KV"]:::next
+  SM70P -.-> FAD256
+  UP28761["上游 #28761 OPEN: D=256 Q-tile 自适应 n_kv>8192 -> tile64"]:::warn
+  UP28761 -.->|方向旁证, 非 sm70 直接可抄| FAD256
+  KVCT -.->|否证了便宜的零改码解| FA78
+  R264 -->|口径: f16 KV 2162 vs q8_0 1920| KVCT
+  FAD256 ==>|预填充缺口 = 第二大缺口| G
+  OPS --> FA78
+  MMVQW -.->|R262 实测: +17.3% 慢 ⇒ 已否证| NCU8
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
   classDef fact fill:#e8e8e8,stroke:#666
   classDef hot  fill:#ffcccc,stroke:#cc0000,stroke-width:2px
@@ -521,6 +666,7 @@ flowchart LR
 | NF7 | 单卡体检：2K 无投机 **29.28** / MTP-K3 **67.66** / 8K 92.74 / 32K 55.04 | A | K4（加卡体检的对照组） |
 | NF8 | **不重排权重**：对激活施加同一置换（两次 `__byte_perm`）—— *the permutation is a relabeling of the reduction*；Q4 nibble 序**天然就是 B-fragment 序**，0 条 pack 指令 | A（`nvfp4_volta_qpn_gemm.cuh:21-35,105-115`、`q4_volta_qpn_gemm.cuh:36-40`） | LOWBIT |
 | NF9 | 单卡整轮 **34.2 ms**（2K 无投机）—— 与我们 3 卡 target 整步 32.3-34.3 ms 持平 | A | 标尺 G |
+| **NF10** | ★★ **Volta 可用的 W8G32 张量核 GEMM（= 我们的 Q8_0）**：`src/ops/linear/w8/w8_volta_mma_gemm.cuh` 是 **sm_70 门控**（`__CUDA_ARCH__ == 700`）的 `mma.sync.m8n8k4` 融合反量化 GEMM，注释原话 *dequantise into **shared** memory and feed the tensor cores directly, so the weight is read once per K pass at its stored density*；**W8G32 = 每元素 1 个 signed int8 + 每 32 个 K 一个 FP16 scale ⇒ 与 ggml Q8_0 同构**（只差 codes/scales 分开存 vs 交错）；**魔数解码**（`:120-134`，每 2 元素仅 2 条指令、全程无 int->float）：`0x6400|u` 作为 fp16 恰等于 1024+u，XOR 0x80 把码 byte 变成 u=b+128 ⇒ `0x6400|u == 1152+b`，一条 `__hsub2` 减 1152.0 还原有符号码 + 一条 `__hmul2` 上 scale；**fragment 取数在 `ops/common/volta_mma.cuh`**（`volta_load_qp`=A / `volta_load_k`=B(I-major-mirrored) / `volta_mma_qk`=`mma.sync.aligned.m8n8k4.row.col.f32.f16.f16.f32` / `volta_d_get_i|j`；**Volta 没有 ldmatrix**，用普通 smem 取数）；调度 `kWarps=4`（每 warp 8 输出行）/`kKStep=32`/`kTTile=32`/**`kXPad=8`（注释：hardware floor）**/128 线程/双缓冲/**K 循环全程只 1 个 `__syncthreads()`**（`:142-144` 有解释）；**陷阱**：Large-T 版 `w8_rowsplit_gemm_mma.cuh` 是 `m16n8k16`+`ldmatrix` = **sm_80+**，且 Volta 的 48KB 静态 smem 会让 nvlink 直接以**链接期**失败拒绝（`w8_rowsplit_gemm_medium_t_splitk.cuh:22-29`）；它的 SIMT W8 回退 *re-reads the entire weight once per 8 output columns ⇒ cost exactly linear in T*（T=24 时搬 3.9 GB 而只需 1.31 GB）—— **我们的 dp4a 没这个缺陷，别拿它当基线** | A（`src/ops/linear/w8/w8_volta_mma_gemm.cuh:1-179`、`src/ops/common/volta_mma.cuh:30-131`、`w8/w8_rowsplit_gemm_mma.cuh:1-59`） | **HMMA**（预填充 GEMM）；次要 LOWBIT |
 
 #### 3.2.4 jusko-llama-volta-qwen3flash —— 同题 llama.cpp fork，注意力线的金矿
 
@@ -1008,6 +1154,96 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
           => **本项目的头号杠杆从此收敛为一件事：减少每轮的启动次数**（draft 侧 ~500 次/轮；target 侧每轮约 2 万次节点启动）。
           加卡、低比特权重、KV dtype 都不能治它；只有「更少的 kernel/更多的工作每 kernel」能治。
        ⑮ 附带确认：tp1 = **97.03 t/s**（NODROP, 512）与历史最好 96.60 同量级 => 这一批臂口径干净、可入账。
+    —— Round 209（**HMMA 的弹药找到了：参考里有 Volta 原生、且与 Q8_0 同构的张量核 GEMM**，纯读码、未上机）：
+       ⑯ 起因：任务书要求「先做 B 后做 A」，A = 预填充 Q8_0 -> FP16 张量核 GEMM（子代理 37e83355 在执行）。我去翻本地只读参考找可抄的东西，
+          结果在处理 `1cat-vllm/benchmarks/csrc/sm70_awq_m5_batched_gemv.cu` 时先得到一条**否定性结论**（见 ⑰），再在 `v100-refs/ninfer-v100` 里找到**正面答案**（见 ⑱）。
+       ⑰ ~~**否决「cuBLAS + 全局反量化」这条岔路（算流量即可判死）**~~ **← R211 撤销（这条算术是 decode 形状的，见 Round 211）**：1cat 那份是 **decode 侧**的量化 batched GEMV（`kM=5` = 5 tokens），不是预填充 GEMM。
+          以我们的预填充形状（m=17408, k=5120, n=512，TP3，每层约 89M 参数）估算每卡每层流量：
+          现状（dp4a 直接读 Q8_0）≈ 94 MB；改成「先全量反量化成 FP16 再调 cuBLAS」= 读 94 + 写 178 + GEMM 再读 178 ≈ **450 MB（约 4.8x）**
+          => **反量化流量本身会取代 GEMM 成为瓶颈** => 反量化必须留在 smem 里逐 tile 做。这条已发给子代理，免得它走弯路。
+       ⑱ ★★ **正面答案：`v100-refs/ninfer-v100/src/ops/linear/w8/w8_volta_mma_gemm.cuh` 是 sm_70 门控（`__CUDA_ARCH__ == 700`）的 `mma.sync.m8n8k4` 融合反量化 GEMM，
+          而它的权重格式 **W8G32 = 每元素 1 个 signed int8 + 每 32 个 K 一个 FP16 scale ⇒ 与 ggml Q8_0 同构**（只差 codes/scales 分开存 vs 交错）。**这就是 A 的现成蓝图。**
+       ⑲ **它给了那个「快速 int8->half2 转换器」的确切做法**（`:120-134`，每 2 个元素只要 2 条指令、全程无 int->float）：
+          `0x6400|u` 作为 fp16 位型恰等于 1024+u；先把码 byte XOR 0x80 变成 u=b+128，于是 `0x6400|u == 1152+b`；
+          一条 `__hsub2` 减 1152.0 还原有符号码，一条 `__hmul2` 上 scale。**这直接反驳了「smem 内反量化的指令开销会吞掉张量核收益」这个担心。**
+       ⑳ **可复用的 fragment 取数**（`ops/common/volta_mma.cuh`，注释明说 *Volta has no ldmatrix, sm_75+ only*）：`volta_load_qp`=A、`volta_load_k`=B（I-major-mirrored，32 lane 只有 8 个不同行）、
+          `volta_mma_qk`=`mma.sync.aligned.m8n8k4.row.col.f32.f16.f16.f32`、结果索引 `volta_d_get_i|j`。调度：`kWarps=4`（每 warp 8 输出行）/`kKStep=32`/`kTTile=32`/**`kXPad=8`（注释：hardware floor）**/128 线程/双缓冲，
+          且 **K 循环全程只有 1 个 `__syncthreads()`**（`:142-144` 自己解释了为什么够）—— 与已知的「v100-skinny 赢法 = 全程 1 barrier」一致。
+       ㉑ **两条必须避开的坑（他们注释自己写的）**：① Large-T 版 `w8_rowsplit_gemm_mma.cuh` 是 `m16n8k16`+`ldmatrix` = **sm_80+**，
+          且 Volta 的 48KB 静态 smem 上限会让 **nvlink 以链接期失败**直接拒绝（不是 ptxas 错）；**Volta 只能用 `m8n8k4` + 普通 smem 取数**。
+          ② 它的 SIMT W8 回退是坏的：*re-reads the entire weight once per 8 output columns ⇒ cost exactly linear in T*（T=24 时搬 3.9 GB 而只需 1.31 GB）—— **我们的 dp4a 没这个缺陷，别拿它当基线**。
+       ㉒ 由此**改写一条旧判断**（§3.2.9 那格「HMMA 需要 f16 操作数（q8_0 要新写 34 字节块的解包分支）」）：
+          那条**对注意力仍然成立**（sm70-attn fork 的 FA 内核确实只吃 f16），但**对矩阵乘已经作废** —— 解包分支在 ninfer 的 `ops/linear/w8` 里已经存在，而且带魔数解码。
+          （已同步写进 §3.2.3 的新行 NF10 与 HMMA 节点标签。）
+       ㉓ 检索价值的一句话：**上游没有 sm70 MMQ/GEMM 的 HMMA 补丁**（只有 FA 的 Volta MMA，PR #17505 已合并且我们树里已有），
+          但**本地只读参考里有一份完整的实现**——「联网找不到」不等于「没有答案」，先翻本地 `v100-refs/` 再下结论。
+    —— Round 211（**A 的路线转向：手写 m8n8k4 否证，改走 cuBLAS；同时撤销我自己 R209 的一条错误否决**）：
+       ① 子代理 37e83355 交出**决定性微基准**（`/tmp/sm70probe2.cu`，sm_70，V100，80SM@1.53GHz）三条硬数字：
+          **(a)** sm70 **只有 `m8n8k4`** —— ptxas 实测 `m16n8k16.f16` 在 **sm_70 与 sm_75 都报错**（*requires .target sm_80 or higher*）⇒ Turing 的 q8_0 MMA 路径**在 Volta 根本不存在**，不能「补一个 Volta 变体」；
+          **(b)** 手写 m8n8k4 当前形态只有 **26.7 TFLOPS**（纯寄存器、ptxas 报 0 spill、4x4 mma 循环 26.7；smem 喂数 27.1；32x16 tile 26.7）；
+          **(c)** **cuBLAS 在真实形状上就是 103 TFLOPS**（W[17408,5120]xX[8192,5120] C16F **103.0** / C32F 101.3；QKV 101.5；W[4096,14336] 96.2；只有 ffn_down 67.8）。
+       ② **推论：换 FP16 张量核的收益主要来自「用 cuBLAS」，不是「手写 mma」。** 且 llama.cpp 的 F16 路径在 Volta 上**本来就强制 f32 输出**（`ggml-cuda.cu:1649-1650`）⇒ 精度不是问题。
+       ③ ⚠️ **撤销我自己 R209 ⑰ 那条「否决 cuBLAS + 全局反量化」** —— 它的算术是 **decode 形状**的：我比的是「反量化流量 450 MB vs 权重读取流量 94 MB」。
+          预填充的正确比法是「**反量化流量 vs GEMM 时间**」：GEMM 时间随 n 线性涨，**反量化每 ubatch 只付一次**。每卡 38.8 GB 额外搬运 ≈ 54 ms，对 pp8192 的 3.25 s 是 **1.7%**，pp32768 再低 4 倍 ⇒ **子代理对，我错。已同步改账本 R211 与 HMMA 节点。**
+          （教训：**否决一条路线前，先确认自己用的是「这个场景」的形状**。我拿 decode 的账去否决 prefill 的路，这类错误比数字错更贵，因为它会挡住后面的正确路线。）
+       ④ **两条已提醒子代理的实现硬约束**：① **16 GB 卡装不下 19.4 GB 的整模型 FP16 副本** ⇒ 必须**逐层复用同一块 scratch**（单层 ffn Q8_0 94.7 MB -> FP16 178 MB，TP3 每卡约 60 MB）；
+          ② **每个 ubatch 重反量化一次** ⇒ `-ub 2048` 时 pp8192 要付 4 次（约 216 ms，6.7%）⇒ A/B **同时测 `-ub 8192`**。
+       ⑤ **预登记期望值**（先写下，避免事后迁就）：GEMM 60.8 -> ~95 TFLOPS（加权，ffn_down 拖后腿）时，**pp8192 约 2524 -> 3300-3400**，**pp32768 约 2165 -> 2900-3100**。
+       ⑥ **第 (b) 条记为「未定论」而非「指令极限」**：sm70 除 `m8n8k4` 无别的张量核指令，而 cuBLAS 用**同一套指令**到 103 ⇒ 26.7 **不是天花板**。最可能是**占用率** —— 每 SM 4 个张量核需要 4 个 warp 同时喂，**1 warp/SM 的上限 ≈ 125/4 ≈ 31**，与 26.7 吻合。
+          ⇒ 正确表述是「**当前形态受占用率/寄存器带宽限制**」；将来若要重写内核，关键是**每 SM >= 4 warp + 每 warp >= 4 个独立累加器**，而不是改 tile 形状。
+       ⑦ 正确性协议已发给子代理（门大概率会破，因为预填充数值变了）：① 先证明**反量化本身对**（抽 block 断言 f16(dequant_q8_0) 逐元素一致或 <= 1 ulp）；② 再报**数值差多大**（logits max-abs / 小段 perplexity）；③ 再做**同臂可复现性**（确定性而非相等性）；④ 明写门值从 `f3edac19...` 变成什么、在哪些臂稳定复现。
+       ⑧ 收尾要求：若 `mmq.cu/mmq.cuh` 那版手写内核写了半截，**清干净**，别留在树里被下一次构建静默带上（§4.31 踩过的坑）。
+    —— Round 212（**读分派链发现 R211 转向的前提可能不成立 —— 立为开放问题**）：
+       ⑨ 起因：核对 R211 那句「预填充 ffn_gate 60.8 TFLOPS ≈ INT8 dp4a 峰值 62.8 的 97% ⇒ 在跑 dp4a」。读 `ggml_cuda_mul_mat` 的分派链后，**源码不支持这个前提**。
+       ⑩ 证据链（行号可核）：① `ggml-cuda.cu:1961-2014` 顺序是 mmvf -> mmf -> mmvq -> **mmq** -> **最后才 cuBLAS**；
+          ② `mmq.cu:334` N 卡终判 `return !fp16_mma_hardware_available(cc) || ne11 < MMQ_DP4A_MAX_BATCH_SIZE;`；
+          ③ **`common.cuh:327` 的 `fp16_mma_hardware_available(cc) = IS_NVIDIA && cc >= VOLTA` ⇒ sm_70 为真**（`turing_mma_available` 对 Volta 为假，dp4a 架构检查也不截）
+          ⇒ **按源码，Volta+Q8_0 应是 `ne11 >= 64` 就落到 cuBLAS**；④ `ggml-cuda.cu:1763` **`mul_mat_cublas` 自己就把量化 src0 反量化成 F16**（`fast_fp16_hardware_available(70)` 亦为真）；
+          ⑤ 上游本就有 `GGML_CUDA_FORCE_CUBLAS`（*always use cuBLAS instead of mmq kernels*）与 `GGML_CUDA_FORCE_MMQ` 两个构建开关。
+       ⑪ **两个分支**：**甲**＝预填充早就在跑 cuBLAS-F16 ⇒ R203 的「60.8 ≈ dp4a 97%」是误读，真缺口是「**每次 matmul 现反量化整张权重**」（裸 cuBLAS 同形状 103 TFLOPS），目标改为「反量化只做一次」；
+          **乙**＝仍在 MMQ ⇒ 另有分支抢先（疑该 build 的 CMake 开了 `GGML_CUDA_FORCE_MMQ`），查清后**改动只需约 3 行**（`should_use_mmq` 返 false + env 门控），**因为反量化管线上游已有**。
+       ⑫ 判别实验（10 分钟，已派子代理）：(a) `test-backend-ops perf -o MUL_MAT` 扫 `ne11 = 8..2048` **看 64 处是否跳变**；(b) `GGML_CUDA_CUBLAS_COMPUTE_TYPE=f32` 交叉验证（只被 `mul_mat_cublas` 读）；(c) `grep -e FORCE_CUBLAS -e FORCE_MMQ build-instr/CMakeCache.txt`。
+          **在结论出来前不许再往 scratch/反量化管线投入**（若是甲则白做；若是乙则改动小得多）。
+       ⑬ **顺带更正 R203 表的一行误导**：「MUL_MAT（预填 n=512）12.8 TFLOPS ≈ FP32 峰值 82%」是**跨 25× 形状范围的异质平均值**，**不能代表 ffn_gate**，已就地划掉并标注不得引用。
+       ⑭ 教训（与 R211 ⑶ 同源，再次踩到）：**「数值恰好落在某个 roofline 的 97%」被当成了「它在跑那条路」的证据** —— 这是**相关性当因果**。要证明走的是哪条路，只有两条路：读分派链到确定，或做**能区分两条路的实验**（这次是 64 处的跳变）。
+          ⇒ 规矩：**凡「它在用 X 而不是 Y」的判断，必须落到「读码到确定」或「一个只有 X/Y 之一能通过实验」**，不能靠性能数字与峰值的接近程度。
+    —— Round 213（**定论：预填充早就在 FP16 张量核上 —— A 的原前提作废，真缺口是「每次 matmul 全量反量化」**）：
+       ⑮ 纯读码 + 构建配置确认，**不需要实测即可定**。触发是 R212 立下的开放问题；答案是**甲**。
+       ⑯ 证据链：① CMakeCache **`GGML_CUDA_FORCE_CUBLAS=OFF` 且 `GGML_CUDA_FORCE_MMQ=OFF`**（两个 `#ifdef` 都不生效）；
+          ② 四道关全不过：`mmvf`（要非量化）-> **`mmf.cu:135` 对量化类型直接 `return false`** -> `mmvq`（`MMVQ_MAX_BATCH_SIZE 8`）-> **`mmq`（`mmq.cu:334` `ne11 < 64`）**
+          => **`ne11 >= 64` 落到 `ggml-cuda.cu:2014` 的 `ggml_cuda_mul_mat_cublas`**；③ 它 `:1762-1764` 对量化 src0 取 **F16**（`fast_fp16_hardware_available(70)` 真）；
+          ④ `:1585-1608` **每次调用**都 `src0_alloc.alloc(ggml_nelements(src0))` + `convert_func(...)` = **全量反量化整张权重**；⑤ `mmq.cuh:8` 注释自证设计意图（*when FP16 tensor cores are available*）。
+       ⑰ **三条旧判断被推翻**：❌「ffn_gate 60.8 ≈ dp4a 峰值 97% ⇒ 在跑 dp4a」（n=512 根本不走 dp4a，**97% 是巧合**）；❌「1cat 预填充领先来自 FP16 张量核」（**我们本来就在张量核上**）；
+          ❌ R211 说的「逐层反量化成 FP16 再走 cuBLAS」这个『新形态』—— **它本来就是现状**，不是待实现项。
+       ⑱ **真缺口 = 那约 40%**：60.8 TFLOPS（llama.cpp 路径，n=512）vs **103 TFLOPS（裸 cuBLAS，子代理实测）** ⇒ 差在「**每个 matmul 一次 alloc + 全量反量化整张权重**」。
+       ⑲ **已叫停子代理**（要求 `git checkout` 还原 mmq 的改动，保持树干净），改派 A1-A4：**前两条零改码** —— A1 扫 ne11 找 64 处跳变 + `GGML_CUDA_CUBLAS_COMPUTE_TYPE=f32` 交叉验证；
+          **A2 `-ub` 扫描（可能是白捡的钱）** —— 反量化是**每次 matmul 的固定开销、与 n 无关**，ubatch 越大摊得越薄；**A3 一行改码** —— env 放大 `MMQ_DP4A_MAX_BATCH_SIZE` 让预填充改走 MMQ 融合 dp4a（不建 F16 副本）对打；A4 才是有头寸后的内核工作。
+       ⑳ **顺带拿到一个可证伪的预测**：两点二次拟合 `t = a*n + b*n^2`（`t(8192)=3.2451`、`t(32768)=15.1369`）=> **a = 3.742e-4 s/token、b = 2.678e-9 s/token^2**
+          => 二次项（注意力）在 8K 占 **5.5%**、在 32K 占 **19.0%**、与线性项相等点在 **n ≈ 140K** => **预测 pp65536 ≈ 1820 t/s**。⚠️ 两点定两参数**恰好确定、无误差估计**，只当假设；`-p 65536` 一枪可判。
+       ㉑ ★★ **教训（比数字更值钱）**：「性能数字恰好接近某个 roofline 的 97%」被当成了「它在跑那条路」的证据 —— **拿相关性当因果**，代价是**一整条主轴方向错误**（子代理已经在写这条路的内核）。
+          ⇒ **规矩：凡「它在用 X 而不是 Y」的判断，必须落到「读分派链到确定」或「一个只有 X/Y 之一能通过的实验」**，不得用「数值接近某峰值」代替。
+    —— Round 215（**A' 第一形态被否证 + 1cat 对比的按卡归一更正；本会话第三次「文档把差距说大了」**）：
+       ㉒ 子代理把「Q8_0 -> FP16 反量化 + cuBLAS」显式实现成 env 门控 `GGML_CUDA_SM70_HMMA_Q8` 并做同源 A/B：**A1(off) pp8192 2523.66 / pp32768 2163.16；B1(on) 2504.18 / 2153.60 ⇒ -0.8% / -0.4%**。
+          控制臂与官方基线（2524.55 / 2164.72）吻合到 **0.04%** ⇒ 口径干净。**A/B 有效性已独立核过**：`libggml-cuda.so` md5 由 `dfb838b3...` 变为 **`89fe01bd...`**、二进制标记串 `GGML_CUDA_SM70_HMMA_Q8 enabled, using Q8_0 to FP16 dequant plus cuBLAS` 在库内、`libggml-base.so` 未变 ⇒ 两臂同二进制 + 不同 env。
+       ㉓ **为什么本该没有收益**：R213 的读码已证 **默认路径就是「全量反量化成 F16 + cuBLAS」** ⇒ 把它显式重写一遍等于把默认行为再实现一遍。
+          ⇒ **「那 40%（60.8 vs 103 TFLOPS）来自反量化」不成立**；40% 更可能是 **n=512 与 n=8192 的差别**（裸 cuBLAS 是 n=8192 测的，R203 的 60.8 是 n=512 且未切分）。
+          ⇒ **节点 DEQ 的 A4（自写融合内核 / F16 副本缓存）作废，不得再投入**；A3 优先级下调。
+       ㉔ **按卡归一更正**：`SESSION-2026-09-20-measurements.md:773` 早就写明 1cat 的 3567-4069 是 **4 卡**，而我们全部预填充数字是 **3 卡**，但 `PLAN-to-180ts.md:19` 与 `AGENTS.md` 直接拿原始 t/s 相除并写成「差 1.65-1.88x」。
+          归一后：我们 pp32768 **721 t/s/卡**、pp8192 841；1cat 32K **1010-1017**、64K 892 ⇒ **同长度真实缺口约 1.40x**。
+          附带核过：**权重位数对预填充几乎无关**（每 ubatch 每卡读 9.68 GB 约 13.8 ms，而每 ubatch 约 811 ms ⇒ 1.7%）⇒ 他们用 NVFP4 不解释缺口（其契约见 `1CAT-PORT-BACKLOG.md:187`）。
+       ㉕ **新实验（零改码，已派）：预填充的 TP 扩展性** —— TP3/TP4/TP6 的 `pp32768` 之比是否约 4/3。明显小于 4/3 ⇒ TP 开销在吃预填充，**上 4 卡就是现货**（注意解码侧「加卡不买时间」是 AR 延迟的账，预填充没测过）。
+       ㉖ ★★ **本会话第三次「前提被推翻」，三次都是同一方向：文档把差距说得比实际更大。** ① R211/213 把「60.8 约等于 dp4a 峰值 97%」当成「在跑 dp4a」；② R213 把「换张量核能翻倍」当主线（本就在张量核上）；③ R215 拿 4 卡的 t/s 比 3 卡的 t/s。
+          ⇒ **新增两条硬规矩（已写入 AGENTS.md 与 goal）**：**① 任何跨系统性能对比，先把两侧的「卡数/形状/量化/长度/是否切分」对齐再相除；② 判断「它在用 X 而不是 Y」必须读分派链到确定，或做一个只有 X/Y 之一能通过的实验，不得用「数值接近某峰值」代替。**
+    —— Round 221（**主线接手机器：清库重建 + 长度扫描跑到 131072；R214 的机制变化彻底出局；新增 ffn_down 头寸**）：
+       ㉘ 用户授权「必要时直接工作」⇒ 主线按**单测量源**原则接手：先发停手令（避免 §4.24 双任务互相污染），再把「等空 -> 清库重建 -> 扫描」串成一条远端脚本顺序执行。
+       ㉙ **清库重建（解决 R220 的空操作）**：`rm -f` 那个 `.o` 后重建 ⇒ `BUILD_RC=0 ERRORLINES=0`、**`OBJ_MARKER=0`**、**`LIB_MARKER=0`**、`libggml-cuda.so` md5 = **`ad6d7fe6975981b9ae191a8360ba118a`**、`libggml-base.so` 未变。
+          ⚠️ **md5 没有回到对照值 `dfb838b3199e7cd1e9f4fab861e11557`** ⇒ **该 lib 的构建不是逐位可复现的** ⇒ **规矩：对照库的判据用「四库 md5 + 标记串 + 同源构建流程」，不能指望 md5 逐位复现。**
+       ㉚ **长度扫描跑完（TP3, -ub 2048, r=3）**：pp8192 2503.29 / pp32768 2147.72 / pp65536 1790.92 / **pp131072 1343.31** ⇒ **log-log 斜率恒为 −0.224，8192→131072 只降到 1/1.864，无拐点**，两点模型全程只高估 1.6-2.6% ⇒ **R214 的「32K→256K 机制变化」彻底出局**（主因是 ub 口径差）。
+       ㉛ ★ **新增头寸（节点 FFNDOWN）**：`ffn_down` 形状 W[5120,17408]xX[8192,17408] 在 cuBLAS 里只有 **67.8 TFLOPS**，比其它形状（101-103）**差约 33%**，而它占 GEMM FLOPs 约 21% ⇒ 端到端约 **4%**。属「换算法/heuristic」类，成本低，**此前无任何节点覆盖**。
+       ㉜ **R217 的归属更正**：那批解码 TP 臂（`tp4-ab.log` 21:04、`tp56.log` 21:57）**不是子代理 37e83355 跑的**（它明确否认，其 ABBA 到 22:56 才完），而是**本会话更早时段**跑的，且**阶段小结里早已记过**（ms/轮 51.86-51.90 / 53.7-53.9 / 56.5-60.5 与之逐项吻合）⇒ R217 的真实增量只有「把 TP4/5/6 的门值列全」。
+       ㉝ **污染窗口已核**：子代理那条自动链占机 **23:01:01 – 23:11:27**；我的链条 23:07:55 启动后先等 `pgrep llama-bench` 为空（`IDLE_AFTER_TICKS=15` ⇒ 约 23:11:40 通过）**才开始重建与扫描** ⇒ **R221 全部数据落在窗口之外** ✓（`p0.log` 的 ub=512 点更是 Sep 20 22:10）。
+       ㉞ **两条新规矩（子代理自查贡献，已进 §4）**：① **还原源码后必须 `rm -f` 目标 `.o`**，验收看**标记串 + md5**而不是 `BUILD_RC`（mtime 保留会导致 make **漏编**，是 §4.28 的反方向）；② **发现负结论后立刻停掉自动续跑的长链**，长链每阶段前重查「这一阶段还有意义吗」。
+       ㉗ **goal 已按用户直接指示更新到 revision 2**：把「60.8 约等于 dp4a 97% ⇒ 换张量核」这条作废前提从目标里摘掉，改为 R213 的分派链定论 + R215 的负结果与按卡归一缺口，预填充待办改为「长度扫描 / TP 扩展性 / ub 扫描」三条。
 ```
 
 ## 5. 作业纪律（血泪）

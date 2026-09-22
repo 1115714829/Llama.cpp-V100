@@ -1,0 +1,96 @@
+diff --git a/common/speculative.cpp b/common/speculative.cpp
+index bfc0677da..9ac011c71 100644
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -1211,8 +1211,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+                 float   * ui = unary.data() + (size_t) i * top_k;
+ 
+                 // top-k scan keeping the largest values in descending order
+-                std::vector<int32_t> ids(top_k, 0);
+-                std::vector<float>   vals(top_k, -INFINITY);
++                GGML_ASSERT(top_k <= 16);
++                int32_t ids[16];
++                float   vals[16];
++                for (int32_t k = 0; k < top_k; ++k) { ids[k] = 0; vals[k] = -INFINITY; }
+                 for (int64_t t = 0; t < n_vocab; ++t) {
+                     const float v = logits[t];
+                     if (v <= vals[top_k - 1]) {
+@@ -1260,9 +1262,78 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+         // gate = selector_hidden^T x hidden_state, rank-major: one selector row is read once and reused
+         // for every block position. Each dot product keeps its original accumulation order, so the
+         // values are bit-identical to the position-major form.
++        // R232 (env GGML_SPEC_SELECTOR_VEC): the n_tokens dot products of one selector row share
++        // that row, so the block positions become the vector lanes. Each lane keeps its own
++        // accumulator and its own accumulation order, so every dot product is bit-identical to
++        // the scalar form while the row load is amortised over the lanes.
++        // R256: the lane-vectorised gate is the default now (it measures -0.33 ms per call and is
++        // bit-identical); GGML_SPEC_SELECTOR_VEC=0 forces the scalar path back for A/B runs.
++        const char * sel_vec_env = getenv("GGML_SPEC_SELECTOR_VEC");
++        const bool sel_vec = (sel_vec_env == nullptr) || (atoi(sel_vec_env) != 0);
++        std::vector<float> embd_T;
++        if (sel_vec) {
++            embd_T.resize((size_t) n_embd_dec * n_tokens);
++            for (int32_t i = 0; i < n_tokens; ++i) {
++                const float * e = embd_all + (size_t) i * n_embd_dec;
++                for (int32_t d = 0; d < n_embd_dec; ++d) {
++                    embd_T[(size_t) d * n_tokens + i] = e[d];
++                }
++            }
++        }
+         auto work_gate = [&](int32_t k_beg, int32_t k_end) {
+             for (int32_t k = k_beg; k < k_end; ++k) {
+                 const float * row = sel_hidden.data() + (size_t) k * n_embd_dec;
++                if (sel_vec && n_tokens == 8) {
++                    float s0[8] = {0}, s1[8] = {0}, s2[8] = {0}, s3[8] = {0};
++                    int32_t d = 0;
++                    for (; d + 4 <= n_embd_dec; d += 4) {
++                        const float c0 = row[d + 0], c1 = row[d + 1], c2 = row[d + 2], c3 = row[d + 3];
++                        const float * t0 = embd_T.data() + (size_t) (d + 0) * 8;
++                        const float * t1 = embd_T.data() + (size_t) (d + 1) * 8;
++                        const float * t2 = embd_T.data() + (size_t) (d + 2) * 8;
++                        const float * t3 = embd_T.data() + (size_t) (d + 3) * 8;
++                        s0[0] += c0 * t0[0];
++                        s0[1] += c0 * t0[1];
++                        s0[2] += c0 * t0[2];
++                        s0[3] += c0 * t0[3];
++                        s0[4] += c0 * t0[4];
++                        s0[5] += c0 * t0[5];
++                        s0[6] += c0 * t0[6];
++                        s0[7] += c0 * t0[7];
++                        s1[0] += c1 * t1[0];
++                        s1[1] += c1 * t1[1];
++                        s1[2] += c1 * t1[2];
++                        s1[3] += c1 * t1[3];
++                        s1[4] += c1 * t1[4];
++                        s1[5] += c1 * t1[5];
++                        s1[6] += c1 * t1[6];
++                        s1[7] += c1 * t1[7];
++                        s2[0] += c2 * t2[0];
++                        s2[1] += c2 * t2[1];
++                        s2[2] += c2 * t2[2];
++                        s2[3] += c2 * t2[3];
++                        s2[4] += c2 * t2[4];
++                        s2[5] += c2 * t2[5];
++                        s2[6] += c2 * t2[6];
++                        s2[7] += c2 * t2[7];
++                        s3[0] += c3 * t3[0];
++                        s3[1] += c3 * t3[1];
++                        s3[2] += c3 * t3[2];
++                        s3[3] += c3 * t3[3];
++                        s3[4] += c3 * t3[4];
++                        s3[5] += c3 * t3[5];
++                        s3[6] += c3 * t3[6];
++                        s3[7] += c3 * t3[7];
++                    }
++                    for (int32_t i = 0; i < 8; ++i) {
++                        float s = (s0[i] + s1[i]) + (s2[i] + s3[i]);
++                        for (int32_t dd = d; dd < n_embd_dec; ++dd) {
++                            s += row[dd] * embd_T[(size_t) dd * 8 + i];
++                        }
++                        gate[(size_t) i * rank + k] = s;
++                    }
++                    continue;
++                }
+                 for (int32_t i = 0; i < n_tokens; ++i) {
+                     const float * embd = embd_all + (size_t) i * n_embd_dec;
+                     // four partial sums shorten the FMA dependency chain; the reduction order is fixed

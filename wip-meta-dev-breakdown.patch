@@ -1,0 +1,85 @@
+diff --git a/ggml/src/ggml-backend-meta.cpp b/ggml/src/ggml-backend-meta.cpp
+--- a/ggml/src/ggml-backend-meta.cpp
++++ b/ggml/src/ggml-backend-meta.cpp
+@@ -2024,6 +2024,13 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend,
+     static int64_t n_mt_calls    = 0;
+     static int64_t n_mt_sub      = 0;
+     static int64_t n_mt_ar       = 0;
++    // dev breakdown: per-device time, per-(i,j) compute time distribution and subgraph sizes
++    static constexpr size_t mt_max_dev = 8;
++    static int64_t t_mt_devj_us[mt_max_dev] = {0};
++    static int64_t n_mt_computes  = 0;
++    static int64_t n_mt_nodes_sum = 0;
++    static int64_t n_mt_hist[4]   = {0}; // <20, 20-60, 60-150, >150 us
++    static std::vector<int64_t> mt_ij_us;
+     const int64_t mt_fn0 = mt_enabled ? ggml_time_us() : 0;
+ 
+     // If the previous cgraph had a defined UID it can be used to skip rebuilding the subgraphs per simple backend.
+@@ -2520,7 +2527,18 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend,
+                         (unsigned long long) bcj.cgraphs[i].cgraph_main->uid,
+                         (size_t) bcj.cgraphs[i].cgraph_main->n_nodes);
+             }
++            const int64_t mt_dij = mt_enabled ? ggml_time_us() : 0;
+             const ggml_status status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
++            if (mt_enabled) {
++                const int64_t dt = ggml_time_us() - mt_dij;
++                if (j < mt_max_dev) {
++                    t_mt_devj_us[j] += dt;
++                }
++                mt_ij_us.push_back(dt);
++                n_mt_computes++;
++                n_mt_nodes_sum += bcj.cgraphs[i].cgraph_main->n_nodes;
++                n_mt_hist[dt < 20 ? 0 : dt < 60 ? 1 : dt < 150 ? 2 : 3]++;
++            }
+             if (dbg_key && i + 1 == backend_ctx->n_subgraphs && j + 1 == n_backends) {
+                 dbg_key_round++;
+             }
+@@ -2581,16 +2599,46 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend,
+         n_mt_calls++;
+         if (n_mt_calls % 64 == 0) {
+             const double k = 1e3 * (double) n_mt_calls;
+-            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f ar=%.3f ms/call | prologue=%.3f (%.1f%%)%c",
++            char dev_j[256] = "";
++            int dev_j_len = 0;
++            for (size_t j = 0; j < n_backends && j < mt_max_dev; j++) {
++                const int n = snprintf(dev_j + dev_j_len, sizeof(dev_j) - dev_j_len, " dev%zu=%.3f", j, (double) t_mt_devj_us[j] / k);
++                if (n <= 0 || dev_j_len + n >= (int) sizeof(dev_j)) {
++                    break;
++                }
++                dev_j_len += n;
++            }
++            int64_t ij_min = 0;
++            int64_t ij_med = 0;
++            int64_t ij_max = 0;
++            if (!mt_ij_us.empty()) {
++                std::vector<int64_t> srt = mt_ij_us;
++                std::sort(srt.begin(), srt.end());
++                ij_min = srt.front();
++                ij_med = srt[srt.size()/2];
++                ij_max = srt.back();
++            }
++            fprintf(stderr, "[META] calls=%lld sub/call=%.1f ar/call=%.1f | total=%.3f loop=%.3f dev=%.3f%s ar=%.3f ms/call | prologue=%.3f (%.1f%%) | dev_hist_us n=%lld min=%lld med=%lld max=%lld | <20=%lld 20-60=%lld 60-150=%lld >150=%lld | nodes/sub=%.1f%c",
+                     (long long) n_mt_calls,
+                     (double) n_mt_sub / (double) n_mt_calls,
+                     (double) n_mt_ar / (double) n_mt_calls,
+                     (double) t_mt_total_us / k,
+                     (double) t_mt_loop_us / k,
+                     (double) t_mt_dev_us / k,
++                    dev_j,
+                     (double) t_mt_ar_us / k,
+                     (double) (t_mt_total_us - t_mt_loop_us) / k,
+-                    100.0 * (double) (t_mt_total_us - t_mt_loop_us) / (double) (t_mt_total_us ? t_mt_total_us : 1), 10);
++                    100.0 * (double) (t_mt_total_us - t_mt_loop_us) / (double) (t_mt_total_us ? t_mt_total_us : 1),
++                    (long long) n_mt_computes,
++                    (long long) ij_min,
++                    (long long) ij_med,
++                    (long long) ij_max,
++                    (long long) n_mt_hist[0],
++                    (long long) n_mt_hist[1],
++                    (long long) n_mt_hist[2],
++                    (long long) n_mt_hist[3],
++                    (double) n_mt_nodes_sum / (double) (n_mt_computes ? n_mt_computes : 1),
++                    10);
+         }
+     }
+     return GGML_STATUS_SUCCESS;
