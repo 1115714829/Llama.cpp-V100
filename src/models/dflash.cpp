@@ -139,10 +139,11 @@ void llama_model_dflash::load_arch_tensors(llama_model_loader &) {
             throw std::runtime_error("DFlash2 hidden size is too small for the selector lattice");
         }
 
-        // Under tensor parallelism the lm_head is split along the vocabulary, which the
-        // in-graph selector cannot consume, so DFlash2 ranks on the CPU and reads these tables
-        // straight from the GGUF file; otherwise the in-graph selector uses them in the model
-        const bool use_cpu_selector = params.split_mode == LLAMA_SPLIT_MODE_TENSOR;
+        // Under tensor parallelism the lm_head is split along the vocabulary, so DFlash2 ranks
+        // on the CPU by default and reads these tables straight from the GGUF file.
+        // GGML_SPEC_SELECTOR_INGRAPH=1 forces the in-graph selector under TP (loads the tables).
+        static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+        const bool use_cpu_selector = params.split_mode == LLAMA_SPLIT_MODE_TENSOR && !sel_ingraph;
         dflash_selector_prev   = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_PREV,   "weight"), { rank, n_vocab }, use_cpu_selector ? TENSOR_SKIP : 0);
         dflash_selector_next   = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_NEXT,   "weight"), { rank, n_vocab }, use_cpu_selector ? TENSOR_SKIP : 0);
         dflash_selector_hidden = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_HIDDEN, "weight"), { n_embd, rank }, 0);
@@ -764,7 +765,8 @@ llama_model_dflash::graph<false>::graph(const llama_model & model, const llm_gra
     // DFlash2 under tensor parallelism ranks on the CPU from the gathered lm_head output, so
     // the decoder hidden states ride the nextn slot; without tensor parallelism the in-graph
     // selector packs its lattice there instead (see below)
-    if (model.dflash_selector_hidden && model.split_mode() == LLAMA_SPLIT_MODE_TENSOR) {
+    static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+    if (model.dflash_selector_hidden && model.split_mode() == LLAMA_SPLIT_MODE_TENSOR && !sel_ingraph) {
         res->t_h_nextn = cur;
     }
 
@@ -820,10 +822,13 @@ llama_model_dflash::graph<false>::graph(const llama_model & model, const llm_gra
         build_dspark_markov_head(*this, model, inp_tokens);
     }
 
-    // DFlash2 ranks its candidates in-graph when the lm_head is not split along the vocabulary
-    if (model.dflash_selector_hidden && model.split_mode() != LLAMA_SPLIT_MODE_TENSOR) {
+    // DFlash2 ranks its candidates in-graph when the lm_head is not split along the vocabulary;
+    // GGML_SPEC_SELECTOR_INGRAPH enables it under tensor parallelism too (split-state rules
+    // in ggml-backend-meta.cpp give per-device top-k pieces and the lattice packs as usual)
+    if (model.dflash_selector_hidden && (model.split_mode() != LLAMA_SPLIT_MODE_TENSOR || sel_ingraph)) {
         build_dflash2_selector(*this, model, inp_tokens);
     }
+
 }
 
 // DSV4 DSpark decoder, dual-mode by batch type (see the DFlash decoder above):

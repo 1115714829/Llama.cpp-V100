@@ -1577,7 +1577,10 @@ int llama_context::encode(const llama_batch & batch_inp) {
                     const uint32_t n_embd_out = hparams.n_embd_out();
 
                     GGML_ASSERT(n_tokens*n_embd_out <= (int64_t) embd.size);
-                    ggml_backend_tensor_get_async(backend_embd, t_embd, embd.data, 0, n_tokens*n_embd_out*sizeof(float));
+                    // copy the tensor's own layout size: equal to n_tokens*n_embd_out for
+                    // standard embeddings, smaller for packed outputs (GGML_SPEC_SELECTOR_INGRAPH)
+                    const size_t embd_bytes = (size_t) n_tokens * t_embd->ne[0] * ggml_element_size(t_embd);
+                    ggml_backend_tensor_get_async(backend_embd, t_embd, embd.data, 0, embd_bytes);
                 } break;
             case LLAMA_POOLING_TYPE_MEAN:
             case LLAMA_POOLING_TYPE_CLS:
@@ -1978,7 +1981,10 @@ int llama_context::decode(const llama_batch & batch_inp) {
                         if (n_outputs) {
                             GGML_ASSERT( n_outputs_prev + n_outputs <= n_outputs_all);
                             GGML_ASSERT((n_outputs_prev + n_outputs)*n_embd_out <= (int64_t) embd.size);
-                            ggml_backend_tensor_get_async(backend_embd, t_embd, embd_out, 0, n_outputs*n_embd_out*sizeof(float));
+                            // copy the tensor's own row size: equals n_embd_out for standard
+                            // embeddings, smaller for packed outputs (GGML_SPEC_SELECTOR_INGRAPH)
+                            const size_t row_bytes = t_embd->ne[0] * ggml_element_size(t_embd);
+                            ggml_backend_tensor_get_async(backend_embd, t_embd, embd_out, 0, n_outputs*row_bytes);
                         }
                     } break;
                 case LLAMA_POOLING_TYPE_MEAN:

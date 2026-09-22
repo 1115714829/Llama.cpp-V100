@@ -541,14 +541,41 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
         if (scalar_only && ret.axis >= 0 && ret.axis < GGML_MAX_DIMS) {
             ret = {GGML_BACKEND_SPLIT_AXIS_UNKNOWN, {0}, {1}, 1};
         }
-        GGML_ASSERT(ret.axis != GGML_BACKEND_SPLIT_AXIS_UNKNOWN);
+        if (ret.axis == GGML_BACKEND_SPLIT_AXIS_UNKNOWN) {
+            GGML_ABORT("generic split states: node=%s op=%s src0=%s axis0=%d src1=%s axis1=%d",
+                    tensor->name, ggml_op_name(tensor->op),
+                    tensor->src[0] ? tensor->src[0]->name : "-", tensor->src[0] ? (int) src_ss[0].axis : -1,
+                    tensor->src[1] ? tensor->src[1]->name : "-", tensor->src[1] ? (int) src_ss[1].axis : -1);
+        }
         return ret;
     };
+
+    // all GGML_SPEC_SELECTOR_INGRAPH additions stay inert unless the env is set
+    static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+    // set by the selector rules below to keep their piece sizes out of the ratio fill
+    bool pieces_owned = false;
 
     // Some ops process data on a per-row bases:
     auto handle_per_row = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
         GGML_ASSERT(src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0);
         return src_ss[0];
+    };
+
+    // GGML_SPEC_SELECTOR_INGRAPH: top-k over an axis-0 split source runs per device on its
+    // slice. the output keeps the same split with a k-sized piece per device and local ids;
+    // consumers must be piece-aligned (see handle_get_rows) and rebase the ids on the host.
+    auto handle_top_k = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+        static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+        if (sel_ingraph && src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_0) {
+            pieces_owned = true;
+            ggml_backend_meta_split_state ret = {GGML_BACKEND_SPLIT_AXIS_0, {0}, {1}, 1};
+            for (size_t j = 0; j < n_bufs; j++) {
+                // contributor mask: only bufs holding a nonzero piece compute top-k
+                ret.ne[j] = src_ss[0].ne[j] != 0 ? tensor->ne[0] : 0;
+            }
+            return ret;
+        }
+        return handle_per_row(src_ss);
     };
 
     // Some ops broadcast the src1 data across src0:
@@ -567,6 +594,31 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
 
     auto handle_concat = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
         const ggml_backend_meta_split_axis concat_axis = ggml_backend_meta_split_axis(ggml_get_op_params_i32(tensor, 0));
+        // GGML_SPEC_SELECTOR_INGRAPH: concat along the split axis keeps the split with
+        // per-buf pieces summed across sources (each device concatenates its own pieces;
+        // the sum of pieces equals the logical size by construction).
+        if (sel_ingraph && int(concat_axis) == int(src_ss[0].axis) && src_ss[0].axis >= 0 && src_ss[0].axis < GGML_MAX_DIMS) {
+            pieces_owned = true;
+            ggml_backend_meta_split_state ret = {src_ss[0].axis, {0}, {1}, 1};
+            bool ok = true;
+            for (size_t i = 0; i < GGML_MAX_SRC && ok; i++) {
+                if (tensor->src[i] == nullptr) {
+                    continue;
+                }
+                if (src_ss[i].axis != src_ss[0].axis) {
+                    ok = false;
+                    break;
+                }
+                for (size_t j = 0; j < n_bufs; j++) {
+                    for (size_t s = 0; s < src_ss[i].n_segments; s++) {
+                        ret.ne[j] += src_ss[i].ne[s*n_bufs + j] * src_ss[i].nr[s];
+                    }
+                }
+            }
+            if (ok) {
+                return ret;
+            }
+        }
         if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED && src_ss[1].axis >= 0 && src_ss[1].axis < GGML_MAX_DIMS) {
             GGML_ASSERT(concat_axis != src_ss[1].axis);
             return src_ss[1];
@@ -676,6 +728,35 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
     };
 
     auto handle_view = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+        // GGML_SPEC_SELECTOR_INGRAPH: a dim-0 sub-range of an axis-0 split keeps the split
+        // with per-buf pieces clipped to the view range (contributor mask for free pieces).
+        if (sel_ingraph && src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_0 && tensor->ne[1] == tensor->src[0]->ne[1] &&
+                tensor->nb[1] == tensor->src[0]->nb[1]) {
+            const int64_t base_ne_in = tensor->src[0]->ne[0];
+            int64_t start = 0;
+            {
+                const char * p0 = (const char *) tensor->src[0]->data;
+                const char * p1 = (const char *) tensor->data;
+                if (p0 != nullptr && p1 != nullptr && tensor->src[0]->buffer == tensor->buffer) {
+                    start = (int64_t) ((p1 - p0) / tensor->nb[0]);
+                } else if (p0 == nullptr && p1 != nullptr) {
+                    // before allocation ggml_view stores the byte offset in the data pointer
+                    start = (int64_t) ((uintptr_t) p1 / tensor->nb[0]);
+                }
+            }
+            pieces_owned = true;
+            ggml_backend_meta_split_state ret = {GGML_BACKEND_SPLIT_AXIS_0, {0}, {1}, 1};
+            int64_t pos = 0;
+            for (size_t j = 0; j < n_bufs; j++) {
+                const int64_t piece = src_ss[0].ne[j];
+                const int64_t lo = pos > start ? pos : start;
+                const int64_t hi = (pos + piece) < (start + tensor->ne[0]) ? (pos + piece) : (start + tensor->ne[0]);
+                ret.ne[j] = hi > lo ? hi - lo : 0;
+                pos += piece;
+            }
+            (void) base_ne_in;
+            return ret;
+        }
         if (ggml_is_contiguous(tensor) && ggml_is_contiguous(tensor->src[0])) {
             return handle_reshape(src_ss);
         }
@@ -753,6 +834,15 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
     auto handle_get_rows = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
         if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_0 && src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED) {
             return src_ss[0];
+        }
+        // GGML_SPEC_SELECTOR_INGRAPH: piece-aligned ids select rows local to each device
+        // slice, so the output carries the ids piece state, shifted by one dim because
+        // the selected rows sit in front of the ids dimensions (out = [a.ne0, ids dims...]).
+        if (sel_ingraph && src_ss[1].axis >= 0 && src_ss[1].axis < GGML_MAX_DIMS - 1) {
+            pieces_owned = true;
+            ggml_backend_meta_split_state ret = src_ss[1];
+            ret.axis = ggml_backend_meta_split_axis(int(src_ss[1].axis) + 1);
+            return ret;
         }
         return handle_generic(src_ss, /*scalar_only =*/ true);
     };
@@ -1005,7 +1095,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
             } break;
             case GGML_OP_ARGSORT:
             case GGML_OP_TOP_K: {
-                split_state = handle_per_row(src_ss);
+                split_state = handle_top_k(src_ss);
             } break;
             case GGML_OP_LEAKY_RELU: {
                 split_state = handle_generic(src_ss, /*scalar_only =*/ false);
@@ -1074,7 +1164,12 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
             bool first_src_split_by_axis = true;
             const size_t n_bufs = ggml_backend_meta_buffer_n_bufs(tensor->buffer);
 
-            for (size_t i = 0; i < GGML_MAX_SRC; i++) {
+            // A handler that already filled the piece sizes (GGML_SPEC_SELECTOR_INGRAPH
+            // top-k / view / concat rules) keeps them as-is; only zero placeholders take
+            // the first-src ratio fill below (those scale uniformly along the split dim).
+            const bool pieces_filled = pieces_owned;
+
+            for (size_t i = 0; (pieces_filled ? false : (i < GGML_MAX_SRC)); i++) {
                 if (tensor->src[i] == nullptr || src_ss[i].axis < 0 || src_ss[i].axis >= GGML_MAX_DIMS) {
                     continue;
                 }
@@ -1108,7 +1203,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
                 }
                 first_src_split_by_axis = false;
             }
-            GGML_ASSERT(!first_src_split_by_axis);
+            GGML_ASSERT(pieces_filled || !first_src_split_by_axis);
         }
         return split_state;
     };
@@ -2007,7 +2102,12 @@ static void ggml_backend_meta_get_tensor_async(ggml_backend_t backend, const ggm
                     i_stop - i_start, chunk_size_j, chunk_size_full);
                 offset_j += chunk_size_j;
             }
-            GGML_ASSERT(offset_j == chunk_size_full);
+            if (offset_j != chunk_size_full) {
+                GGML_ABORT("tensor get splice mismatch: tensor=%s axis=%d chunk_full=%zu offset_j=%zu n_bufs=%zu ne=[%lld,%lld]",
+                        tensor->name, (int) split_state.axis, chunk_size_full, offset_j,
+                        ggml_backend_meta_buffer_n_bufs(tensor->buffer),
+                        (long long) tensor->ne[0], (long long) tensor->ne[1]);
+            }
         } break;
         case GGML_BACKEND_SPLIT_AXIS_MIRRORED: {
             // TODO other simple backend may be better
@@ -2115,6 +2215,57 @@ static uint64_t ggml_backend_meta_capture_sig(struct ggml_cgraph * cgraph, ggml_
     }
     return h;
 }
+
+// GGML_META_SUBGRAPH_CAPTURE: content signature of one device subgraph (F3). same contract as
+// capture_sig: equal signature means the recorded kernels read the same addresses and shapes.
+static uint64_t ggml_backend_meta_sub_sig(struct ggml_cgraph * g, size_t dev_idx) {
+    uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h](uint64_t v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+    };
+    mix((uint64_t) dev_idx);
+    mix((uint64_t) g->n_nodes);
+    mix((uint64_t) g->n_leafs);
+    // content only: the addresses and shapes the kernels bake in. no object pointers, so a
+    // rebuilt-but-equivalent graph keeps the same signature (stability across calls).
+    for (int i = 0; i < g->n_leafs; i++) {
+        const ggml_tensor * leaf = g->leafs[i];
+        mix((uint64_t) (uintptr_t) leaf->data);
+        mix((uint64_t) leaf->type);
+        for (int k = 0; k < GGML_MAX_DIMS; k++) {
+            mix((uint64_t) leaf->ne[k]);
+            mix((uint64_t) leaf->nb[k]);
+        }
+    }
+    for (int i = 0; i < g->n_nodes; i++) {
+        const ggml_tensor * node = g->nodes[i];
+        mix((uint64_t) (uintptr_t) node->data);
+        mix((uint64_t) node->op);
+        mix((uint64_t) node->type);
+        for (int k = 0; k < GGML_MAX_DIMS; k++) {
+            mix((uint64_t) node->ne[k]);
+            mix((uint64_t) node->nb[k]);
+        }
+        for (int s = 0; s < GGML_MAX_SRC; s++) {
+            const ggml_tensor * src = node->src[s];
+            if (src != nullptr) {
+                mix((uint64_t) (uintptr_t) src->data);
+                mix((uint64_t) src->op);
+            } else {
+                mix(0);
+            }
+        }
+        mix(node->view_src != nullptr);
+    }
+    return h;
+}
+
+struct ggml_backend_meta_sub_slot {
+    bool     used;
+    uint64_t sig;
+    void   * exec;
+};
 
 static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
     GGML_ASSERT(cgraph->grads == nullptr);
@@ -2637,6 +2788,16 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
         backend_ctx->capture_begin != nullptr && backend_ctx->capture_end != nullptr && backend_ctx->capture_launch != nullptr &&
         backend_ctx->capture_discard != nullptr;
 
+    // F3: capture each (subgraph, device) compute as its own graph and replay it. The collectives
+    // stay outside the capture (the officially recommended form), unlike GGML_META_FULLGRAPH.
+    static const bool sub_capture = getenv("GGML_META_SUBGRAPH_CAPTURE") != nullptr && atoi(getenv("GGML_META_SUBGRAPH_CAPTURE")) != 0;
+    static bool sub_failed = false;
+    static ggml_backend_meta_sub_slot sub_slots[512];
+    static size_t sub_next = 0;
+    const bool sub_ready = sub_capture && !fullgraph && !fg_ready && !sub_failed &&
+        backend_ctx->capture_begin != nullptr && backend_ctx->capture_end != nullptr &&
+        backend_ctx->capture_launch != nullptr && backend_ctx->capture_discard != nullptr;
+
     auto run_subgraphs = [&]() -> enum ggml_status {
     for (size_t i = 0; i < backend_ctx->n_subgraphs; i++) {
         const int64_t mt_d0 = mt_enabled ? ggml_time_us() : 0;
@@ -2649,7 +2810,112 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                         (size_t) bcj.cgraphs[i].cgraph_main->n_nodes);
             }
             const int64_t mt_dij = mt_enabled ? ggml_time_us() : 0;
-            const ggml_status status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+            ggml_status status = GGML_STATUS_SUCCESS;
+            bool sub_ran = false;
+            if (sub_ready) {
+                // memoize the signature per (subgraph, device): the full content walk costs more
+                // than the dispatch it replaces. validity stamp = graph + node count + endpoints.
+                static uint64_t     sub_sig_memo[4096];
+                static const void * sub_sig_key[4096];
+                static int          sub_sig_n[4096];
+                static const void * sub_sig_e0[4096];
+                static const void * sub_sig_e1[4096];
+                static const void * sub_sig_d0[4096];
+                const size_t memo_i = (i * n_backends + j) % 4096;
+                struct ggml_cgraph * gk = bcj.cgraphs[i].cgraph_main;
+                const void * e0 = gk->n_nodes > 0 ? (const void *) gk->nodes[0] : nullptr;
+                const void * e1 = gk->n_nodes > 0 ? (const void *) gk->nodes[gk->n_nodes - 1] : nullptr;
+                const void * d0 = gk->n_nodes > 0 ? (const void *) gk->nodes[0]->data : nullptr;
+                uint64_t sig;
+                if (sub_sig_key[memo_i] == (const void *) gk && sub_sig_n[memo_i] == gk->n_nodes &&
+                    sub_sig_e0[memo_i] == e0 && sub_sig_e1[memo_i] == e1 && sub_sig_d0[memo_i] == d0 &&
+                    sub_sig_memo[memo_i] != 0) {
+                    sig = sub_sig_memo[memo_i];
+                } else {
+                    sig = ggml_backend_meta_sub_sig(gk, j);
+                    sub_sig_key[memo_i] = (const void *) gk;
+                    sub_sig_n[memo_i]  = gk->n_nodes;
+                    sub_sig_e0[memo_i] = e0;
+                    sub_sig_e1[memo_i] = e1;
+                    sub_sig_d0[memo_i] = d0;
+                    sub_sig_memo[memo_i] = sig;
+                }
+                // direct-mapped slot: O(1) lookup (linear scans taxed miss-heavy calls)
+                ggml_backend_meta_sub_slot * sl_base = &sub_slots[sig % (sizeof(sub_slots)/sizeof(sub_slots[0]))];
+                ggml_backend_meta_sub_slot * hit = nullptr;
+                if (sl_base->used && sl_base->sig == sig && sl_base->exec != nullptr &&
+                    getenv("GGML_META_SUBCAP_RECORDONLY") == nullptr) {
+                    hit = sl_base;
+                }
+                static uint64_t sub_recs = 0;
+                static uint64_t sub_hits = 0;
+                if (hit != nullptr) {
+                    sub_hits++;
+                    if ((sub_hits & 511) == 1) {
+                        fprintf(stderr, "[SUBCAP] recs=%llu hits=%llu\n",
+                                (unsigned long long) sub_recs, (unsigned long long) sub_hits);
+                    }
+                    if (backend_ctx->capture_launch(bcj.backend, hit->exec)) {
+                        sub_ran = true;
+                    } else {
+                        backend_ctx->capture_discard(hit->exec);
+                        hit->used = false;
+                        hit->exec = nullptr;
+                    }
+                }
+                if (!sub_ran) {
+                    // second-seen recording via the slot itself (exec == null marks seen):
+                    // one-shot variants (per-call address churn) never pay capture+instantiate
+                    if (sl_base->used && sl_base->sig == sig && sl_base->exec == nullptr) {
+                        // second sighting: fall through to the record block below
+                    } else {
+                        sl_base->used = true;
+                        sl_base->sig  = sig;
+                        sl_base->exec = nullptr;
+                        status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+                        sub_ran = true;
+                    }
+                }
+                if (!sub_ran) {
+                    void * e = nullptr;
+                    bool computed = false;
+                    if (backend_ctx->capture_begin(bcj.backend)) {
+                        // capture records the kernels without running them
+                        status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+                        computed = true;
+                        if (backend_ctx->capture_end(bcj.backend, &e) && e != nullptr) {
+                            ggml_backend_meta_sub_slot * sl = sl_base;
+                            if (sl->used && sl->exec != nullptr) {
+                                backend_ctx->capture_discard(sl->exec);
+                            }
+                            sl->used = true;
+                            sl->sig  = sig;
+                            sl->exec = e;
+                            sub_recs++;
+                            sub_ran  = backend_ctx->capture_launch(bcj.backend, e);
+                            if (!sub_ran) {
+                                backend_ctx->capture_discard(e);
+                                sl->used = false;
+                                sl->exec = nullptr;
+                            }
+                        }
+                    }
+                    if (!sub_ran) {
+                        if (!computed) {
+                            status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+                            sub_ran = true;
+                        } else {
+                            // the kernels already ran during capture; nothing to replay
+                            sub_ran = true;
+                            GGML_LOG_WARN("%s: subgraph capture end failed, plain loop from now on\n", __func__);
+                            sub_failed = true;
+                        }
+                    }
+                }
+            }
+            if (!sub_ran) {
+                status = ggml_backend_graph_compute_async(bcj.backend, bcj.cgraphs[i].cgraph_main);
+            }
             if (mt_enabled) {
                 const int64_t dt = ggml_time_us() - mt_dij;
                 if (j < mt_max_dev) {

@@ -71,6 +71,17 @@ GGML_API bool ggml_gallocr_reserve_n(
 // returns false if using multiple buffers and a re-allocation is needed (call ggml_gallocr_reserve_n first to set the node buffers)
 GGML_API bool ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph * graph);
 
+// multi-slot alloc: slot key includes node/leaf buffer ids so different backend
+// assignments keep separate reserved plans (no full re-reserve on switch).
+// env GGML_GALLOCR_SLOTS=N sets the slot count (default on with 8 slots, 0 = off).
+// returns false when slots are disabled or no cached plan fits (caller must
+// fall back to ggml_gallocr_alloc_graph / ggml_gallocr_reserve_n).
+GGML_API bool ggml_gallocr_alloc_graph_n(
+    ggml_gallocr_t galloc,
+    struct ggml_cgraph * graph,
+    const int * node_buffer_ids,
+    const int * leaf_buffer_ids);
+
 GGML_API size_t ggml_gallocr_get_buffer_size(ggml_gallocr_t galloc, int buffer_id);
 
 // Utils

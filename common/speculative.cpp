@@ -990,8 +990,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
         selector_top_k = llama_model_dflash_selector_top_k(model_dft);
         is_dflash2     = selector_top_k > 0;
-        // under tensor parallelism the lm_head is split and the in-graph selector cannot run
-        is_dflash2_cpu = is_dflash2 && llama_model_get_split_mode(model_dft) == LLAMA_SPLIT_MODE_TENSOR;
+        // under tensor parallelism the lm_head is split and the CPU selector ranks by default;
+        // GGML_SPEC_SELECTOR_INGRAPH=1 switches to the in-graph selector (lattice walk)
+        static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+        is_dflash2_cpu = is_dflash2 && llama_model_get_split_mode(model_dft) == LLAMA_SPLIT_MODE_TENSOR && !sel_ingraph;
         mask_token_id = llama_vocab_mask(llama_model_get_vocab(model_dft));
 
         if (is_dflash2_cpu) {
@@ -999,6 +1001,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             // available after the decode; the hidden states ride the nextn output
             load_dflash2_selector();
         }
+
 
         if (is_dspark && this->params.p_min > 0.0f) {
             char buf[16] = {};
@@ -1256,7 +1259,30 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             }
         };
 
-        run_parallel(n_tokens, work_topk);
+        static const bool sel_pack = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+        if (sel_pack) {
+            // in-graph top-k pack: [2*top_k*n_dev, n_tokens], column-major per token, with
+            // device blocks of 2*top_k rows (local ids first, then unary values)
+            const float * pack = llama_get_embeddings(ctx_dft);
+            GGML_ASSERT(pack && "DFlash2 selector pack missing from the embd output");
+            // the vocabulary split follows the target model (the lm_head owner)
+            const int32_t n_dev = llama_model_n_devices(llama_get_model(params.ctx_tgt));
+            const int64_t n_pack = 2 * (int64_t) top_k * n_dev;
+            for (int32_t i = 0; i < n_tokens; ++i) {
+                int32_t * ci = cand.data()  + (size_t) i * top_k;
+                float   * ui = unary.data() + (size_t) i * top_k;
+                for (int32_t d = 0; d < n_dev; ++d) {
+                    const float * blk = pack + (size_t) i * n_pack + (size_t) d * 2 * top_k;
+                    const int32_t base = (int32_t) ((int64_t) n_vocab * d / n_dev);
+                    for (int32_t r = 0; r < top_k; ++r) {
+                        ci[d * top_k + r] = (int32_t) blk[r] + base;
+                        ui[d * top_k + r] = blk[top_k + r];
+                    }
+                }
+            }
+        } else {
+            run_parallel(n_tokens, work_topk);
+        }
         const int64_t t_topk1 = st_enabled ? ggml_time_us() : 0;
 
         // gate = selector_hidden^T x hidden_state, rank-major: one selector row is read once and reused
@@ -1561,7 +1587,9 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             for (int32_t i = 0; i < n_block_tokens; ++i) {
                 // the CPU-side DFlash2 selector needs the gathered lm_head output for every block
                 // position; the in-graph selector consumes it inside the graph instead
-                common_batch_add(batch, i == 0 ? dp.id_last : mask_token_id, n + i, { seq_id }, !is_dflash2 || is_dflash2_cpu);
+                static const bool sel_pack = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
+                common_batch_add(batch, i == 0 ? dp.id_last : mask_token_id, n + i, { seq_id },
+                        (!is_dflash2 || is_dflash2_cpu) && !sel_pack);
             }
         }
 

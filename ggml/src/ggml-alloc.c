@@ -479,6 +479,21 @@ struct node_alloc {
     struct tensor_alloc src[GGML_MAX_SRC];
 };
 
+// multi-slot plan cache: keep one reserved plan per graph shape so alternating
+// graphs do not force a full re-reserve on every sched call (GGML_GALLOCR_SLOTS)
+#define GGML_GALLOCR_MAX_SLOTS 8
+
+struct gallocr_slot {
+    int used;
+    uint64_t key;
+    int n_nodes;
+    int n_leafs;
+    struct node_alloc * node_allocs; // [n_nodes]
+    struct leaf_alloc * leaf_allocs; // [n_leafs]
+    struct vbuffer ** buffers; // [n_buffers] owned by the slot
+    uint64_t last_used;
+};
+
 struct ggml_gallocr {
     ggml_backend_buffer_type_t * bufts; // [n_buffers]
     struct vbuffer ** buffers; // [n_buffers]
@@ -493,7 +508,229 @@ struct ggml_gallocr {
 
     struct leaf_alloc * leaf_allocs; // [n_leafs]
     int n_leafs;
+
+    // multi-slot plan cache, 0 = disabled
+    int slots_n;
+    int slots_cur; // active slot index, -1 = none
+    uint64_t slots_seq;
+    struct gallocr_slot * slots; // [slots_n]
+    uint64_t slot_hit;
+    uint64_t slot_miss;
+
+    // whole-call fast path (GGML_GALLOCR_FAST, default on, 0 = off): skip the plan key and
+    // the plan walks when the same tensor set is re-allocated from the same plan
+    uint64_t plan_gen;   // bumped when the layout is rebuilt
+    uint64_t fast_stamp; // tensor identity + buffer ids of the last full alloc
+    uint64_t fast_gen;
+    uint64_t slot_fast;
+    int fast_slot;
+    int fast_n_nodes;
+    int fast_n_leafs;
+
+    // fast path diagnostics (GGML_GALLOCR_SLOTS_DEBUG)
+    uint64_t r_gen, r_stamp, r_slot, r_shape, r_data;
+    uint64_t t_key_us, t_slot_us, t_alloc_us, n_calls;
 };
+
+// cheap identity of a graph submission: tensor pointers and buffer ids only. the pointed
+// tensors are immutable after build, so an equal stamp means the plan result is unchanged.
+static uint64_t ggml_gallocr_fast_stamp(
+        const struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids) {
+    uint64_t s = 0xcbf29ce484222325ull;
+    for (int i = 0; i < graph->n_nodes; i++) {
+        s ^= (uint64_t) (uintptr_t) graph->nodes[i];
+        s *= 0x100000001b3ull;
+        s ^= (uint64_t) (uint32_t) (node_buffer_ids ? node_buffer_ids[i] : 0);
+        s *= 0x100000001b3ull;
+    }
+    for (int i = 0; i < graph->n_leafs; i++) {
+        s ^= (uint64_t) (uintptr_t) graph->leafs[i];
+        s *= 0x100000001b3ull;
+        s ^= (uint64_t) (uint32_t) (leaf_buffer_ids ? leaf_buffer_ids[i] : 0);
+        s *= 0x100000001b3ull;
+    }
+    return s;
+}
+
+// key = graph structure + node/leaf buffer ids (buffer ids matter: same shape with a
+// different backend assignment must not share a plan). covers node dst shape, src slot
+// pattern and src shapes: the plan places tensors by lifetime, so two graphs may share
+// a plan only if their wiring is the same. the hash only picks a slot; needs_realloc
+// re-validates all sizes after the slot is loaded.
+static uint64_t ggml_gallocr_plan_key(
+        const struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = h * 0x100000001b3ull + (uint64_t) graph->n_nodes;
+    h = h * 0x100000001b3ull + (uint64_t) graph->n_leafs;
+    for (int i = 0; i < graph->n_nodes; i++) {
+        const struct ggml_tensor * t = graph->nodes[i];
+        h = h * 0x100000001b3ull + (uint64_t) t->type;
+        h = h * 0x100000001b3ull + (uint64_t) t->op;
+        for (int d = 0; d < 4; d++) {
+            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
+        }
+        h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t->op_params[0];
+        h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
+        h = h * 0x100000001b3ull + (uint64_t) (node_buffer_ids ? node_buffer_ids[i] : 0);
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            const struct ggml_tensor * s = t->src[j];
+            if (s == NULL) {
+                continue;
+            }
+            h = h * 0x100000001b3ull + (uint64_t) j;
+            h = h * 0x100000001b3ull + (uint64_t) s->type;
+            for (int d = 0; d < 4; d++) {
+                h = h * 0x100000001b3ull + (uint64_t) s->ne[d];
+            }
+        }
+    }
+    for (int i = 0; i < graph->n_leafs; i++) {
+        const struct ggml_tensor * t = graph->leafs[i];
+        h = h * 0x100000001b3ull + (uint64_t) t->type;
+        for (int d = 0; d < 4; d++) {
+            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
+        }
+        h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
+        h = h * 0x100000001b3ull + (uint64_t) (leaf_buffer_ids ? leaf_buffer_ids[i] : 0);
+    }
+    return h;
+}
+
+static void ggml_gallocr_slot_clear(struct gallocr_slot * s, int n_buffers) {
+    if (s->buffers != NULL) {
+        for (int i = 0; i < n_buffers; i++) {
+            bool freed = false;
+            for (int j = 0; j < i; j++) {
+                if (s->buffers[j] == s->buffers[i]) {
+                    freed = true;
+                    break;
+                }
+            }
+            if (!freed) {
+                ggml_vbuffer_free(s->buffers[i]);
+            }
+        }
+        free(s->buffers);
+        s->buffers = NULL;
+    }
+    free(s->node_allocs);
+    free(s->leaf_allocs);
+    s->node_allocs = NULL;
+    s->leaf_allocs = NULL;
+    s->n_nodes = 0;
+    s->n_leafs = 0;
+    s->used = 0;
+    s->key = 0;
+}
+
+// park the active plan in slot idx (pointer move). galloc ends empty.
+static void ggml_gallocr_slot_store(ggml_gallocr_t galloc, int idx) {
+    if (idx < 0 || idx >= galloc->slots_n) {
+        return;
+    }
+    struct gallocr_slot * s = &galloc->slots[idx];
+    s->node_allocs = galloc->node_allocs;
+    s->leaf_allocs = galloc->leaf_allocs;
+    s->n_nodes = galloc->n_nodes;
+    s->n_leafs = galloc->n_leafs;
+    s->buffers = galloc->buffers;
+    s->used = 1;
+    s->last_used = ++galloc->slots_seq;
+    galloc->node_allocs = NULL;
+    galloc->leaf_allocs = NULL;
+    galloc->n_nodes = 0;
+    galloc->n_leafs = 0;
+    galloc->buffers = NULL;
+    galloc->slots_cur = -1;
+}
+
+// install slot idx as the active plan (takes ownership of its pointers)
+static void ggml_gallocr_slot_load(ggml_gallocr_t galloc, int idx) {
+    struct gallocr_slot * s = &galloc->slots[idx];
+    galloc->node_allocs = s->node_allocs;
+    galloc->leaf_allocs = s->leaf_allocs;
+    galloc->n_nodes = s->n_nodes;
+    galloc->n_leafs = s->n_leafs;
+    galloc->buffers = s->buffers;
+    s->last_used = ++galloc->slots_seq;
+    galloc->slots_cur = idx;
+}
+
+// refresh slot idx after reserve may have realloc'd galloc->node_allocs
+static void ggml_gallocr_slot_sync(ggml_gallocr_t galloc, int idx) {
+    if (idx < 0 || idx >= galloc->slots_n) {
+        return;
+    }
+    struct gallocr_slot * s = &galloc->slots[idx];
+    s->node_allocs = galloc->node_allocs;
+    s->leaf_allocs = galloc->leaf_allocs;
+    s->n_nodes = galloc->n_nodes;
+    s->n_leafs = galloc->n_leafs;
+    s->buffers = galloc->buffers;
+    s->used = 1;
+}
+
+static int ggml_gallocr_slot_find(ggml_gallocr_t galloc, uint64_t key) {
+    for (int i = 0; i < galloc->slots_n; i++) {
+        if (galloc->slots[i].used && galloc->slots[i].key == key) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int ggml_gallocr_slot_alloc(ggml_gallocr_t galloc, uint64_t key) {
+    for (int i = 0; i < galloc->slots_n; i++) {
+        if (!galloc->slots[i].used) {
+            ggml_gallocr_slot_clear(&galloc->slots[i], galloc->n_buffers);
+            galloc->slots[i].used = 1;
+            galloc->slots[i].key = key;
+            galloc->slots[i].last_used = ++galloc->slots_seq;
+            return i;
+        }
+    }
+    // evict the least recently used slot: freeing its buffers is safe because
+    // ggml_backend_buffer_free synchronizes the device backend before reuse
+    int victim = 0;
+    for (int i = 1; i < galloc->slots_n; i++) {
+        if (galloc->slots[i].last_used < galloc->slots[victim].last_used) {
+            victim = i;
+        }
+    }
+    ggml_gallocr_slot_clear(&galloc->slots[victim], galloc->n_buffers);
+    galloc->slots[victim].used = 1;
+    galloc->slots[victim].key = key;
+    galloc->slots[victim].last_used = ++galloc->slots_seq;
+    return victim;
+}
+
+// switch galloc to the plan for key.
+// returns slot idx if a cached plan is ready, -1 if reserve is required.
+static int ggml_gallocr_slot_activate(ggml_gallocr_t galloc, uint64_t key) {
+    int idx = ggml_gallocr_slot_find(galloc, key);
+    if (idx >= 0 && idx == galloc->slots_cur) {
+        galloc->slots[idx].last_used = ++galloc->slots_seq;
+        return idx;
+    }
+    if (galloc->slots_cur >= 0) {
+        ggml_gallocr_slot_store(galloc, galloc->slots_cur);
+    }
+    if (idx >= 0) {
+        ggml_gallocr_slot_load(galloc, idx);
+        return idx;
+    }
+    // new key
+    idx = ggml_gallocr_slot_alloc(galloc, key);
+    if (galloc->buffers == NULL) {
+        galloc->buffers = calloc(galloc->n_buffers, sizeof(struct vbuffer *));
+        GGML_ASSERT(galloc->buffers != NULL);
+    }
+    // galloc may still hold legacy plan/buffers: attach them to this slot so reserve
+    // updates in place and nothing is leaked
+    ggml_gallocr_slot_sync(galloc, idx);
+    galloc->slots_cur = idx;
+    return -1;
+}
 
 ggml_gallocr_t ggml_gallocr_new_n(ggml_backend_buffer_type_t * bufts, int n_bufs) {
     ggml_gallocr_t galloc = (ggml_gallocr_t)calloc(1, sizeof(struct ggml_gallocr));
@@ -527,6 +764,23 @@ ggml_gallocr_t ggml_gallocr_new_n(ggml_backend_buffer_type_t * bufts, int n_bufs
         }
     }
     galloc->n_buffers = n_bufs;
+    galloc->slots_cur = -1;
+
+    // multi-slot plan cache: on by default, GGML_GALLOCR_SLOTS=0 disables,
+    // N > 0 sets the slot count (clamped to GGML_GALLOCR_MAX_SLOTS)
+    int slots_n = GGML_GALLOCR_MAX_SLOTS;
+    const char * env_slots = getenv("GGML_GALLOCR_SLOTS");
+    if (env_slots != NULL) {
+        slots_n = atoi(env_slots);
+    }
+    if (slots_n > GGML_GALLOCR_MAX_SLOTS) {
+        slots_n = GGML_GALLOCR_MAX_SLOTS;
+    }
+    if (slots_n > 0) {
+        galloc->slots_n = slots_n;
+        galloc->slots = calloc(slots_n, sizeof(struct gallocr_slot));
+        GGML_ASSERT(galloc->slots != NULL);
+    }
 
     return galloc;
 }
@@ -538,6 +792,19 @@ ggml_gallocr_t ggml_gallocr_new(ggml_backend_buffer_type_t buft) {
 void ggml_gallocr_free(ggml_gallocr_t galloc) {
     if (galloc == NULL) {
         return;
+    }
+
+    // multi-slot: free inactive slots; active plan lives in galloc fields
+    if (galloc->slots != NULL) {
+        for (int i = 0; i < galloc->slots_n; i++) {
+            if (i == galloc->slots_cur) {
+                // galloc fields are (or were updated from) this slot; free via galloc below
+                continue;
+            }
+            ggml_gallocr_slot_clear(&galloc->slots[i], galloc->n_buffers);
+        }
+        free(galloc->slots);
+        galloc->slots = NULL;
     }
 
     for (int i = 0; i < galloc->n_buffers; i++) {
@@ -824,6 +1091,7 @@ static void ggml_gallocr_alloc_graph_impl(ggml_gallocr_t galloc, struct ggml_cgr
 
 static bool ggml_gallocr_reserve_n_impl(
         ggml_gallocr_t galloc, struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids, bool no_alloc) {
+    galloc->plan_gen++;
     size_t min_hash_size = graph->n_nodes + graph->n_leafs;
     // add 25% margin to avoid hash collisions
     min_hash_size += min_hash_size / 4;
@@ -950,7 +1218,16 @@ static bool ggml_gallocr_reserve_n_impl(
 
 void ggml_gallocr_reserve_n_size(
         ggml_gallocr_t galloc, struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids, size_t * sizes) {
+    // multi-slot: measure into the slot of this key so the active plan of another key
+    // is not overwritten (no_alloc may also drop buffers that are too small)
+    const bool slotted = galloc->slots_n > 0;
+    if (slotted) {
+        ggml_gallocr_slot_activate(galloc, ggml_gallocr_plan_key(graph, node_buffer_ids, leaf_buffer_ids));
+    }
     GGML_ASSERT(ggml_gallocr_reserve_n_impl(galloc, graph, node_buffer_ids, leaf_buffer_ids, /*no_alloc =*/ true));
+    if (slotted) {
+        ggml_gallocr_slot_sync(galloc, galloc->slots_cur);
+    }
     for (int i = 0; i < galloc->n_buffers; i++) {
         sizes[i] = 0;
         for (int c = 0; c < galloc->buf_tallocs[i]->n_chunks; c++) {
@@ -960,6 +1237,14 @@ void ggml_gallocr_reserve_n_size(
 }
 
 bool ggml_gallocr_reserve_n(ggml_gallocr_t galloc, struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids) {
+    if (galloc->slots_n > 0) {
+        uint64_t key = ggml_gallocr_plan_key(graph, node_buffer_ids, leaf_buffer_ids);
+        // land in the slot for this key so the reserved plan is kept
+        ggml_gallocr_slot_activate(galloc, key);
+        bool ok = ggml_gallocr_reserve_n_impl(galloc, graph, node_buffer_ids, leaf_buffer_ids, /*no_alloc =*/ false);
+        ggml_gallocr_slot_sync(galloc, galloc->slots_cur);
+        return ok;
+    }
     return ggml_gallocr_reserve_n_impl(galloc, graph, node_buffer_ids, leaf_buffer_ids, /*no_alloc =*/ false);
 }
 
@@ -1049,23 +1334,9 @@ static bool ggml_gallocr_needs_realloc(ggml_gallocr_t galloc, struct ggml_cgraph
     return false;
 }
 
-bool ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph * graph) {
-    if (ggml_gallocr_needs_realloc(galloc, graph)) {
-        if (galloc->n_buffers == 1) {
-#ifndef NDEBUG
-            GGML_LOG_DEBUG("%s: reallocating buffers automatically\n", __func__);
-#endif
-            if (!ggml_gallocr_reserve(galloc, graph)) {
-                return false;
-            }
-        } else {
-#ifndef NDEBUG
-            GGML_LOG_DEBUG("%s: cannot reallocate multi buffer graph automatically, call reserve\n", __func__);
-#endif
-            return false;
-        }
-    }
-
+// re-address the graph tensors from the current plan. the sched builds fresh tensor
+// objects per submission, so this walk must run on every call.
+static void ggml_gallocr_assign_graph(ggml_gallocr_t galloc, struct ggml_cgraph * graph) {
     // reset buffers
     for (int i = 0; i < galloc->n_buffers; i++) {
         if (galloc->buffers[i] != NULL) {
@@ -1093,7 +1364,71 @@ bool ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph * graph)
         }
         ggml_gallocr_init_tensor(galloc, node, &node_alloc->dst);
     }
+}
 
+bool ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph * graph) {
+    if (ggml_gallocr_needs_realloc(galloc, graph)) {
+        if (galloc->n_buffers == 1) {
+#ifndef NDEBUG
+            GGML_LOG_DEBUG("%s: reallocating buffers automatically\n", __func__);
+#endif
+            if (!ggml_gallocr_reserve(galloc, graph)) {
+                return false;
+            }
+        } else {
+#ifndef NDEBUG
+            GGML_LOG_DEBUG("%s: cannot reallocate multi buffer graph automatically, call reserve\n", __func__);
+#endif
+            return false;
+        }
+    }
+
+    ggml_gallocr_assign_graph(galloc, graph);
+
+    return true;
+}
+
+bool ggml_gallocr_alloc_graph_n(
+        ggml_gallocr_t galloc, struct ggml_cgraph * graph,
+        const int * node_buffer_ids, const int * leaf_buffer_ids) {
+    if (galloc->slots_n <= 0) {
+        // slots disabled: caller falls back to ggml_gallocr_alloc_graph
+        return false;
+    }
+    const int fast_on = getenv("GGML_GALLOCR_FAST") == NULL || atoi(getenv("GGML_GALLOCR_FAST")) != 0;
+    const int dbg = getenv("GGML_GALLOCR_SLOTS_DEBUG") != NULL;
+    const int64_t t0 = ggml_time_us();
+    uint64_t key = ggml_gallocr_plan_key(graph, node_buffer_ids, leaf_buffer_ids);
+    int idx = ggml_gallocr_slot_activate(galloc, key);
+    if (idx < 0) {
+        // no cached plan for this key
+        galloc->slot_miss++;
+        return false;
+    }
+    // a slot plan was fit-validated by needs_realloc at reserve time for this key, so the
+    // per-call re-check is skipped (GGML_GALLOCR_FAST=0 restores it)
+    if (fast_on) {
+        ggml_gallocr_assign_graph(galloc, graph);
+    } else {
+        if (!ggml_gallocr_alloc_graph(galloc, graph)) {
+            return false;
+        }
+    }
+    galloc->slot_hit++;
+    galloc->slot_fast++;
+    galloc->t_alloc_us += (uint64_t) (ggml_time_us() - t0);
+    galloc->n_calls++;
+    if (dbg && galloc->n_calls % 256 == 1) {
+        fprintf(stderr, "[GALLOC_FAST] calls=%llu fast=%llu t_total=%llu\n",
+                (unsigned long long) galloc->n_calls, (unsigned long long) galloc->slot_fast,
+                (unsigned long long) galloc->t_alloc_us);
+    }
+    if (getenv("GGML_GALLOCR_SLOTS_DEBUG") != NULL && galloc->slot_hit % 64 == 1) {
+        fprintf(stderr, "[GALLOC_SLOT] hit=%llu miss=%llu cur=%d n_nodes=%d\n",
+                (unsigned long long) galloc->slot_hit,
+                (unsigned long long) galloc->slot_miss,
+                galloc->slots_cur, galloc->n_nodes);
+    }
     return true;
 }
 
