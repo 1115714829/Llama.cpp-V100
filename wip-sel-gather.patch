@@ -1,0 +1,104 @@
+diff --git a/common/speculative.cpp b/common/speculative.cpp
+index 9ac011c71..c97478793 100644
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -990,8 +990,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+ 
+         selector_top_k = llama_model_dflash_selector_top_k(model_dft);
+         is_dflash2     = selector_top_k > 0;
+-        // under tensor parallelism the lm_head is split and the in-graph selector cannot run
+-        is_dflash2_cpu = is_dflash2 && llama_model_get_split_mode(model_dft) == LLAMA_SPLIT_MODE_TENSOR;
++        // under tensor parallelism the lm_head is split and the in-graph selector defaults off;
++        // GGML_SPEC_SELECTOR_INGRAPH=1 forces it on (must match the dflash.cpp load decision)
++        static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
++        is_dflash2_cpu = is_dflash2 && llama_model_get_split_mode(model_dft) == LLAMA_SPLIT_MODE_TENSOR && !sel_ingraph;
+         mask_token_id = llama_vocab_mask(llama_model_get_vocab(model_dft));
+ 
+         if (is_dflash2_cpu) {
+diff --git a/ggml/src/ggml-backend-meta.cpp b/ggml/src/ggml-backend-meta.cpp
+index 62dc07526..a4859b0d2 100644
+--- a/ggml/src/ggml-backend-meta.cpp
++++ b/ggml/src/ggml-backend-meta.cpp
+@@ -551,6 +551,22 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
+         return src_ss[0];
+     };
+ 
++    // GGML_SPEC_SELECTOR_INGRAPH: top-k over an axis-0 split source runs per device on its
++    // slice. the output keeps the same split with a k-sized piece per device and local ids;
++    // consumers must be piece-aligned (see handle_get_rows) and rebase the ids on the host.
++    auto handle_top_k = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
++        static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
++        if (sel_ingraph && src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_0) {
++            ggml_backend_meta_split_state ret = {GGML_BACKEND_SPLIT_AXIS_0, {0}, {1}, 1};
++            for (size_t j = 0; j < n_bufs; j++) {
++                // contributor mask: only bufs holding a nonzero piece compute top-k
++                ret.ne[j] = src_ss[0].ne[j] != 0 ? tensor->ne[0] : 0;
++            }
++            return ret;
++        }
++        return handle_per_row(src_ss);
++    };
++
+     // Some ops broadcast the src1 data across src0:
+     auto handle_bin_bcast = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+         if (src_ss[0].axis >= 0 && src_ss[0].axis < GGML_MAX_DIMS &&
+@@ -754,6 +770,11 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
+         if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_0 && src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED) {
+             return src_ss[0];
+         }
++        // GGML_SPEC_SELECTOR_INGRAPH: piece-aligned ids select rows local to each device
++        // slice, so the output carries the ids piece state.
++        if (src_ss[1].axis >= 0 && src_ss[1].axis < GGML_MAX_DIMS) {
++            return src_ss[1];
++        }
+         return handle_generic(src_ss, /*scalar_only =*/ true);
+     };
+ 
+@@ -1005,7 +1026,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
+             } break;
+             case GGML_OP_ARGSORT:
+             case GGML_OP_TOP_K: {
+-                split_state = handle_per_row(src_ss);
++                split_state = handle_top_k(src_ss);
+             } break;
+             case GGML_OP_LEAKY_RELU: {
+                 split_state = handle_generic(src_ss, /*scalar_only =*/ false);
+diff --git a/src/models/dflash.cpp b/src/models/dflash.cpp
+index 6d6d5fc4d..ee191426d 100644
+--- a/src/models/dflash.cpp
++++ b/src/models/dflash.cpp
+@@ -139,10 +139,11 @@ void llama_model_dflash::load_arch_tensors(llama_model_loader &) {
+             throw std::runtime_error("DFlash2 hidden size is too small for the selector lattice");
+         }
+ 
+-        // Under tensor parallelism the lm_head is split along the vocabulary, which the
+-        // in-graph selector cannot consume, so DFlash2 ranks on the CPU and reads these tables
+-        // straight from the GGUF file; otherwise the in-graph selector uses them in the model
+-        const bool use_cpu_selector = params.split_mode == LLAMA_SPLIT_MODE_TENSOR;
++        // Under tensor parallelism the lm_head is split along the vocabulary, so DFlash2 ranks
++        // on the CPU by default and reads these tables straight from the GGUF file.
++        // GGML_SPEC_SELECTOR_INGRAPH=1 forces the in-graph selector under TP (loads the tables).
++        static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
++        const bool use_cpu_selector = params.split_mode == LLAMA_SPLIT_MODE_TENSOR && !sel_ingraph;
+         dflash_selector_prev   = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_PREV,   "weight"), { rank, n_vocab }, use_cpu_selector ? TENSOR_SKIP : 0);
+         dflash_selector_next   = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_NEXT,   "weight"), { rank, n_vocab }, use_cpu_selector ? TENSOR_SKIP : 0);
+         dflash_selector_hidden = create_tensor(tn(LLM_TENSOR_DFLASH_SELECTOR_HIDDEN, "weight"), { n_embd, rank }, 0);
+@@ -764,7 +765,8 @@ llama_model_dflash::graph<false>::graph(const llama_model & model, const llm_gra
+     // DFlash2 under tensor parallelism ranks on the CPU from the gathered lm_head output, so
+     // the decoder hidden states ride the nextn slot; without tensor parallelism the in-graph
+     // selector packs its lattice there instead (see below)
+-    if (model.dflash_selector_hidden && model.split_mode() == LLAMA_SPLIT_MODE_TENSOR) {
++    static const bool sel_ingraph = getenv("GGML_SPEC_SELECTOR_INGRAPH") != nullptr && atoi(getenv("GGML_SPEC_SELECTOR_INGRAPH")) != 0;
++    if (model.dflash_selector_hidden && model.split_mode() == LLAMA_SPLIT_MODE_TENSOR && !sel_ingraph) {
+         res->t_h_nextn = cur;
+     }
+ 
+@@ -821,7 +823,7 @@ llama_model_dflash::graph<false>::graph(const llama_model & model, const llm_gra
+     }
+ 
+     // DFlash2 ranks its candidates in-graph when the lm_head is not split along the vocabulary
+-    if (model.dflash_selector_hidden && model.split_mode() != LLAMA_SPLIT_MODE_TENSOR) {
++    if (model.dflash_selector_hidden && (model.split_mode() != LLAMA_SPLIT_MODE_TENSOR || sel_ingraph)) {
+         build_dflash2_selector(*this, model, inp_tokens);
+     }
+ }

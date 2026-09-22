@@ -68,6 +68,41 @@ flowchart TD
   X1 -.->|它量化出| METATAX
   METATAX["★ meta 税 = 15.8 ms/轮<br/>alloc 15x, enqueue 4x"]:::hot
   METATAX --> HOST
+  subgraph CAMP["B5->B6 主机侧战役（2026-09-22 晚，账本 R277-R279）"]
+    B5NOW["当前采用链 B5 = 45.94 ms/轮<br/>tg 113.28/94.32/145.65（= B4+FGC 关）<br/>vs B4 -2.1%, vs B3 -8.5%, vs 原版 -54%<br/>sha256 f3edac19..., AL 5.55/4.22/6.38"]:::fact
+    CALIB["标定 R278: spin 探针主机穿透 50%<br/>1 ms/call ~ 1.50 ms/轮杠杆（post-T8）<br/>=> 到 37.0 需砍 ~6 ms/call 当量"]:::cond
+    FLOOR["GPU 地板直测: 真实 duty 70-85%<br/>nvidia-smi 本平台欠采样(报31.7%)<br/>须用预填充饱和段校准上限<br/>=> 地板 30-36, 饥饿区 10-16 ms/轮<br/>（本战役猎场）"]:::fact
+    F1P["✗ F1 指针折印快路径<br/>r_stamp=509/513: split_graph 每调用<br/>ggml_free+ggml_init 重建张量工厂<br/>(ggml-backend.cpp:1085-1087)<br/>+ input_dep 无条件新生(:1514)<br/>=> 指针身份逐调用漂移, 快路永不命中"]:::no
+    F1V3["✗ F1-v3 槽命中跳过 needs_realloc<br/>机制生效仅省 7%（852->792 us/call）<br/>=> alloc 2.16ms 真身 = 指派遍历过<br/>meta init 钩子（新张量逐个算分裂态）"]:::no
+    FIXA["✗ Fix A 副本/依赖池化（R279）<br/>反向 7.8%（46.06->49.65 ms/轮）<br/>prologue 0.56->1.17 翻倍<br/>=> 身份稳定只是必要不充分<br/>meta 容器乒乓才是缓存线真堵点"]:::no
+    FIXB["Fix B 后备大招: 停 meta 容器乒乓<br/>(stc_compute[2] 逐 compute 换容器重建<br/>镜像, meta:2289-2290) + 内容键化<br/>= E6 五次 abort 雷区，慎入"]:::next
+    F3N["★ F3 子图级捕获（前置已验）<br/>FGC 悖论 = NCCL 官方铁律:<br/>含集合操作的图其回放本身是集合操作<br/>(docs.nvidia.com deeplearning/nccl<br/>/cudagraph.html) => 三卡整图锁步是设计使然<br/>F3 = 纯计算子图捕获 + AR 图外直发<br/>= 官方推荐形态; 65% compute<20us 达标<br/>预期 -2~4 ms/轮"]:::next
+    F2C["F2-1c 调用序重排（进行中, env 门控<br/>GGML_SPEC_EARLY_PROCESS）<br/>特征拷贝前置(:2031 提到 :1954 前) +<br/>process() 入同步窗(:3703 llama_synchronize 前) +<br/>gate 前置于 topk 扫描<br/>预期 -0.8~1.5 ms/轮；零语义"]:::next
+    FPDN["FPD 判决: 单槽指纹 last_graph_fp<br/>对三形交替（target/注入/块）workload<br/>结构性永不命中（skipped=0 真因）<br/>TOP 破字段 = (reshaped):RESHAPE.nb2/ne0<br/>= 逐调用新生的视图节点"]:::warn
+    B2BLK["B2 图内 selector TP 化: 机制全清<br/>但本模型几何受阻（n_embd_dec=32 行槽<br/>装不下 3k 候选 lattice 240 行/gate 256 行）<br/>复活条件 = 大 hidden draft（槽>=286 行）<br/>残值 -2~3 ms/轮"]:::warn
+    RULES["战役纪律新条目（R278-R279 固化）:<br/>① 特性 A/B 必须带机制自证计数<br/>（F1 假零效果 = 机制未生效白读墙钟）<br/>② 分账先于设计（[META]/[GALLOC_FAST] 解剖）<br/>③ 构建验证与 A/B 启动分两步（两次踩坑）<br/>④ 采样计数器须饱和段校准<br/>⑤ 备份用绝对路径 + 新文件入拷贝清单<br/>⑥ 还原须走【树+影子源(/tmp/t15)】双通道<br/>还原后标记串三查（strings 含被撤 env 名=0）<br/>（影子源尸体教训: 假还原 +3.6 潜伏三轮）"]:::tool
+  end
+  B5NOW --> CALIB
+  FLOOR --> CALIB
+  CALIB --> F2C
+  CALIB --> F3N
+  F1P -.->|真凶定位: 张量工厂逐调用重建| FIXA
+  F1V3 -.->|真身=指派遍历/钩子| FIXB
+  FIXA -.->|缓存线单独不可赢| FIXB
+  FPDN -.->|指纹跳过线关闭| FIXB
+  F3N2["F3 v1 判决 R281: 数值根治(水槽签名)<br/>p1 -3.0% / p2 -1.5% 稳态真赢<br/>p3 +6.4% 短负载之谜拖正均值<br/>=> v1 不采用; v2 修点=p3谜+签名成本<br/>record-only 鉴别: 记录语义无病,<br/>命中路径地址漂移(确定性)已根治"]:::warn
+  F3N -.->|v1 判决| F3N2
+  F3N2 --> METATAX
+  F3FIN["F3 终局 R285: 六连不采用关闭<br/>v1 指针签=损坏 / v2 水槽=+0.3<br/>v3 热身出窗=+0.55(一次性假说死)<br/>v4 内容签=门绿+0.0(recs 12507)<br/>v5 二见=+2.4(线性扫描税)<br/>v6 O(1)+槽内seen=净值 0.15%噪声<br/>=> 真实净值 0±0.3%, p1 早测含交叉假象<br/>副产品: 内容签名正确性法/二见政策/<br/>O(1) 直映射槽/record-only 鉴别/热身协议"]:::no
+  F3N2 -.->|v2-v6 迭代| F3FIN
+  F3FIN --> METATAX
+  F3FIN -.->|方法论资产| RULES
+  F2C --> METATAX
+  X9 -.->|官方定性其死因, F3 恰是其反形态| F3N
+  E4V -.->|同一 split 重建根源| F1P
+  METATAX -.->|穿透 50% 定价尺| CALIB
+  RULES -.->|约束所有 A/B| CALIB
+  B2BLK -.->|大 hidden draft 才解锁| SELGRAPH
   X11 -.->|样本若坏则说明此路未试过| N1
   X14 -.->|A2 的补丁已在树里(门控), 未测 decode| C1
   X4 -.->|其探针| PFA
@@ -331,6 +366,7 @@ flowchart TD
   W8V["x R260 **Volta MMA kernel**（DESIGN-W8VOLTA-MMA 的 decode 版）: 已实现且**数值正确**<br/>置换探针 + fp64 对拍（maxabs 3.5e-2 / ref 110.7 = f16 舍入预期）<br/>673 µs(lane=row) -> 320(8 lane 协作+smem) -> **238**(split-K=8+预取一块) vs 现役 **111 µs**<br/>ncu: lane=row 版 **16.8x L1 扇出**(33.0M sectors)、No-Eligible 92.7%、3.0 warps/scheduler<br/>★★ 判决性: **ptxas 拒绝 `m8n8k4.s8`**（`Illegal matrix shape`；`m16n8k16` 要 sm_80）<br/>= **sm_70 没有 int8 张量核** ⇒ mma 必付 ~2 指令/值的 int8->f16 解码，<br/>而 **dp4a 对权重编码是零解码** ⇒ mma 的理论优势被解码成本吃光<br/>= V100 上 Q8_0 + n<=8 的 mma 路线**架构性不成立**（非调参问题）"]:::no
   MMVQW["★ **MMVQ-WIDE（下一轮 kernel 候选，直接来自 R259 的数字）**<br/>把 `vec_dot_q8_0_q8_1` 加宽 VDR 2 -> 8: 一个线程吃完整 32 值块<br/>=> 8 条 dp4a 只付**一次** scale（7.2 -> 约 2.5 inst/dp4a）<br/>估算 warp 指令 26.16M -> 约 9M；改动小（vecdotq.cuh + mmvq.cu 各 20-30 行）<br/>只对 Q8_0；**会改累加顺序 ⇒ 必须重立门值**；先做算子级 perf（20 s 出数）"]:::next
   SRETRY["x R261 sched 快路径重试 `GGML_SCHED_RETRY_ALLOC`: **ok=0/563**<br/>四臂 ABBA 同源 100.96 / 101.18 / 102.00 / 102.32，门全 `f3edac19…`<br/>计数器 `bic=563 retry=563 **ok=0** bad=0` ⇒ **一次都没成功**<br/>= 单槽 gallocr 的 `needs_realloc` 每轮必真（一轮在 4-6 张节点数不同的图间交替）<br/>= **慢路径是必需的**；便宜修法穷尽 => 只剩多槽/按指纹的 gallocr（= E6V 那条线）"]:::no
+  T8SLOT["★★ **T8 多槽 gallocr（R273，SRETRY 的后继，实现已上机）**: 按图形状指纹缓存多套分配方案, 命中即跳过 **sync x3 + reserve（约 5 ms/call）**<br/>实现: `ggml-alloc.c` 每 key 一套 {node_allocs, leaf_allocs, vbuffers}（**LRU 8 槽**, env `GGML_GALLOCR_SLOTS=N` 默认 OFF）+ `ggml-backend.cpp` `backend_ids_changed` 时先试 `alloc_graph_n`, 命中绕过慢路径<br/>**接手审查修正 3 处（已修）**: ① `plan_key` 原只哈希 ne[0..2]+view ⇒ 补 **op/ne[3]/src 槽位模式/src 形状**（分配方案按生命周期放置, 同形状不同连线不得共享）② `reserve_n_size`（预热量尺寸）原绕过槽记账 ⇒ 会把量尺寸方案写进活动槽并 free 其缓冲 ⇒ 已套 activate/sync ③ 删只写不读的死字段 `plan_key/plan_key_set`<br/>构建: BUILD_RC=0 / error 0 / 标记串 `GGML_GALLOCR_SLOTS` 在 libggml-base.so=2 ⇒ 装 `/root/libdir-t8`（不动 libdir-instr 基线）<br/>★★ **R273 判决: 采用 = B4** —— 四臂 ABBA 均值 ms/轮 **50.27 -> 46.99（-3.29, -6.5%）**<br/>tg p1/p2/p3 101.73/89.15/130.40 -> **107.24/95.88/141.19**（+5.4/+7.5/+8.3%）; 四臂 sha256 全 = f3edac19… 门未破, draft_n/acc 四臂逐字相同<br/>机制: `[GALLOC_SLOT] hit=513 miss=11` = **97.9% 命中**; draft_decode **6.0 -> 3.4 ms/轮**<br/>注脚: 控制臂差 0.33%（特性臂 0.11%）; NODROP 口径; env 默认 OFF 待用户拍板; 距 37.0 ms/轮 还差 **-21%**"]:::ok
 
   OPS --> NCU8
   NCU8 --> RPB
@@ -342,6 +378,18 @@ flowchart TD
   GALLOCR --> SRETRY
   SRETRY -.->|只剩多槽这一条| E6V
   SRETRY -->|慢路径确认为必需| GALLOCR
+  GALLOCR ==>|修法② 按指纹缓存方案| T8SLOT
+  SRETRY ==>|便宜修法穷尽后的唯一余项| T8SLOT
+  T8SLOT ==>|目标 -3 ms/轮 冲 tg 约 110| PASSCOST
+  TPSWEEP["x R275 **TP 卡数重扫（Phase B4 欠账）: 加卡全线变差，方向关闭**<br/>镜像 8 臂（TP3/4/6 x2 + TP2 探针）, B4 配置, `ms/轮 = pred_ms/(draft_n/7)`<br/>**TP3 47.06（复现 B4）-> TP4 48.76（+3.6% 变差）-> TP6 60.50（+28.6% 变差）**; TP2 两臂 `cudaMalloc out of memory`（14.5 GB/卡）不可用<br/>两重税: ① `enqueue_us/轮` **8.1 -> 10.5 -> 20.5**（加卡翻倍提交窗口，吃光权重流摊薄）② **TP 改 FP 求和序 => DFlash2 接受率 65.3% -> 45.9%/57.4%**，tg 双重受损<br/>门值: TP3=f3edac19…（锚 ✓）, TP4 两臂同 ccc284e4…, TP6 两臂同 69207026…（臂内一致 ✓）<br/>=> **TP3 保持最优, B5=B4 不变**; 剩余路径 = selector 4.6 + enqueue 8.3 + fused（约 -1.7）"]:::no
+  T8SLOT ==>|「解码地板靠加卡摊薄」的假设被它否证| TPSWEEP
+  K4 -.->|R275 在 NCCL+FGC+T8 时代复证并加强| TPSWEEP
+  FRESH["★★★ R276 **新鲜度 A/B（用户提示图可能过时）: 三个老结论两个过时一个成立，且发现 FGC 边际反转 -> B5**<br/>B4 库重验（12 臂全门值 f3edac19…）: **P2P** 旧记 +10.6% -> 实测 **0%**（过时, butterfly 时代收益被吃尽）; **SELVEC** 复核成立（开=快 0.23 ms/轮）<br/>**FGC 重大反转**: B2 旧记 -6.5%（开更快）-> **关更快 2.1%**（45.94 vs 46.94 均值）; 机制线索: 关掉后 enqueue 8.3 -> 18.6 ms/轮（主机翻倍）**墙钟反而快** = cudaGraphExec 整图回放已成串行化税, T8 拿掉其收益基础只留代价<br/>⚠️ 又踩 `GGML_META_FULLGRAPH=0` 也是开的坑（首轮 FGC 两臂同 ON 作废, `env -u` 重测）<br/>=> **B5 = B4 + FGC 完全关闭: 45.94 ms/轮, tg 113.28/94.32/145.65**（距 37.0 还差 -19.5%）"]:::hot
+  FRESH -.->|R276 反转其边际, B5 已改关闭| FGC
+  FRESH -.->|R276 实测归零| RBSKIP
+  SELGRAPH["★ R277 **B2 图内 selector TP 化: 首上机被 meta 分裂代数挡住（待拍板）**<br/>env `GGML_SPEC_SELECTOR_INGRAPH` 放开现成非 TP 路径 -> **ON 臂 LAUNCH_FAILED x2**（OFF 控制 46.13 复现 B5, 门值全过）<br/>病因: `ggml-backend-meta.cpp:550` 断言拒绝轴 0 切分源 -- `t_logits` vocab 切分 = top_k 归约轴, **全局合并是框架缺失的语义**; `get_rows(sel_next)` 沿切分轴选行是第二堵墙<br/>残值实测口径: B2 完整 **-2~3 ms/轮**（需 meta 新语义）; 退化版 **-0.6~1**（top-k/拷贝留）; A 融合 **-1.1~1.3**（需混合模态批）"]:::hot
+  SELGRAPH -.->|给出 TP 禁用的准确机制| SELCPU2
+  T8SLOT ==>|同属主线主机残账| SELGRAPH
   TRAP --> RPB
   TRAP --> W8V
   TRAP -.->|所有上机实验的前提| G
