@@ -244,7 +244,7 @@ flowchart TD
     MMVQWIDE["★★★ R224 **被关闭的 AL 路线应当重开**: R202 的「MMVQ 不支持 9-16 批量」是**错的**<br/>根因: `mmvq.cu:1199` 只实例化 `case 1..8`, 其余 **`GGML_ABORT`** =&gt; 当时看到的 `tg=0/PARSE_FAIL` 是**进程 abort**, 不是算错也不是不支持<br/>补 case 所需一切都在: `calc_rows_per_block`/`calc_nwarps`(含 **Volta 分支**) 对 ncols&gt;8 都有 `default: return 1`<br/>**默认零行为改变** (env 不设时 `MMVQ_MAX_BATCH_SIZE`=8 =&gt; 新分支不可达)<br/>粗估 (非测量): 15-token 验证回到 MMVQ 每 token 代价 =&gt; tg **约 108/101/140** (现 100.95/88.30/129.12), **p3 已接近硬指标**<br/>⚠️ 编译代价: 每个量化类型各实例化一次 =&gt; 用 `if constexpr (type == GGML_TYPE_Q8_0)` 收窄<br/>**已上机判决 (R228): 假设证伪** —— 同形状 env 开/关对照: n=9 **+7.4%** / n=12 **+44.1%** / n=15 **+65.6%** / n=16 **+84.3%** (n<=8 两臂同为 MMVQ, ±1-2% 是噪声本底)<br/>=&gt; **MMQ 耗时几乎与 n 无关, MMVQ 随 n 线性涨** (= 源码注释 *mvq redoes that per column*) =&gt; **宽 ncols 走 MMVQ 更慢**<br/>=&gt; **R224 的假设证伪; R202 在效果上是对的; BLK14 的关闭有了第二个独立理由**<br/>=&gt; **已全部还原并验证** (三文件回 .orig md5, LIB_MARKER_R224=0)"]:::no
     MMVQWIDE ==>|若成立: 抬 AL = 唯一还能到 150 的路| BLK14
     MMVQWIDE -.->|更正 R202 的关闭理由| MMVQCAP
-    UBLEVER["★★ R222/R223 + **R239/R240 定案 = 预填充成果 U1** **`-ub` 是预填充的零改码杠杆**: 同库同会话 pp32768 **1691.81 ± 1.52 (ub512) -&gt; 2162.44 ± 1.78 (ub2048) = +27.8%**（R222 表: 64K 1.25x / 128K 1.21x / 256K 约 1.18x）<br/>⚠️ **不是纯赚**: 同库同会话解码 **50.25 (ub512) / 50.22 (ub1024) / 51.36 (ub2048) ms/轮** ⇒ ub2048 用 **-2.2% 解码** 换 **+27.8% 预填充**; ub1024 解码零代价<br/>**门在两种 ub 下都是 f3edac19…**（短 prompt 下 ub 不改计算图 ⇒ R219 的「必须重新确立门」担心不成立）<br/>⚠️ `-b 8192 -ub 8192` **abort**（`ggml-backend-meta.cpp:1726 GGML_ASSERT(bufs.back() != nullptr)` = 显存不足）⇒ 大 ub 有硬上限<br/>⚠️ 生产 unit（只读红线）没有 -ub ⇒ 只能由用户自己加 override"]:::ok
+    UBLEVER["⚠️ R222/R223 + R239/R240 **`-ub` 是【用户调参】，不是内核成果**（用户 2026-09-22 红线：DeepSeek 曾跑偏）<br/>pp32768 ub512->2048 = +27.8%，但**不入采用链、不当项目收益**；仅作 A/B 的固定测量形状<br/>同库同会话解码 50.25/50.22/51.36 ms/轮 ⇒ ub2048 用 -2.2% 解码换预填充<br/>门在两种 ub 下都是 f3edac19…<br/>⚠️ `-b 8192 -ub 8192` abort（显存不足）<br/>⚠️ 生产 unit（只读红线）没有 -ub ⇒ 只能由用户自己加 override"]:::warn
     UBLEVER -.->|生产服务与 harness 都没写 -ub| UBLEVER2["⚠️ **生产 `llama-server.service`(只读) 与 harness 都无 `-ub`/`-b` =&gt; 跑在默认 512**; 而 **`n_ubatch` 被 `n_batch` 钳制** (`-b` 默认 2048) =&gt; **`-ub 8192` 被静默钳到 2048**(实测 +0.11%, 噪声内)<br/>=&gt; 要再往上必须 `-b` 一起提, 但 R223 有界预测只值 **4-5%** (C=79.7 ms/ubatch)"]:::cond
     DEQ ==>|反量化只是 C 的 32ms, 另有 48ms 成分不明| UBLEVER
     BUCKET["⚠️ R231 **分相括号不是稳定桶**: 同配置两臂 tg 都约 100, 而 `draft_decode` **6.03 vs 13.67 (2.27x)**、`selector` **5.19 vs 2.78 (1.87x)**<br/>=&gt; 时间在括号间搬家 =&gt; **E16 的分相分解桶间边界不可靠**, **不能从分相里挑最大的块来优化**<br/>=&gt; 可靠的是**函数内部探针** (selector 内部三段 1.74/1.89/1.89 ms/次) 或**整轮总时长差**<br/>另: `inject timing gather 0.36-0.78 + copy 0.07 + submit 1.44 = 约 1.9-2.3 ms/次 (layers=5)`; `draft ctx t_eval=0.0` **不可用**<br/>&gt;= **规矩: 选目标只用内部探针或整轮总时长; 收益必须用整轮总时长验**"]:::hot
@@ -348,7 +348,7 @@ flowchart TD
   W8V -.->|RAM 实测 7.2 inst/dp4a 的另一个解释面| PASSCOST
 
   KVCT["x R263 **KV 类型 A/B: 每 ubatch 反量化整条 KV 的假设被证伪**<br/>代码确实 O(n_kv)/ubatch（`fattn-common.cuh:1026-1088` to_fp16 整条 K/V）<br/>但 f16 KV（**零转换**）在 131K **慢 31%**: 1271.21 -> 879.36 t/s<br/>8K/32K 两者相同（+0.8%/+1.0%）⇒ 转换不是墙<br/>⇒ 长上下文是**注意力读 KV 的字节数**在说话（也不是纯带宽）<br/>⚠️ 口径: 账本旧值 pp32768=2162.44 是 `llama-bench` 默认 **f16 KV**；q8_0 KV 实测 1920.27"]:::no
-  FA78["★★★ R264 **预填充真正的墙（带名字的逐算子表，单卡 -ub 2048，合计 470.3 ms）**<br/>**`FLASH_ATTN_EXT(D=256,24头,n_q=2048,n_kv=262144) = 368757 µs = 78.4%**<br/>LM head(`result_output` 248320x2048) 66518 µs = 14.1%<br/>全部 MUL_MAT 加起来约 **5%**（ffn_gate 4766 / ffn_out 4737 / Qcur_full 3419 / node_13 2792 ...）<br/>FLOPs 550 GFLOP / 0.369 s = **1.49 TFLOPS = FP16 峰值 125 的 1.2%**<br/>折算 256K 预填充: 16 层约 357 s（实测 672 s）⇒ **370 t/s 的主因**<br/>⇒ 与 R203「FA 11.7 GB/s 病态」同一件事；这是**最大单一 kernel 缺口**"]:::hot
+  FA78["★★★ R264 **预填充真正的墙（带名字的逐算子表，单卡 -ub 2048，合计 470.3 ms）**<br/>**`FLASH_ATTN_EXT(D=256,24头,n_q=2048,n_kv=262144) = 368757 µs = 78.4%**<br/>LM head(`result_output` 248320x2048) 66518 µs = 14.1%<br/>全部 MUL_MAT 加起来约 **5%**<br/>⚠️ R269 更正: ~~FLOPs 550 GFLOP = 1.49 TFLOPS = 1.2%~~ **漏乘 24 头**<br/>⇒ **13.2 TFLOP / 0.369 s = 35.8 TFLOPS = 峰值 28.6%**（不是 1.2% 病态）<br/>折算 256K 预填充: 16 层约 357 s（实测 672 s）⇒ **370 t/s 的主因**"]:::hot
   FAD256["★ **FA-D256（下一手主攻）—— R266 零改码诊断已完成**<br/>[FAK] 32K 预填充: **kernel=MMA_F16 D=256 n_q=2048 n_kv=32768 kv_type=8(Q8_0) need_f16_K=1 need_f16_V=1**<br/>decode: kernel=VEC n_q=1 need_f16=0（与旧账一致）；pp32768 q8_0=**1924.40 ± 4.71**<br/>**分派（读码）**: Volta + gqa=6 -> `switch_ncols1 ncols2=2` -> n_q=2048 落 **ncols1=32, ncols2=2, ncols=64**<br/>Volta D256/64 配置: nthreads=128 occ=2 **nbatch_fa=32** K2=128 V2=128 combine=128 nstages=2 Q_in_reg=**false**<br/>`launch_fattn(..., stream_k=true)`；split-KV/combine **非主因**: ntiles_KV=n_kv/32（32K=1024 档、256K=8192 档），combine/fixup 是尾部小核；墙在 **MMA_F16 本体扫全量 KV + 每 ubatch 整条 to_fp16**（1.49 TFLOPS）<br/>**JS4 门控不直接命中本形状**: 要求 nbatch_V2==**64**（我们 128）、n_q **&lt;1024**（我们 2048）、且 small_tp 路径还要求 f16 KV + n_kv&gt;=64K<br/>**JS2** `fattn-q8-volta.cuh` 仍是 smem 反量化参考；**JS3 常量照抄已被 X16 否证** (-1.19%)<br/>下一步（按赔率）: ① 算子级拆时间: to_fp16 vs MMA 本体 vs combine ② 若 to_fp16 占大头则试 f16 KV 长上下文（R263 已示 131K f16 更慢，须重测 32K/256K 分段）③ 结构: 移植 JS4 需先改门控匹配我们的 nbatch_V2/n_q，或改走 JS2 独立 kernel"]:::next
 
   NCU8 --> FA78
@@ -358,14 +358,21 @@ flowchart TD
   FAKP["R266 [FAK] 实测: 预填 MMA_F16 need_f16=1/1; decode VEC"]:::ok
   FAKP ==> FAD256
   FASPLIT["R267 算子级: 真实形状 n_q=2048 n_kv=262144 = **371.3 ms** (f16 KV, 无 to_fp16)<br/>n_q=1 = 5.2 ms / 193 GB/s<br/>=> **墙= MMA_F16 主核本身**; to_fp16 估 <1 ms; combine 尾核可忽略<br/>上游 #28761: D=256 长 KV 需更大 Q-tile (sm_75 tile64 +19~50%)<br/>sm70-attn: prefill-only, 只收 F16/Q4_0 (**拒 q8_0**), 声称 +39.9%@176k (C级)<br/>sglang dense D256: BM=64 BN=32; 尾块 split-KV 表 (SG3)"]:::hot
+  R269["★★★ R269 **FA 效率口径更正（读码）**: 1.49 TFLOPS 漏乘 24 头<br/>真实 **35.8 TFLOPS = FP16 峰值 28.6%**；KV 3x 重读也只要 3.6 ms ⇒ 非带宽墙<br/>Volta 只吃 ncols2=2（6 不被 4/8 整除）⇒ GQA 打包 2/6<br/>机会是 **1.5-2x**（与 JS4 +13% / sm70-attn +40% 同量级），不是 10-50x"]:::hot
   FASPLIT ==> FAD256
-  SM70P["sm70-attn 移植候选 (需改 KV 类型或扩 q8_0): fattn-sm70-d256.cu<br/>门: Volta + D=256 + q>=256 + mask + F16/Q4_0 KV"]:::next
+  R269 -.->|更正 FA78 的 TFLOPS 口径| FA78
+  R269 ==>|机会重估后仍为主线| FAD256
+  SM70P["★★★ R270/R271 **sm70-attn Path A 已上机并端到端验证**<br/>算子级 n_q=2048 n_kv=262144: **370.3 -> 287.5 ms (-22.3%, 1.29x)**<br/>端到端 pp32768 q8_0 KV: **1916 -> 1994 t/s (+4.0%)**, tg64 零回退<br/>Path A q8_0 ACCEPT (Ktype=8); env LLAMA_SM70_D256=1; 库 8481a6ed…<br/>+4% = Amdahl(32K FA 约 19% x 22%); **256K 理论约 +17% = 下一臂**<br/>⚠️ 门值/累加序须重立; ub 仅作固定形状(非杠杆)"]:::ok
+  SM70P ==>|FA-D256 路径 A 落地| G
+  SM70P ==>|FA-D256 路径 A 落地| G
+  G256["★★★ R272 **256K 端到端 A/B 完成: +17.5%**<br/>stock 598.02 vs sm70 **702.42** t/s（臂内 ±0.04–0.31）<br/>与 Amdahl 预测 17.4% 逐字吻合；ACCEPT×10, Ktype=8<br/>⇒ 算子 -22% / 32K +4% / **256K +17.5%** 三层闭合<br/>⚠️ sha256 门值须重立; 默认 OFF 是否翻转待用户拍板"]:::ok
   SM70P -.-> FAD256
   UP28761["上游 #28761 OPEN: D=256 Q-tile 自适应 n_kv>8192 -> tile64"]:::warn
   UP28761 -.->|方向旁证, 非 sm70 直接可抄| FAD256
   KVCT -.->|否证了便宜的零改码解| FA78
   R264 -->|口径: f16 KV 2162 vs q8_0 1920| KVCT
   FAD256 ==>|预填充缺口 = 第二大缺口| G
+  FAD256 ==>|已走 Path A| SM70P
   OPS --> FA78
   MMVQW -.->|R262 实测: +17.3% 慢 ⇒ 已否证| NCU8
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
