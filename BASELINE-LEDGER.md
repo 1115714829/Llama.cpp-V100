@@ -29,6 +29,8 @@
 - ⇒ **T1 双判据验收完成**；教训入档：**门臂形状必须覆盖新码路径**（q<256 走 stock = 无效验证，probe 计数自证是抓这类空洞的关键）。
 - 下一步 T2：GQA 打包 QK（cuBLAS 块）+ PV（显式 mma，FP32 块输出）+ score 布局（p3-decomp spec [S2]-2/3/4）。
 
+### R298-P ★★ **enqueue 税解剖（P6/P10 量具，256K 单请求）：巨兽不是 meta（7 ms/call），是 sched 每调用图规划（263.7 ms/call = 墙钟 69%）**（2026-09-24，前哨）
+
 - **账（r=1.08，rep=1，505 调用）**：`enqueue 133.1 s = 263.7 ms/call`（墙钟 69%）｜`alloc 28.5 ms/call`（T8 已治）｜`setin 22.5 ms/call`｜`build 0.25 ms/call`。
 - **[META] 对照**：`total=7.049 ms/call`、sub/call=15.8、ar/call=14.8、dev_hist 中位 25µs、85%<60µs ⇒ **meta 派发只是零头**；老 E 系列"meta 税"叙事在 256K 服务负载下让位于 **ggml_backend_sched 每调用图规划**（split/指派 O(大图)，prefill 图 5000+ 节点）。
 - ⇒ **桶化已让图复现（rebuild 66）但 sched 规划仍逐调用重做** —— r=1.08 收益饱和的真因。
