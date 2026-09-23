@@ -191,6 +191,7 @@ static void sm70_decomp_group(
         float softmax_scale_log2) {
     const int n_kv = kbn_total;
     const int kbn_blk = kBlockN < kbn_total ? kBlockN : kbn_total;
+    (void) kbn_blk;
 
     // workspace partition: Qp [256, q6] f16, Kp/Vp [256, kbn_blk] f16,
     // S/P [q6, kbn_blk], O [256, q6], row_max/row_sum [q6]

@@ -691,7 +691,8 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
                     kBlockN = atoi(kb);
                 }
             }
-            const int kbn_max = kBlockN < kv_len ? kBlockN : kv_len;
+            const int kbn_max = kBlockN; // FIXED cap: growing with kv_len made
+            // every call realloc the workspace (55k cudaMalloc per prefill).
             sm70_decomp_dev_init(id);
             // KV row/head strides in 256-elem rows, from the REAL nb metrics:
             // f16 direct uses nb directly; staged quantized (contiguous input)
