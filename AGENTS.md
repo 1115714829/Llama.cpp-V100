@@ -29,8 +29,8 @@
 >
 > **BL3 口径**：同 BL1 prompt/生成长度、thinking on、DFlash2 n-max 7、**TP4 卡 0,1,2,3**（TP3 深 KV OOM：双 KV 头 rank +578 MiB 分配失败）、`--parallel 1 --ctx-size 262144`（llama 把 ctx 按槽均分）、ub 512、库 `/root/libdir-t8b`。**BL2 = 结构性不可用**：官方 434ddbb 与 b11053 原版均 0.05s 内 D7 硬崩（`ggml-backend-meta.cpp:543`，DFlash2 selector top-k × vocab 切分），B5 的 D7 修复是入场券（账本 R292）。⚠ 合成 prompt 对双方投机都有可预测性红利（横向公平），勿与 1cat 文档真实文本 50 t/s 直接比。
 
-**当前差距分解（R293/R294，256K 同口径）**：tg 3.81x × pp 1.90x **同一根病 = 每调用图重建 + alloc/setin/enqueue 主机税**（target 95.7% rebuild、593 ms/调用 host ≈ 墙钟全额）。主刀 = **host 图管理税根治**（mask 定尺/统一分块/多形状 build 缓存）；P-P3 内核线降二刀；纯 decode 步差 1.44x 为三刀。
-**最新战果（R297 采用，`GGML_KV_BUCKET_RATIO=1.08`）**：256K 预填充 **289.2 → 208.9 s（+38.4%）**、纯步不回退（34.5→34.4 ms）、门值全绿 ⇒ **距 BL1 预填充 1.90x → 1.37x**（spec-off 对 spec-off 1.21x）。rebuild -86% 后剩余 host 大头 = **enqueue 253 ms/调用非形状税**（下刀：P-D1/Fix B）；吐字主刀未变（轮结构 2.65x × 步 1.44x）。
+**当前差距分解（R293→R298-P 定案，256K 同口径）**：**预填充 = GPU-bound（GPU 152.6 s = 79%，CPU 21%）**；FA 占 GPU ~60-70%。主刀最终排序：**① P-P3 内核线**（FA 大 GEMM 分解，GPU 侧 +25~30%）→ ② R298 调度线（CPU 小头 15-30 s）→ ③ 吐字轮结构（2.65x）+ 纯步（1.44x）。tg 判据一律用 spec-off 纯步锚。
+**最新战果（R297 采用，`GGML_KV_BUCKET_RATIO=1.08`）**：256K 预填充 **289.2 → 208.9 s（+38.4%）**、纯步不回退（34.5→34.4 ms）、门值全绿 ⇒ **距 BL1 预填充 1.90x → 1.37x**（spec-off 对 spec-off 1.21x）。桶化收益 = 纯 CPU 侧（算术闭合）。
 
 ### 1.1 维护 [`1cat-vllm-v100-study/PLAN-GRAPH.md`](1cat-vllm-v100-study/PLAN-GRAPH.md)
 
