@@ -23,6 +23,8 @@
 - ⇒ **ub 是部署层双刃剑**；根治仍须**形状稳定化**（n_kv 桶量化/mask 定尺——使 ub512 也吃调用数红利且不伤 decode；mask 定尺顺带解 1.7 GB OOM = P-M 白捡）。
 - 口径注记：此臂为**口径对齐测量**（非成果主张，UBLEVER 纪律）；BL3 标准行维持 ub512/SLOTS=3 原口径。
 
+### R294 ★★★ **256K 轮内分账（LLAMA_ROUND_TIMING + LLAMA_SPEC_TIMING，零改码）：host 图管理税 = 两大差距的同一根病**（2026-09-23）
+
 - **target ctx（489 调用 = 462 prefill ubatch + verify 等）**：`rebuild=468/489（95.7% 逐调用重建）`；**alloc 97.0 s（198 ms/调用）+ setin 35.7 s（73 ms）+ enqueue 157.3 s（322 ms）≈ 290 s ≈ TTFT 285 s 的 102%** ⇒ **预填充是主机受限，GPU 藏在 host 影子下**。draft ctx 对照：3726 调用 reuse 3689（99% 复用），host 账仅 ~5.5 s。
 - **decode 轮（16 轮）**：`draft_decode 13.21 + selector 2.52 + walk 0.10 ms/round`；target 段 ≈73 ms/轮 = **每调用 rebuild（R246 单次 23 ms+）+ alloc/setin/enqueue** 的放大——R293"轮放大 2.65x"的真身。
 - ⇒ **tg 3.81x 与 pp 1.90x 同根 = 每调用图重建 + alloc/setin/enqueue 主机税**（meta 税在 256K 服务负载的统治级放大；kq_mask 逐 ubatch 变长 → 图形状逐调用变 → rebuild，REBUILD 节点成因①）。
