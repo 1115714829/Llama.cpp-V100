@@ -20,7 +20,7 @@
 - **目标**：ub2048 采用栈 alloc = 45.6 s/46 rebuild（900 ms/次整池 free+malloc）= 墙钟 25%；砍到 ~3 s ⇒ TTFT ~150 s ⇒ **反超 BL1 spec-off（159.0）**。
 - **证据链两轮**：① **增长余量（ggml-alloc.c realloc 分支 chunk max_size ×1.5+16MB）= 零效果**（alloc 45.6 不动）——因 `realloc = buffers[i]==NULL`（:1183）= **新 plan key 必然全新分配**，T8 槽对"单调增长 + 46 个一次性 key" = 逐 key 驱逐（slot_clear :610 **vbuffer_free 整池**）+ 重建，增长余量被架空。② **key 尺寸量化（2 的幂档）= assert 证伪**：`ggml-backend.cpp:2359` 张量放置越界 assert——**plan 地址布局不可跨尺寸复用**（"re-validates all sizes" 实为总量级弱验证），灰名单。
 - **机制全图（读码定案）**：plan_key 哈希含全量 `ne[d]`（:570）⇒ bucket 步进 = 新 key；slot 驱逐 free 整池 ⇒ 46 key × 900 ms。**plan 缓存对单调增长工作负载 = 结构性无效**。
-- **v2 立案（单池解耦：分配与放置分离）**：所有 key 共享常驻缓冲池（不随驱逐 free）；plan 缓存只存放置表；命中且尺寸全 ≤ size_max ⇒ 直用；否则**池内重放置**（host 微操作）+ 池按需增长（既有增长余量 = O(log n) 真实分配）。预期 alloc 45.6 → 3-5 s。
+- **v2 实测采用（R302-V2）**：单池解耦七处刀（驱逐缴械移交池 + 池承接 + teardown 收池 + key 粗化撤销）——**TTFT 182.6 → 175.8 s（-3.7%）/ 1344 t/s、纯步 34.27 ms 持平、门值 `c4e11b2d` 四臂全绿（分配器零数值影响 ✓）**。alloc 45.6 → 33.0 s（-28%，未到 3-5s 预期 = 重放置 walk/残余分配成本待 R302b 深挖）。**距 BL1：1.15x → 1.11x**（159.0 vs 175.8，spec-off 口径）。显存注记：carry 池常驻 + 增长余量峰值未单测（粗算合包络）。
 - 教训：③ 测试服务必须收尾清场（孤儿 server 连续两次触发 BUSY_SERVER 拦截——互斥纪律两次救场）；④ "re-validates"类注释要按代码实证强度解读。
 
 ### R301 ★★★ **刀序终局定案（分账先行）：FA = GPU 78%（R264 账本级）⇒ P-P3-T 优先；算子流量分析定出真大奖 = GQA-smem 摊销（grid.z=gqa 令 KV 全局流量 ×6）**（2026-09-24）
