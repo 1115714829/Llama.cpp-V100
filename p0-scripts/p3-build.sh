@@ -11,12 +11,13 @@ if pgrep -f 'llama-benc[h] -m' >/dev/null; then echo "BUSY_BENCH"; echo BUILD_DO
 if pgrep -f 'cmake --buil[d]' >/dev/null; then echo "BUSY_BUILD"; echo BUILD_DONE; exit 2; fi
 touch /tmp/LLAMA_BUILD_LOCK
 cd /root/llm/test/v100-opt/llama.cpp || { echo NO_TREE; rm -f /tmp/LLAMA_BUILD_LOCK; echo BUILD_DONE; exit 2; }
-if [ ! -f /tmp/p3-fattn-sm70-d256.cu ]; then
+if [ ! -f /tmp/p3-fattn-sm70-d256.cu ] || [ ! -f /tmp/p3-fattn-sm70-decomp.cuh ]; then
   echo NO_SRC_PAYLOAD; rm -f /tmp/LLAMA_BUILD_LOCK; echo BUILD_DONE; exit 2
 fi
 sed 's/\r$//' /tmp/p3-fattn-sm70-d256.cu > ggml/src/ggml-cuda/fattn-sm70-d256.cu
+sed 's/\r$//' /tmp/p3-fattn-sm70-decomp.cuh > ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
 echo "SRC_MD5:"
-md5sum ggml/src/ggml-cuda/fattn-sm70-d256.cu
+md5sum ggml/src/ggml-cuda/fattn-sm70-d256.cu ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
 echo "MARK_DECOMP_ENV=$(grep -c LLAMA_SM70_FA_DECOMP ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
 echo "MARK_WS=$(grep -c sm70_decomp_ws_reserve ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
 cmake --build build-instr -j128 --target llama-server llama-bench > "$MAKELOG" 2>&1

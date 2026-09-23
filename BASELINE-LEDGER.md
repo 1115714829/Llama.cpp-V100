@@ -15,7 +15,13 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
-### R299-T1 ★★ **P-P3 分解 T1（门控 + 私有常驻 workspace + 直通）验收全过：=0/=1 双判据位级等价**（2026-09-24）
+### R299-T2 ★★ **P-P3 分解 T2 阶段记录：全链跑通（576/576 进新路径、零崩溃）但 PPL 陪审未过（+1.68% > 0.1%）⇒ 数值 bug 待 dump 二分定位**（2026-09-24）
+
+- **已跑通**：GQA 打包（Q 组打包 kernel，[d,h,q] 实测布局）+ 双 cuBLAS GEMM（QK/PV，fp32 累加）+ 精确块 softmax + 散写 dst；per-device workspace/cublas 句柄；probe 576/576 ACCEPT、0 REJECT。
+- **连环修掉 5 个真 bug**（每条都有实证定位）：① mask f16/f32 类型链；② Q 布局 [d, h, q]（诊断打印 `qnb1=6144=1024×ne[2]` 定案，"预转置"必须件第三次显灵）；③ **多卡单例交叉**（ws/cublas 句柄全局 → per-device，97 调用后跨卡指针崩）；④ cublasGemmEx **禁止混型操作数**（A32F×B16F = NotSupported → Q 打包直接出 f16）；⑤ 块 softmax **rescale 方向反 + 全 mask 块垃圾因子**（桶尾 -inf 块）。
+- **PPL 陪审（判据 ≤0.1% 相对差）**：decomp=0 **1.0025±0.00036** vs decomp=1 **1.0193±0.00071** = **+1.68%（超 17 倍）⇒ 数值真 bug，T2 不采用**。e2e 贪心第 ~10 token 分叉（0.185 overlap）与此一致。
+- **下一步（已定方法）**：dump 二分定位——env 门控 dump S（QK 后）/P/O/dst 首值，S 已错 ⇒ QK/打包几何错；S 对 O 错 ⇒ softmax/PV 错。禁止继续盲推（第五定律二连）。
+- 工具链战痕累计（本 feature）：pwsh `$( )` 本地抢算、`tail -3` 裁掉 PPL 正式行、编辑失配 ×2（注释措辞/已替块）——全部自抓，数据未污染。
 
 - **实现**（commit `0da82d593`，分支 `feat/p3-decomp`，fattn.cu 零改动）：`LLAMA_SM70_FA_DECOMP`（判值）+ 私有常驻 workspace（static 设备缓冲，不入图防多槽翻倍 = P3-RECON [S2]-1）+ T1 直通（Path A 本体照跑）。
 - **五臂门**：gb-off/gb-off-nospec/gb-on/gb-on-nospec 全绿（无回归）+ t1-decomp 臂 `f3edac19…` ——但 **probe=0 自曝验证空洞**：门臂 greedy q<256 不进 sm70 路径 ⇒ =1 判据未覆盖。

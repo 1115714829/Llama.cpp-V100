@@ -35,9 +35,25 @@ arm() {
   sleep 3
   kill $SPID 2>/dev/null
   sleep 4
-  echo "probe_hits=$(grep -ac 'decomp T1 passthrough' /tmp/t1e-$tag-server.log)"
+  echo "probe_hits=$(grep -ac 'decomp T2 compute' /tmp/t1e-$tag-server.log)"
+  echo "reject_hits=$(grep -ac 'decomp T2 shape/type' /tmp/t1e-$tag-server.log)"
   echo "sha=$(python3 -c "import json,hashlib;print(hashlib.sha256(json.load(open('/tmp/t1e-$tag-resp.json'))['content'].encode()).hexdigest())" 2>/dev/null)"
 }
 arm a0 0
 arm a1 1
+echo ===CLOSENESS===
+python3 - <<'PYEOF'
+import json, hashlib
+a = json.load(open('/tmp/t1e-a0-resp.json'))['content']
+b = json.load(open('/tmp/t1e-a1-resp.json'))['content']
+ta, tb = a.split(), b.split()
+n = min(len(ta), len(tb))
+same = sum(1 for i in range(n) if ta[i] == tb[i])
+print('len_a=%d len_b=%d prefix_overlap=%.3f'
+      % (len(ta), len(tb), same / max(len(ta), len(tb), 1)))
+print('sha_a=%s' % hashlib.sha256(a.encode()).hexdigest()[:16])
+print('sha_b=%s' % hashlib.sha256(b.encode()).hexdigest()[:16])
+print('head_a=%r' % a[:80])
+print('head_b=%r' % b[:80])
+PYEOF
 echo T1E_DONE
