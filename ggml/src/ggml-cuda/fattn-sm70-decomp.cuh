@@ -91,6 +91,24 @@ __global__ void sm70_decomp_softmax_block_kernel(
     }
 }
 
+// Pack kbn KV rows of one head into [256, kbn] col-major (f16). Source rows may
+// interleave heads (measured: K nb=(34,544,272) => row r = 2*j + h), so gather
+// by strides instead of assuming a packed head slice.
+__global__ void sm70_decomp_pack_kv_kernel(
+        const half * __restrict__ src,
+        int src_rstep, int src_hstep, int h0,
+        int j0, int kbn,
+        half * __restrict__ dst) {
+    for (int jj = (int) blockIdx.x * blockDim.x + threadIdx.x;
+            jj < kbn; jj += (int) blockDim.x * gridDim.x) {
+        const half * s = src
+            + (index_t) (j0 + jj) * src_rstep * 256
+            + (index_t) h0 * src_hstep * 256;
+        half * d = dst + (index_t) jj * 256;
+        for (int x = 0; x < 256; ++x) { d[x] = s[x]; }
+    }
+}
+
 // Pack one KV-head group of Q into [256, q6] col-major (f16: cublasGemmEx
 // requires uniform operand types). Source layout is GGML [d, h, q]:
 // (d, t, h) at d + h*256 + t*hq*256 (measured, R299 diag).
@@ -161,22 +179,25 @@ static void sm70_decomp_group(
         int dev_id,
         const void   * Q_raw,   // [256, q_len, hq] GGML layout (d,h,q)
         cudaDataType_t q_type,
-        const half   * Kg,
+        const half   * Kg,      // base of the whole K staging (strides below)
         const half   * Vg,
         float        * out_raw,
         float        * ws,
         const void   * mask,
         bool mask_f16,
-        int q6, int q_len, int hq, int g0, int kbn_total, int kBlockN, int gqa,
+        int q6, int q_len, int hq, int g0, int gkv, int kbn_total, int kBlockN, int gqa,
         int q_t, int q_h, int o_t, int o_h,
+        int k_rstep, int k_hstep, int v_rstep, int v_hstep,
         float softmax_scale_log2) {
     const int n_kv = kbn_total;
     const int kbn_blk = kBlockN < kbn_total ? kBlockN : kbn_total;
 
-    // workspace partition: Qp [256, q6] f16, S/P [q6, kbn_blk], O [256, q6],
-    // row_max/row_sum [q6]
+    // workspace partition: Qp [256, q6] f16, Kp/Vp [256, kbn_blk] f16,
+    // S/P [q6, kbn_blk], O [256, q6], row_max/row_sum [q6]
     half  * Qp      = (half *) ws;
-    float * S       = (float *) (Qp + (size_t) 256 * q6);
+    half  * Kp      = Qp + (size_t) 256 * q6;
+    half  * Vp      = Kp + (size_t) 256 * kbn_blk;
+    float * S       = (float *) (Vp + (size_t) 256 * kbn_blk);
     half  * P       = (half *) (S + (size_t) kbn_blk * q6);
     float * O       = (float *) (P + (size_t) kbn_blk * q6);
     float * row_max = O + (size_t) 256 * q6;
@@ -198,14 +219,17 @@ static void sm70_decomp_group(
 
     for (int j0 = 0; j0 < kbn_total; j0 += kBlockN) {
         const int kbn = min(kBlockN, kbn_total - j0);
-        const half * Kblk = Kg + (size_t) j0 * 256;
-        const half * Vblk = Vg + (size_t) j0 * 256;
+        sm70_decomp_pack_kv_kernel<<<(unsigned) ((kbn + 255) / 256), 256, 0, stream>>>(
+            Kg, k_rstep, k_hstep, gkv, j0, kbn, Kp);
+        sm70_decomp_pack_kv_kernel<<<(unsigned) ((kbn + 255) / 256), 256, 0, stream>>>(
+            Vg, v_rstep, v_hstep, gkv, j0, kbn, Vp);
+        CUDA_CHECK(cudaGetLastError());
 
-        // QK: S[q6, kbn] = Qp^T[q6, 256] x Kg_blk[256, kbn], fp32 accumulate.
+        // QK: S[q6, kbn] = Qp^T[q6, 256] x Kp[256, kbn], fp32 accumulate.
         CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_T, CUBLAS_OP_N,
                 q6, kbn, 256, &alpha,
                 Qp, CUDA_R_16F, 256,
-                Kblk, CUDA_R_16F, 256,
+                Kp, CUDA_R_16F, 256,
                 &beta0, S, CUDA_R_32F, q6,
                 CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
@@ -218,10 +242,10 @@ static void sm70_decomp_group(
         CUDA_CHECK(cudaGetLastError());
         (void) 0;
 
-        // PV: O[256, q6] += Vblk[256, kbn] x P^T[kbn, q6], fp32 accumulate.
+        // PV: O[256, q6] += Vp[256, kbn] x P^T[kbn, q6], fp32 accumulate.
         CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_N, CUBLAS_OP_T,
                 256, q6, kbn, &alpha,
-                Vblk, CUDA_R_16F, 256,
+                Vp, CUDA_R_16F, 256,
                 P, CUDA_R_16F, q6,
                 &beta1, O, CUDA_R_32F, 256,
                 CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));

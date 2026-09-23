@@ -242,6 +242,27 @@ static bool sm70_fa_decomp() {
     return e != nullptr && atof(e) != 0.0;
 }
 
+// Debug: env SM70_FA_DUMPOUT=1 dumps the first values of each FA output so two
+// paths can be diffed numerically (magnitude/structure of divergence).
+static void sm70_fa_dump_out(const ggml_tensor * dst, const char * tag) {
+    const char * e = getenv("SM70_FA_DUMPOUT");
+    if (e == nullptr || e[0] != '1') {
+        return;
+    }
+    static int n = 0;
+    if (n >= 3) {
+        return;
+    }
+    ++n;
+    float h[16];
+    CUDA_CHECK(cudaMemcpy(h, dst->data, sizeof(h), cudaMemcpyDeviceToHost));
+    fprintf(stderr, "[fa-out] %s n=%d:", tag, n);
+    for (int i = 0; i < 16; ++i) {
+        fprintf(stderr, " %+.6f", h[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
 // Private resident workspace for the decomposed path: never enters the graph,
 // never multiplies per allocation slot (p3-decomp [S2]-1). Lazily grown and
 // kept until process exit so repeat calls skip the alloc entirely.
@@ -672,8 +693,23 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
             }
             const int kbn_max = kBlockN < kv_len ? kBlockN : kv_len;
             sm70_decomp_dev_init(id);
+            // KV row/head strides in 256-elem rows, from the REAL nb metrics:
+            // f16 direct uses nb directly; staged quantized (contiguous input)
+            // keeps the input interleave (row = type_size/blck*256 bytes);
+            // the nc dequant variant packs canonically (row 1, head ne[1]).
+            const int k_rowb = K->type == GGML_TYPE_F16 ? 512
+                : (int) (ggml_type_size(K->type) / ggml_blck_size(K->type) * 256);
+            const int v_rowb = V->type == GGML_TYPE_F16 ? 512
+                : (int) (ggml_type_size(V->type) / ggml_blck_size(V->type) * 256);
+            const bool k_contig = ggml_is_contiguously_allocated((ggml_tensor *) K);
+            const bool v_contig = ggml_is_contiguously_allocated((ggml_tensor *) V);
+            const int k_rstep = !k_contig ? 1 : (int) (K->nb[1] / k_rowb);
+            const int k_hstep = !k_contig ? (int) K->ne[1] : (int) (K->nb[2] / k_rowb);
+            const int v_rstep = !v_contig ? 1 : (int) (V->nb[1] / v_rowb);
+            const int v_hstep = !v_contig ? (int) V->ne[1] : (int) (V->nb[2] / v_rowb);
             sm70_decomp_ws_reserve(id,
-                (size_t) 256 * q6 * 2 + (size_t) q6 * kbn_max * 6
+                (size_t) 256 * q6 * 2 + (size_t) 256 * kbn_max * 4
+                + (size_t) q6 * kbn_max * 6
                 + (size_t) 256 * q6 * 4 + (size_t) q6 * 8);
             const half * Kg_base = K->type == GGML_TYPE_F16
                 ? (const half *) K->data : (const half *) f16_extra.K;
@@ -681,21 +717,19 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
                 ? (const half *) V->data : (const half *) f16_extra.V;
             const cudaDataType_t q_type =
                 Q->type == GGML_TYPE_F16 ? CUDA_R_16F : CUDA_R_32F;
-            const int64_t k_head_stride = (int64_t) K->ne[1] * SM70_D256_D;
-            const int64_t v_head_stride = (int64_t) V->ne[1] * SM70_D256_D;
             for (int g = 0; g < hkv; ++g) {
                 FLASH_NAMESPACE::sm70_decomp_group(
                     stream,
                     id,
                     (const void *) Q->data,
                     q_type,
-                    Kg_base + (int64_t) g * k_head_stride,
-                    Vg_base + (int64_t) g * v_head_stride,
+                    Kg_base,
+                    Vg_base,
                     (float *) dst->data,
                     (float *) FLASH_NAMESPACE::sm70_decomp_state(id).ws,
                     (const void *) mask->data,
                     mask->type == GGML_TYPE_F16,
-                    q6, q_len, (int) Q->ne[2], g * gqa, kv_len, kBlockN,
+                    q6, q_len, (int) Q->ne[2], g * gqa, g, kv_len, kBlockN,
                     gqa,
                     // stride semantics differ between Q ([d,q,h], head inner)
                     // and dst ([d,h,q], token outer): disambiguate by ne size
@@ -703,23 +737,36 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
                     (int) (Q->nb[2] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
                     (int) ((dst->ne[1] == q_len ? dst->nb[1] : dst->nb[2]) / sizeof(float)),
                     (int) ((dst->ne[1] == q_len ? dst->nb[2] : dst->nb[1]) / sizeof(float)),
+                    k_rstep, k_hstep, v_rstep, v_hstep,
                     softmax_scale_log2);
             }
             sm70_d256_probe("ACCEPT: sm70 decomp T2 compute", cc, Q, K, V, mask);
+            sm70_fa_dump_out(dst, "decomp");
             {
-                static bool dumped = false;
-                if (!dumped) {
-                    dumped = true;
+                static int dumped = 0;
+                if (dumped < 3) {
+                    dumped++;
                     fprintf(stderr,
                         "[decomp-layout] q_nb1=%d q_nb2=%d o_nb1=%d o_nb2=%d "
-                        "qne1=%lld qne2=%lld dnb1=%lld dnb2=%lld gqa=%d\n",
+                        "qne1=%lld qne2=%lld dnb1=%lld dnb2=%lld gqa=%d "
+                        "Kne=%lld,%lld,%lld Knb=%lld,%lld,%lld,%lld "
+                        "Vnb=%lld,%lld,%lld,%lld f16K=%d f16V=%d viskv=%d\n",
                         (int) (Q->nb[1] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
                         (int) (Q->nb[2] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
                         (int) (dst->nb[1] / sizeof(float)),
                         (int) (dst->nb[2] / sizeof(float)),
                         (long long) Q->ne[1], (long long) Q->ne[2],
                         (long long) dst->nb[1], (long long) dst->nb[2],
-                        gqa);
+                        gqa,
+                        (long long) K->ne[0], (long long) K->ne[1], (long long) K->ne[2],
+                        (long long) K->nb[0], (long long) K->nb[1],
+                        (long long) K->nb[2], (long long) K->nb[3],
+                        (long long) V->nb[0], (long long) V->nb[1],
+                        (long long) V->nb[2], (long long) V->nb[3],
+                        (int) (K->type == GGML_TYPE_F16),
+                        (int) (V->type == GGML_TYPE_F16),
+                        (int) V_is_K_view);
+                    fprintf(stderr, "\n");
                 }
             }
             return;
@@ -1021,5 +1068,6 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
             Q->nb[1] / 8, Q->nb[2] / 8, Q->nb[3] / 8);
         CUDA_CHECK(cudaGetLastError());
     }
+    sm70_fa_dump_out(dst, "pathA");
 
 }
