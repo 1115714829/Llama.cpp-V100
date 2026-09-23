@@ -497,6 +497,7 @@ struct gallocr_slot {
 struct ggml_gallocr {
     ggml_backend_buffer_type_t * bufts; // [n_buffers]
     struct vbuffer ** buffers; // [n_buffers]
+    struct vbuffer ** pool_buffers; // [n_buffers] carried across evictions (R302)
     struct ggml_dyn_tallocr ** buf_tallocs; // [n_buffers]
     int n_buffers;
 
@@ -552,27 +553,12 @@ static uint64_t ggml_gallocr_fast_stamp(
     return s;
 }
 
-// R302: size dims enter the key only as power-of-two classes so bucket steps
-// share one plan/slot. Exact wiring still separates plans and needs_realloc
-// re-validates real sizes after a slot load, so coarsening stays safe.
-static uint64_t ggml_gallocr_size_class(int64_t n) {
-    if (n < 2048) {
-        return (uint64_t) n;
-    }
-    uint64_t v = (uint64_t) n;
-    int sh = 0;
-    while (v > 1) {
-        v >>= 1;
-        sh++;
-    }
-    return (uint64_t) 1 << (sh + 1);
-}
-
 // key = graph structure + node/leaf buffer ids (buffer ids matter: same shape with a
 // different backend assignment must not share a plan). covers node dst shape, src slot
 // pattern and src shapes: the plan places tensors by lifetime, so two graphs may share
 // a plan only if their wiring is the same. the hash only picks a slot; needs_realloc
-// re-validates all sizes after the slot is loaded.
+// re-validates all sizes after the slot is loaded. (R302: exact sizes - size classes
+// were refuted by the placement assert at ggml-backend.cpp:2359.)
 static uint64_t ggml_gallocr_plan_key(
         const struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids) {
     uint64_t h = 0xcbf29ce484222325ull;
@@ -583,7 +569,7 @@ static uint64_t ggml_gallocr_plan_key(
         h = h * 0x100000001b3ull + (uint64_t) t->type;
         h = h * 0x100000001b3ull + (uint64_t) t->op;
         for (int d = 0; d < 4; d++) {
-            h = h * 0x100000001b3ull + ggml_gallocr_size_class(t->ne[d]);
+            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
         }
         h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t->op_params[0];
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
@@ -596,7 +582,7 @@ static uint64_t ggml_gallocr_plan_key(
             h = h * 0x100000001b3ull + (uint64_t) j;
             h = h * 0x100000001b3ull + (uint64_t) s->type;
             for (int d = 0; d < 4; d++) {
-                h = h * 0x100000001b3ull + ggml_gallocr_size_class(s->ne[d]);
+                h = h * 0x100000001b3ull + (uint64_t) s->ne[d];
             }
         }
     }
@@ -604,12 +590,21 @@ static uint64_t ggml_gallocr_plan_key(
         const struct ggml_tensor * t = graph->leafs[i];
         h = h * 0x100000001b3ull + (uint64_t) t->type;
         for (int d = 0; d < 4; d++) {
-            h = h * 0x100000001b3ull + ggml_gallocr_size_class(t->ne[d]);
+            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
         }
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
         h = h * 0x100000001b3ull + (uint64_t) (leaf_buffer_ids ? leaf_buffer_ids[i] : 0);
     }
     return h;
+}
+
+// R302 single-pool: keep the evicted slot's buffers as the starting pool for
+// the next plan instead of free+malloc. Whole-array move keeps the dedup shape.
+static void ggml_gallocr_slot_disarm(ggml_gallocr_t galloc, struct gallocr_slot * s) {
+    if (s->buffers != NULL && galloc->pool_buffers == NULL) {
+        galloc->pool_buffers = s->buffers;
+        s->buffers = NULL;
+    }
 }
 
 static void ggml_gallocr_slot_clear(struct gallocr_slot * s, int n_buffers) {
@@ -698,6 +693,7 @@ static int ggml_gallocr_slot_find(ggml_gallocr_t galloc, uint64_t key) {
 static int ggml_gallocr_slot_alloc(ggml_gallocr_t galloc, uint64_t key) {
     for (int i = 0; i < galloc->slots_n; i++) {
         if (!galloc->slots[i].used) {
+            ggml_gallocr_slot_disarm(galloc, &galloc->slots[i]);
             ggml_gallocr_slot_clear(&galloc->slots[i], galloc->n_buffers);
             galloc->slots[i].used = 1;
             galloc->slots[i].key = key;
@@ -713,6 +709,7 @@ static int ggml_gallocr_slot_alloc(ggml_gallocr_t galloc, uint64_t key) {
             victim = i;
         }
     }
+    ggml_gallocr_slot_disarm(galloc, &galloc->slots[victim]);
     ggml_gallocr_slot_clear(&galloc->slots[victim], galloc->n_buffers);
     galloc->slots[victim].used = 1;
     galloc->slots[victim].key = key;
@@ -738,8 +735,13 @@ static int ggml_gallocr_slot_activate(ggml_gallocr_t galloc, uint64_t key) {
     // new key
     idx = ggml_gallocr_slot_alloc(galloc, key);
     if (galloc->buffers == NULL) {
-        galloc->buffers = calloc(galloc->n_buffers, sizeof(struct vbuffer *));
-        GGML_ASSERT(galloc->buffers != NULL);
+        if (galloc->pool_buffers != NULL) {
+            galloc->buffers = galloc->pool_buffers;
+            galloc->pool_buffers = NULL;
+        } else {
+            galloc->buffers = calloc(galloc->n_buffers, sizeof(struct vbuffer *));
+            GGML_ASSERT(galloc->buffers != NULL);
+        }
     }
     // galloc may still hold legacy plan/buffers: attach them to this slot so reserve
     // updates in place and nothing is leaked
@@ -821,6 +823,23 @@ void ggml_gallocr_free(ggml_gallocr_t galloc) {
         }
         free(galloc->slots);
         galloc->slots = NULL;
+    }
+
+    if (galloc->pool_buffers != NULL) {
+        for (int i = 0; i < galloc->n_buffers; i++) {
+            bool freed = false;
+            for (int j = 0; j < i; j++) {
+                if (galloc->pool_buffers[j] == galloc->pool_buffers[i]) {
+                    freed = true;
+                    break;
+                }
+            }
+            if (!freed) {
+                ggml_vbuffer_free(galloc->pool_buffers[i]);
+            }
+        }
+        free(galloc->pool_buffers);
+        galloc->pool_buffers = NULL;
     }
 
     for (int i = 0; i < galloc->n_buffers; i++) {
