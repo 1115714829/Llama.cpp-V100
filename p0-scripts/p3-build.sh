@@ -1,0 +1,36 @@
+#!/bin/bash
+# p3-decomp T1 build: fattn-sm70-d256.cu only. Same discipline as gb-build.sh.
+set -uo pipefail
+LOG=/tmp/p3-build.log
+MAKELOG=/tmp/p3-build-make.log
+exec > "$LOG" 2>&1
+echo "BUILD_START $(date)"
+if [ -f /tmp/LLAMA_BUILD_LOCK ]; then echo "LOCK_HELD"; echo BUILD_DONE; exit 2; fi
+if pgrep -f 'llama-serve[r] --model' >/dev/null; then echo "BUSY_SERVER"; echo BUILD_DONE; exit 2; fi
+if pgrep -f 'llama-benc[h] -m' >/dev/null; then echo "BUSY_BENCH"; echo BUILD_DONE; exit 2; fi
+if pgrep -f 'cmake --buil[d]' >/dev/null; then echo "BUSY_BUILD"; echo BUILD_DONE; exit 2; fi
+touch /tmp/LLAMA_BUILD_LOCK
+cd /root/llm/test/v100-opt/llama.cpp || { echo NO_TREE; rm -f /tmp/LLAMA_BUILD_LOCK; echo BUILD_DONE; exit 2; }
+if [ ! -f /tmp/p3-fattn-sm70-d256.cu ]; then
+  echo NO_SRC_PAYLOAD; rm -f /tmp/LLAMA_BUILD_LOCK; echo BUILD_DONE; exit 2
+fi
+sed 's/\r$//' /tmp/p3-fattn-sm70-d256.cu > ggml/src/ggml-cuda/fattn-sm70-d256.cu
+echo "SRC_MD5:"
+md5sum ggml/src/ggml-cuda/fattn-sm70-d256.cu
+echo "MARK_DECOMP_ENV=$(grep -c LLAMA_SM70_FA_DECOMP ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
+echo "MARK_WS=$(grep -c sm70_decomp_ws_reserve ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
+cmake --build build-instr -j128 --target llama-server llama-bench > "$MAKELOG" 2>&1
+BUILD_RC=$?
+echo "BUILD_RC=$BUILD_RC"
+echo "ERROR_LINES=$(grep -c 'error:' "$MAKELOG" || true)"
+if [ "$BUILD_RC" != "0" ]; then
+  grep -m 30 -a 'error' "$MAKELOG"
+  rm -f /tmp/LLAMA_BUILD_LOCK
+  echo BUILD_DONE
+  exit 1
+fi
+mkdir -p /root/libdir-gb
+cp -a build-instr/bin/. /root/libdir-gb/
+echo "MARK_LIB_DECOMP=$(strings /root/libdir-gb/libggml-cuda.so.0.24.0 | grep -c LLAMA_SM70_FA_DECOMP || true)"
+rm -f /tmp/LLAMA_BUILD_LOCK
+echo BUILD_DONE

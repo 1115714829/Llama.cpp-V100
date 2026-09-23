@@ -15,7 +15,19 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
-### R298-P ★★ **enqueue 税解剖（P6/P10 量具，256K 单请求）：巨兽不是 meta（7 ms/call），是 sched 每调用图规划（263.7 ms/call = 墙钟 69%）**（2026-09-24，前哨）
+### R299-T1 ★★ **P-P3 分解 T1（门控 + 私有常驻 workspace + 直通）验收全过：=0/=1 双判据位级等价**（2026-09-24）
+
+- **实现**（commit `0da82d593`，分支 `feat/p3-decomp`，fattn.cu 零改动）：`LLAMA_SM70_FA_DECOMP`（判值）+ 私有常驻 workspace（static 设备缓冲，不入图防多槽翻倍 = P3-RECON [S2]-1）+ T1 直通（Path A 本体照跑）。
+- **五臂门**：gb-off/gb-off-nospec/gb-on/gb-on-nospec 全绿（无回归）+ t1-decomp 臂 `f3edac19…` ——但 **probe=0 自曝验证空洞**：门臂 greedy q<256 不进 sm70 路径 ⇒ =1 判据未覆盖。
+- **补 q≥256 端到端对照（t1-e2e.sh，greedy/seed 固定，~4500 tok prompt，双臂）**：
+
+| 臂 | probe_hits | 输出 sha256 |
+|---|---|---|
+| DECOMP=0 | 0（默认路径零触碰 ✓） | `86707d24…` |
+| **DECOMP=1** | **576**（真实 FA 调用全进新分支 ✓） | **`86707d24…` 逐字相同** |
+
+- ⇒ **T1 双判据验收完成**；教训入档：**门臂形状必须覆盖新码路径**（q<256 走 stock = 无效验证，probe 计数自证是抓这类空洞的关键）。
+- 下一步 T2：GQA 打包 QK（cuBLAS 块）+ PV（显式 mma，FP32 块输出）+ score 布局（p3-decomp spec [S2]-2/3/4）。
 
 - **账（r=1.08，rep=1，505 调用）**：`enqueue 133.1 s = 263.7 ms/call`（墙钟 69%）｜`alloc 28.5 ms/call`（T8 已治）｜`setin 22.5 ms/call`｜`build 0.25 ms/call`。
 - **[META] 对照**：`total=7.049 ms/call`、sub/call=15.8、ar/call=14.8、dev_hist 中位 25µs、85%<60µs ⇒ **meta 派发只是零头**；老 E 系列"meta 税"叙事在 256K 服务负载下让位于 **ggml_backend_sched 每调用图规划**（split/指派 O(大图)，prefill 图 5000+ 节点）。
