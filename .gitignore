@@ -1,4 +1,4 @@
-﻿# heavy / nested — not in this workspace meta repo
+# heavy / nested — not in this workspace meta repo
 v100-refs/
 llama.cpp/
 .dsh/
@@ -9,4 +9,5 @@ llama.cpp/
 # secrets and bulky backups — never commit
 olddoc/qwen-private/
 olddoc/backup/
-1cat-vllm-v100-study/  # self-versioned archive repo (commits inside are the backup)
+# self-versioned archive repo (its own commits are the backup)
+1cat-vllm-v100-study/
