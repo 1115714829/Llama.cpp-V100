@@ -14,7 +14,7 @@ arm() {
   tag=$1
   dec=$2
   echo "=== ARM $tag decomp=$dec $(date) ==="
-  env GGML_KV_BUCKET_RATIO=1.08 LLAMA_SM70_FA_DECOMP=$dec LLAMA_SM70_D256_DEBUG=1 \
+  env GGML_KV_BUCKET_RATIO=1.08 LLAMA_SM70_FA_DECOMP=$dec LLAMA_SM70_D256_DEBUG=1 SM70_FA_DUMPOUT=1 \
     LD_LIBRARY_PATH=/root/libdir-gb CUDA_VISIBLE_DEVICES=0,1,2 GGML_GALLOCR_SLOTS=3 \
     nohup /root/libdir-gb/llama-server --model "$M" --model-draft "$D" \
       --spec-type draft-dflash --spec-draft-n-max 7 \
