@@ -21,9 +21,11 @@
 
 | 256K 指标 | BL1 vLLM（标准线） | BL2 官方 llama | BL3 B5 | 我们（目标） |
 |---|---|---|---|---|
-| 预填充 TTFT / pp t/s | 待测填入 | 待测填入 | 待测填入 | **≥ BL1** |
-| 吐字 tg t/s（附 AL） | 待测填入 | 待测填入 | 待测填入 | **≥ BL1** |
-| 体感 tpot / ms 每轮 | 待测填入 | 待测填入 | 待测填入 | **≥ BL1** |
+| 预填充 TTFT / pp t/s | **152.5 s / 1549 t/s**（152.26/152.82） | 待测填入 | 待测填入 | **≥ BL1** |
+| 吐字 tg t/s（附 AL） | **124.6 t/s**（118.0/131.1） | 待测填入 | 待测填入 | **≥ BL1** |
+| 体感 tpot / ms 每轮 | **≈8.0 ms**（8.47/7.63） | 待测填入 | 待测填入 | **≥ BL1** |
+
+> **BL1 口径（2026-09-23 实测，stress-256k 技能）**：ctx 262144 的 **90.14% 填充**（prompt 236,313 tokens；每 rep 加盐防 prefix cache、句序号防投机刷分）；gen 128；thinking on、chunked prefill 2048、DFlash2、TP4 卡 0,1,3,4；服务**原样启动参数**（`vllm-1cat.service`）。比 1cat 文档 2438 t/s 低是因为那是 chunk 8192 pure prefill 契约——本表是**标准服务基本参数实测**，即标准线本体。
 
 ### 1.1 维护 [`1cat-vllm-v100-study/PLAN-GRAPH.md`](1cat-vllm-v100-study/PLAN-GRAPH.md)
 
