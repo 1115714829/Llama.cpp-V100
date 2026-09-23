@@ -234,9 +234,9 @@ static bool sm70_fa_gemm() {
     return enabled;
 }
 
-// P-P3 decomposition path (p3-decomp spec). Judge the VALUE (=0 off). T1 is a
-// passthrough (same output as Path A) that exercises the gate, the probe and
-// the private resident workspace; T2 swaps in the decomposed compute.
+#include "fattn-sm70-decomp.cuh"
+
+// P-P3 decomposition path (p3-decomp spec). Judge the VALUE (=0 off).
 static bool sm70_fa_decomp() {
     const char * e = getenv("LLAMA_SM70_FA_DECOMP");
     return e != nullptr && atof(e) != 0.0;
@@ -596,15 +596,6 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     GGML_ASSERT(sm70_d256_kv_type_ok(K->type));
     GGML_ASSERT(sm70_d256_kv_type_ok(V->type));
 
-    if (sm70_fa_decomp()) {
-        // T1 passthrough (p3-decomp spec [S2]-1/9): gate + probe + resident
-        // workspace only; the Path A body below runs unchanged => bit-identical.
-        const int kbn = q_len <= 2048 ? 24576 : 8192;
-        sm70_decomp_ws_reserve(
-            (size_t) hkv * (size_t) (q_len * gqa) * (size_t) kbn * 2);
-        sm70_d256_probe("ACCEPT: sm70 decomp T1 passthrough", cc, Q, K, V, mask);
-    }
-
     const int q_pad = ((q_len + SM70_D256_BLOCK_M - 1) / SM70_D256_BLOCK_M) * SM70_D256_BLOCK_M;
 
     float scale = 1.0f;
@@ -649,6 +640,47 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     cudaStream_t stream = ctx.stream();
     sm70_d256_dequant_kv((ggml_tensor *) K, (ggml_tensor *) V, f16_extra,
                          V_is_K_view, stream, k_direct, v_direct);
+
+    if (sm70_fa_decomp()) {
+        // T2 decomposed compute (p3-decomp [S2]-2/3/4): GQA-packed cuBLAS QK/PV
+        // pair + exact fp32 block softmax over the staged f16 KV. Unsupported
+        // shapes/types fall through to Path A below (probe keeps it auditable).
+        if (nb == 1 && !k_direct && !v_direct && Q->type == GGML_TYPE_F16
+            && Q->nb[1] == 2 * SM70_D256_D
+            && ggml_is_contiguously_allocated((ggml_tensor *) K)
+            && ggml_is_contiguously_allocated((ggml_tensor *) V)) {
+            const int q6 = q_len * gqa;
+            const int kBlockN = q_len <= 2048 ? 24576 : 8192;
+            sm70_decomp_ws_reserve(
+                (size_t) q6 * kBlockN * 6 + (size_t) 256 * q6 * 4
+                + (size_t) q6 * 8);
+            const half * Qg_base = (const half *) Q->data;
+            const half * Kg_base = K->type == GGML_TYPE_F16
+                ? (const half *) K->data : (const half *) f16_extra.K;
+            const half * Vg_base = (V->type == GGML_TYPE_F16 && !V_is_K_view)
+                ? (const half *) V->data : (const half *) f16_extra.V;
+            float * out_base = (float *) dst->data;
+            const int64_t q_head_stride = (int64_t) q_len * SM70_D256_D;
+            const int64_t k_head_stride = (int64_t) K->ne[1] * SM70_D256_D;
+            const int64_t v_head_stride = (int64_t) V->ne[1] * SM70_D256_D;
+            for (int g = 0; g < hkv; ++g) {
+                FLASH_NAMESPACE::sm70_decomp_group(
+                    stream,
+                    Qg_base + (int64_t) g * gqa * q_head_stride,
+                    Kg_base + (int64_t) g * k_head_stride,
+                    Vg_base + (int64_t) g * v_head_stride,
+                    out_base + (int64_t) g * gqa * q_head_stride,
+                    (float *) sm70_decomp_ws,
+                    (const void *) mask->data,
+                    mask->type == GGML_TYPE_F16,
+                    q6, q_len, kv_len, kBlockN, softmax_scale_log2);
+            }
+            sm70_d256_probe("ACCEPT: sm70 decomp T2 compute", cc, Q, K, V, mask);
+            return;
+        }
+        sm70_d256_probe("REJECT: decomp T2 shape/type, Path A fallback",
+                        cc, Q, K, V, mask);
+    }
 
     const half * K_h2;
     const half * V_h2;

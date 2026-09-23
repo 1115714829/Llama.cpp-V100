@@ -27,6 +27,13 @@ namespace FLASH_NAMESPACE {
 
 using index_t = uint32_t;
 
+// mask is F16 when flash_attn is on (build_attn_inp_kq_mask), F32 otherwise.
+__device__ __forceinline__ float sm70_decomp_mask_at(
+        const void * mask, bool mask_f16, index_t idx) {
+    return mask_f16 ? __half2float(((const half *) mask)[idx])
+                    : ((const float *) mask)[idx];
+}
+
 // S/P are [q6, kbn] (elem (m,j) at j*q6+m); O is [256, q6] (d + m*256).
 // One block of kbn KV rows per launch; running row max/sum merges blocks.
 template <int kQ6PerBlk>
@@ -36,7 +43,8 @@ __global__ void sm70_decomp_softmax_block_kernel(
         float       * __restrict__ row_max, // [q6] raw-dot domain
         float       * __restrict__ row_sum, // [q6]
         float       * __restrict__ O,       // [256, q6]
-        const float * __restrict__ mask,    // [n_kv, q_len], (j,t) at j + t*n_kv
+        const void  * __restrict__ mask,    // [n_kv, q_len], (j,t) at j + t*n_kv
+        bool mask_f16,
         int kbn, int q6, int q_len, int n_kv, int j0,
         float softmax_scale_log2, bool first_block) {
     const int m0 = (int) blockIdx.x * kQ6PerBlk;
@@ -45,7 +53,8 @@ __global__ void sm70_decomp_softmax_block_kernel(
         // 1) block max over raw dots + add-mask
         float bmax = -INFINITY;
         for (int j = 0; j < kbn; ++j) {
-            const float mv = __ldg(mask + (j0 + j) + (index_t) t * n_kv);
+            const float mv =
+                sm70_decomp_mask_at(mask, mask_f16, (j0 + j) + (index_t) t * n_kv);
             const float s = S[(index_t) j * q6 + mm] + mv;
             if (s > bmax) { bmax = s; }
         }
@@ -63,7 +72,8 @@ __global__ void sm70_decomp_softmax_block_kernel(
         // 3) exp -> P (f16) + block sum
         float bsum = 0.0f;
         for (int j = 0; j < kbn; ++j) {
-            const float mv = __ldg(mask + (j0 + j) + (index_t) t * n_kv);
+            const float mv =
+                sm70_decomp_mask_at(mask, mask_f16, (j0 + j) + (index_t) t * n_kv);
             const float e = exp2f(
                 (S[(index_t) j * q6 + mm] + mv - safe_max) * softmax_scale_log2);
             P[(index_t) j * q6 + mm] = (half) e;
@@ -107,7 +117,8 @@ static void sm70_decomp_group(
         const half   * Vg,
         float        * out_g,
         float        * ws,
-        const float  * mask,
+        const void   * mask,
+        bool mask_f16,
         int q6, int q_len, int kbn_total, int kBlockN,
         float softmax_scale_log2) {
     const int n_kv = kbn_total;
@@ -145,7 +156,7 @@ static void sm70_decomp_group(
         // block softmax + running merge (scale folded via scale_log2 here).
         sm70_decomp_softmax_block_kernel<32><<<
             (unsigned) ((q6 + 31) / 32), 128, 0, stream>>>(
-                S, P, row_max, row_sum, O, mask,
+                S, P, row_max, row_sum, O, mask, mask_f16,
                 kbn, q6, q_len, n_kv, j0,
                 softmax_scale_log2, j0 == 0);
         CUDA_CHECK(cudaGetLastError());
