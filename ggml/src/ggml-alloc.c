@@ -552,6 +552,22 @@ static uint64_t ggml_gallocr_fast_stamp(
     return s;
 }
 
+// R302: size dims enter the key only as power-of-two classes so bucket steps
+// share one plan/slot. Exact wiring still separates plans and needs_realloc
+// re-validates real sizes after a slot load, so coarsening stays safe.
+static uint64_t ggml_gallocr_size_class(int64_t n) {
+    if (n < 2048) {
+        return (uint64_t) n;
+    }
+    uint64_t v = (uint64_t) n;
+    int sh = 0;
+    while (v > 1) {
+        v >>= 1;
+        sh++;
+    }
+    return (uint64_t) 1 << (sh + 1);
+}
+
 // key = graph structure + node/leaf buffer ids (buffer ids matter: same shape with a
 // different backend assignment must not share a plan). covers node dst shape, src slot
 // pattern and src shapes: the plan places tensors by lifetime, so two graphs may share
@@ -567,7 +583,7 @@ static uint64_t ggml_gallocr_plan_key(
         h = h * 0x100000001b3ull + (uint64_t) t->type;
         h = h * 0x100000001b3ull + (uint64_t) t->op;
         for (int d = 0; d < 4; d++) {
-            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
+            h = h * 0x100000001b3ull + ggml_gallocr_size_class(t->ne[d]);
         }
         h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t->op_params[0];
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
@@ -580,7 +596,7 @@ static uint64_t ggml_gallocr_plan_key(
             h = h * 0x100000001b3ull + (uint64_t) j;
             h = h * 0x100000001b3ull + (uint64_t) s->type;
             for (int d = 0; d < 4; d++) {
-                h = h * 0x100000001b3ull + (uint64_t) s->ne[d];
+                h = h * 0x100000001b3ull + ggml_gallocr_size_class(s->ne[d]);
             }
         }
     }
@@ -588,7 +604,7 @@ static uint64_t ggml_gallocr_plan_key(
         const struct ggml_tensor * t = graph->leafs[i];
         h = h * 0x100000001b3ull + (uint64_t) t->type;
         for (int d = 0; d < 4; d++) {
-            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
+            h = h * 0x100000001b3ull + ggml_gallocr_size_class(t->ne[d]);
         }
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
         h = h * 0x100000001b3ull + (uint64_t) (leaf_buffer_ids ? leaf_buffer_ids[i] : 0);
@@ -1204,6 +1220,22 @@ static bool ggml_gallocr_reserve_n_impl(
             if (no_alloc) {
                 galloc->buffers[i] = NULL;
             } else {
+                // R302 growth headroom: small plan growth must not free+malloc
+                // the whole pool. Inflate chunk max_size so later steps fit.
+                // GGML_GALLOCR_GROWTH=1.0 disables; default 1.5.
+                {
+                    double growth = 1.5;
+                    const char * ge = getenv("GGML_GALLOCR_GROWTH");
+                    if (ge != NULL && atof(ge) >= 1.0) {
+                        growth = atof(ge);
+                    }
+                    if (growth > 1.0) {
+                        for (int c = 0; c < galloc->buf_tallocs[i]->n_chunks; c++) {
+                            galloc->buf_tallocs[i]->chunks[c]->max_size =
+                                (size_t) ((double) galloc->buf_tallocs[i]->chunks[c]->max_size * growth) + 16*1024*1024;
+                        }
+                    }
+                }
                 galloc->buffers[i] = ggml_vbuffer_alloc(galloc->bufts[i], galloc->buf_tallocs[i], GGML_BACKEND_BUFFER_USAGE_COMPUTE);
                 if (galloc->buffers[i] == NULL) {
                     GGML_LOG_ERROR("%s: failed to allocate %s buffer of size %zu\n", __func__, ggml_backend_buft_name(galloc->bufts[i]), new_size);
