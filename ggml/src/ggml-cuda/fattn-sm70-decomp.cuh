@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// ============================================================================
+// fattn-sm70-decomp.cuh - P-P3 decomposition compute (T2 core).
+//
+// Dataflow (p3-decomp spec [S2], mirrors 1cat 79T):
+//   per KV-head group (gqa=6 Q heads packed into M, zero-copy: the 6 heads are
+//   contiguous in GGML Q, so the group IS a [256, q6] column-major matrix):
+//     QK  : S[m, j] = Q[d, m] . K[d, j]     one cuBLAS GEMM per kBlockN block
+//     soft: exact fp32 block softmax merge (running row max/sum; P -> f16)
+//     PV  : O[d, m] += V[d, j] * P[m, j]    one cuBLAS GEMM per block
+//     epi : O *= 1/sum -> f32 output (GGML [256(d), q_len, hq] layout)
+//
+// Layout convention (single, checked): everywhere column-major cuBLAS style.
+//   S/P      [q6, kbn]  : elem (m, j) at j*q6 + m
+//   O / out  [256, q6]  : elem (d, m) at d + m*256
+//   mask     [n_kv, q_len] (GGML ne0 = n_kv contiguous) : (j, t) at j + t*n_kv
+// Score/row-state live in the private resident workspace (never in the graph).
+// Numerics: fp32 score + exact max subtraction (no f16 score range risk).
+// ============================================================================
+#pragma once
+
+#include "fattn-sm70-d256-kernel.cuh"
+
+#include <cublas_v2.h>
+
+namespace FLASH_NAMESPACE {
+
+using index_t = uint32_t;
+
+// S/P are [q6, kbn] (elem (m,j) at j*q6+m); O is [256, q6] (d + m*256).
+// One block of kbn KV rows per launch; running row max/sum merges blocks.
+template <int kQ6PerBlk>
+__global__ void sm70_decomp_softmax_block_kernel(
+        const float * __restrict__ S,       // [q6, kbn] raw dots (unscaled)
+        half        * __restrict__ P,       // [q6, kbn]
+        float       * __restrict__ row_max, // [q6] raw-dot domain
+        float       * __restrict__ row_sum, // [q6]
+        float       * __restrict__ O,       // [256, q6]
+        const float * __restrict__ mask,    // [n_kv, q_len], (j,t) at j + t*n_kv
+        int kbn, int q6, int q_len, int n_kv, int j0,
+        float softmax_scale_log2, bool first_block) {
+    const int m0 = (int) blockIdx.x * kQ6PerBlk;
+    for (int mm = m0; mm < m0 + kQ6PerBlk && mm < q6; ++mm) {
+        const int t = mm % q_len;
+        // 1) block max over raw dots + add-mask
+        float bmax = -INFINITY;
+        for (int j = 0; j < kbn; ++j) {
+            const float mv = __ldg(mask + (j0 + j) + (index_t) t * n_kv);
+            const float s = S[(index_t) j * q6 + mm] + mv;
+            if (s > bmax) { bmax = s; }
+        }
+        const float safe_max = bmax == -INFINITY ? 0.0f : bmax;
+        // 2) running max / O rescale (exact fp32 merge across blocks)
+        if (!first_block) {
+            const float factor =
+                exp2f((row_max[mm] - safe_max) * softmax_scale_log2);
+            row_sum[mm] *= factor;
+            for (int d = 0; d < 256; ++d) {
+                O[d + (index_t) mm * 256] *= factor;
+            }
+        }
+        if (bmax > row_max[mm]) { row_max[mm] = bmax; }
+        // 3) exp -> P (f16) + block sum
+        float bsum = 0.0f;
+        for (int j = 0; j < kbn; ++j) {
+            const float mv = __ldg(mask + (j0 + j) + (index_t) t * n_kv);
+            const float e = exp2f(
+                (S[(index_t) j * q6 + mm] + mv - safe_max) * softmax_scale_log2);
+            P[(index_t) j * q6 + mm] = (half) e;
+            bsum += e;
+        }
+        row_sum[mm] += bsum;
+    }
+}
+
+// O *= 1/row_sum -> out, both [256, q6] (d + m*256).
+__global__ void sm70_decomp_epilogue_kernel(
+        const float * __restrict__ O,
+        float       * __restrict__ out,
+        const float * __restrict__ row_sum,
+        int q6) {
+    for (int mm = (int) blockIdx.x; mm < q6; mm += (int) gridDim.x) {
+        const float inv = 1.0f / row_sum[mm];
+        for (int d = 0; d < 256; ++d) {
+            out[d + (index_t) mm * 256] = O[d + (index_t) mm * 256] * inv;
+        }
+    }
+}
+
+// Private cublas handle for the decomposed path (process-lifetime).
+inline cublasHandle_t sm70_decomp_cublas() {
+    static const cublasHandle_t handle = [] {
+        cublasHandle_t h = nullptr;
+        CUBLAS_CHECK(cublasCreate(&h));
+        return h;
+    }();
+    return handle;
+}
+
+// Full decomposed attention for one KV-head group (6 packed Q heads).
+// Qg/Kg/Vg are column-major [256, N] views (d contiguous); out_g is the
+// matching [256, q6] f32 output slice. ws is the private resident workspace.
+static void sm70_decomp_group(
+        cudaStream_t stream,
+        const half   * Qg,
+        const half   * Kg,
+        const half   * Vg,
+        float        * out_g,
+        float        * ws,
+        const float  * mask,
+        int q6, int q_len, int kbn_total, int kBlockN,
+        float softmax_scale_log2) {
+    const int n_kv = kbn_total;
+
+    // workspace partition: S/P [q6, kBlockN], O [256, q6], row_max/row_sum [q6]
+    float * S       = ws;
+    half  * P       = (half *) (S + (size_t) kBlockN * q6);
+    float * O       = (float *) (P + (size_t) kBlockN * q6);
+    float * row_max = O + (size_t) 256 * q6;
+    float * row_sum = row_max + q6;
+
+    CUDA_CHECK(cudaMemsetAsync(row_sum, 0, (size_t) q6 * sizeof(float), stream));
+    CUDA_CHECK(cudaMemsetAsync(O, 0, (size_t) 256 * q6 * sizeof(float), stream));
+
+    cublasHandle_t cublas = sm70_decomp_cublas();
+    CUBLAS_CHECK(cublasSetStream(cublas, stream));
+
+    const float alpha = 1.0f;
+    const float beta0 = 0.0f;
+    const float beta1 = 1.0f;
+
+    for (int j0 = 0; j0 < kbn_total; j0 += kBlockN) {
+        const int kbn = min(kBlockN, kbn_total - j0);
+        const half * Kblk = Kg + (size_t) j0 * 256;
+        const half * Vblk = Vg + (size_t) j0 * 256;
+
+        // QK: S[q6, kbn] = Qg^T[q6, 256] x Kg_blk[256, kbn], fp32 accumulate.
+        CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_T, CUBLAS_OP_N,
+                q6, kbn, 256, &alpha,
+                Qg, CUDA_R_16F, 256,
+                Kblk, CUDA_R_16F, 256,
+                &beta0, S, CUDA_R_32F, q6,
+                CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+        // block softmax + running merge (scale folded via scale_log2 here).
+        sm70_decomp_softmax_block_kernel<32><<<
+            (unsigned) ((q6 + 31) / 32), 128, 0, stream>>>(
+                S, P, row_max, row_sum, O, mask,
+                kbn, q6, q_len, n_kv, j0,
+                softmax_scale_log2, j0 == 0);
+        CUDA_CHECK(cudaGetLastError());
+
+        // PV: O[256, q6] += Vblk[256, kbn] x P^T[kbn, q6], fp32 accumulate.
+        CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_N, CUBLAS_OP_T,
+                256, q6, kbn, &alpha,
+                Vblk, CUDA_R_16F, 256,
+                P, CUDA_R_16F, q6,
+                &beta1, O, CUDA_R_32F, 256,
+                CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+    }
+
+    sm70_decomp_epilogue_kernel<<<(unsigned) min(q6, 256), 32, 0, stream>>>(
+        O, out_g, row_sum, q6);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+} // namespace FLASH_NAMESPACE
