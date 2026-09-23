@@ -38,8 +38,16 @@
 | [`llama.cpp/`](llama.cpp/) | **交付物**（二次开发代码） | 改码前读 [`llama.cpp/AGENTS.md`](llama.cpp/AGENTS.md) |
 | [`models/`](models/README.md) | 本机参考模型（vocab GGUF） | 大权重在服务器 `/mnt/3.84t/**` |
 | [`olddoc/`](olddoc/README.md) | 旧私有/散件回档 | `qwen-private/QWEN.md` **含口令，禁止外传** |
-| [`v100-refs/`](v100-refs/) | 外部 V100 参考实现 | **只读** |
-| `vllm/` `1cat-vllm/` `vllm-forkpoint/` | 对照源 | **只读，禁止改** |
+| [`v100-refs/`](v100-refs/) | **全部外部参考**（已收拢，只读） | 见下表 |
+
+### `v100-refs/` 内（一律只读、禁止改）
+
+| 子目录 | 含义 |
+|---|---|
+| [`vllm/`](v100-refs/vllm/) · [`1cat-vllm/`](v100-refs/1cat-vllm/) | 官方 vllm 与 1cat 分支 |
+| [`vllm-1ca-vllm分支版本差异文件/`](v100-refs/vllm-1ca-vllm分支版本差异文件/) | **分叉点基线**（原 `vllm-forkpoint`）= 1cat 起分支时的 vllm；对照此目录看 **1cat 相对分叉点改了什么** |
+| 看差异的命令 | `git -C v100-refs/1cat-vllm diff 4ff865c38..HEAD -- <path>`（分叉点在 1cat 对象库内） |
+| 其余 | `flash-attention-v100/` `sm70-attn/` `v100-skinny/` `ninfer-v100/` `jusko-…/` `sglang-V100/` `xllama.cpp/` `qwen38-v100-serve/` — V100 内核/服务参考 |
 
 ### 研究档案深链（按需）
 
