@@ -1,0 +1,27 @@
+archive : llama.cpp V100/SM70 study — 1cat-vLLM comparison, NCCL finding, measurement tooling
+
+Research archive for the llama.cpp V100 (SM 70) optimization effort, kept in its own
+repository so the fork under ../llama.cpp stays clean.
+
+Reports
+- goal-phase1-findings.md (sections 1-16): the Goal harness and baseline, the NCCL
+  allreduce finding (+18.4%, 80.42 -> 95.20 tok/s), the falsified Q8_0 MMVQ->MMQ
+  hypothesis (-31%), the --spec-draft-device root cause, and the closed-lever list.
+- premise-check-1cat-vs-llamacpp.md / premise-check.html: the 1cat-vLLM production
+  service measured on this box (222-263 tok/s) versus this project.
+- FINAL-REPORT.md, phase0-round-breakdown.md, phase1a-report.html, l3-acceptance.md,
+  stress-test-256k.md, same-source-ab.md, mtp-sampler-cpu.md, c5-volta-crossover.md,
+  dflash-in-llamacpp.md, dflash2-llama-cpp-research.md, baseline.md, WORKPLAN.md,
+  core-changes.md, FlashAttention-V100-reference.md, fa-v100-verified.md,
+  1cat-sm70-gemm-tactics.md, vllm-vs-1cat-vllm-diff.md.
+
+Tooling
+- p60-ab-harness.sh: the fixed-workload decode harness (model, ctx, sampling, prompt
+  set, seed, n_predict are fixed; card list and split mode are parameters). Also
+  p60-ab-harness2.sh, which adds an LD_LIBRARY_PATH extension and prints the
+  allreduce-init and per-round timing lines.
+- p*.sh and *.bat: every experiment script used, plus the raw result captures.
+
+tmp-src.tgz (37 MB upstream source snapshot) is excluded by .gitignore.
+
+Assisted-by: Qwen Code

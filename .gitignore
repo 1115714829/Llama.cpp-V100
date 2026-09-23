@@ -1,0 +1,11 @@
+﻿# heavy / nested — not in this workspace meta repo
+v100-refs/
+llama.cpp/
+.dsh/
+.mimocode/
+.tmpcmp/
+*.gguf
+
+# secrets and bulky backups — never commit
+olddoc/qwen-private/
+olddoc/backup/
