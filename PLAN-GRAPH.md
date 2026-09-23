@@ -458,6 +458,9 @@ flowchart TD
   DECMP["★★★ R293 吐字 3.81x 分解 (spec-off 对照): **纯步 1.44x (34.5 vs 24.1 ms/token) x 投机轮放大差 2.65x**<br/>(我方 round = 2.57x 单步 = draft 2 调用 + selector CPU + meta host = E16 碎账; vLLM = 1.10x 单步, draft 近免费)<br/>AL 2.9 vs 3.4 仅 1.17x 小头 => **吐字主刀重排 = P-D 轮结构 (P-D3/P-D1/P-D5) >> 纯内核 1.44x**<br/>预填充差 1.70-1.90x; 我方 draft 预填充吃 6.8%"]:::hot
   BLINE -.->|分解其吐字差| DECMP
   DECMP ==>|主刀指向轮结构| FIXB
+  HOSTTAX["★★★ R294 256K 轮内分账: **host 图管理税 = 两大差距同一根病**<br/>target 489 调用 rebuild 468 (95.7%): alloc 198 + setin 73 + enqueue 322 = 593 ms/调用 ≈ ubatch 墙钟 615 的全额<br/>decode 轮 target 段 73ms = 每调用 rebuild (R246 23ms+) 同族; draft 13.2 + selector 2.5 小头<br/>=> **主刀二次重排 = host 图管理税根治 (mask 定尺/统一分块/多形状 build 缓存)**, P-P3 内核降二刀 (Amdahl)<br/>AL 随内容 2.9-6.4 波动 (口径注记)"]:::hot
+  DECMP ==>|轮放大 2.65x 真身| HOSTTAX
+  HOSTTAX ==>|根治方向 = R246 修法③ + 复活老线| REBUILD
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
   classDef fact fill:#e8e8e8,stroke:#666
   classDef hot  fill:#ffcccc,stroke:#cc0000,stroke-width:2px

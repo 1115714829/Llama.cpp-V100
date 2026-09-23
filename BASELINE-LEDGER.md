@@ -15,6 +15,14 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
+### R294 ★★★ **256K 轮内分账（LLAMA_ROUND_TIMING + LLAMA_SPEC_TIMING，零改码）：host 图管理税 = 两大差距的同一根病**（2026-09-23）
+
+- **target ctx（489 调用 = 462 prefill ubatch + verify 等）**：`rebuild=468/489（95.7% 逐调用重建）`；**alloc 97.0 s（198 ms/调用）+ setin 35.7 s（73 ms）+ enqueue 157.3 s（322 ms）≈ 290 s ≈ TTFT 285 s 的 102%** ⇒ **预填充是主机受限，GPU 藏在 host 影子下**。draft ctx 对照：3726 调用 reuse 3689（99% 复用），host 账仅 ~5.5 s。
+- **decode 轮（16 轮）**：`draft_decode 13.21 + selector 2.52 + walk 0.10 ms/round`；target 段 ≈73 ms/轮 = **每调用 rebuild（R246 单次 23 ms+）+ alloc/setin/enqueue** 的放大——R293"轮放大 2.65x"的真身。
+- ⇒ **tg 3.81x 与 pp 1.90x 同根 = 每调用图重建 + alloc/setin/enqueue 主机税**（meta 税在 256K 服务负载的统治级放大；kq_mask 逐 ubatch 变长 → 图形状逐调用变 → rebuild，REBUILD 节点成因①）。
+- ⇒ **主刀重排（第二次）：host 图管理税根治**（R246 修法③ mask 定尺/统一分块 + 多形状 build 缓存 + P-D1/N6B 老线）；**P-P3 内核线降为二刀**（host 不清，内核收益被埋，Amdahl 否决内核优先）。
+- 口径注记：本探测 gen 高接受（draft 162/接受 102，tg 45.3）⇒ **AL 随内容波动 2.9–6.4**；基线表按同 prompt 双 rep 口径不变。
+
 ### R293 ★★★ **吐字 3.81x 分解实验（spec-off 对照 + journal SpecDecoding metrics）：主敌 = 投机轮结构开销 2.65x，纯 decode 步差仅 1.44x**（2026-09-23）
 
 - **臂**：BL3NS（B5 + `NO_SPEC=1`）/ BL1NS（vLLM 去 `--speculative-config`）——唯一变量 = 投机开关；同 prompt（236,313 tok / 90.14%）、同 gen 128、同 TP4。双 rep 离散 ≤1%。
