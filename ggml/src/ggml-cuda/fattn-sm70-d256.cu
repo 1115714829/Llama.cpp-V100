@@ -661,10 +661,19 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
             && (V->type != GGML_TYPE_F16
                 || (V->nb[1] == 2 * SM70_D256_D && V->nb[2] == V->nb[1] * V->ne[1]))) {
             const int q6 = q_len * gqa;
-            const int kBlockN = q_len <= 2048 ? 24576 : 8192;
+            int kBlockN = q_len <= 2048 ? 24576 : 8192;
+            {
+                // bisect knob: block-size invariance test (merge math must be
+                // block-size independent); 0/unset = auto
+                const char * kb = getenv("GGML_DECOMP_KBN");
+                if (kb != nullptr && atoi(kb) > 0) {
+                    kBlockN = atoi(kb);
+                }
+            }
+            const int kbn_max = kBlockN < kv_len ? kBlockN : kv_len;
             sm70_decomp_dev_init(id);
             sm70_decomp_ws_reserve(id,
-                (size_t) 256 * q6 * 2 + (size_t) q6 * kBlockN * 6
+                (size_t) 256 * q6 * 2 + (size_t) q6 * kbn_max * 6
                 + (size_t) 256 * q6 * 4 + (size_t) q6 * 8);
             const half * Kg_base = K->type == GGML_TYPE_F16
                 ? (const half *) K->data : (const half *) f16_extra.K;
@@ -687,9 +696,32 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
                     (const void *) mask->data,
                     mask->type == GGML_TYPE_F16,
                     q6, q_len, (int) Q->ne[2], g * gqa, kv_len, kBlockN,
-                    gqa, softmax_scale_log2);
+                    gqa,
+                    // stride semantics differ between Q ([d,q,h], head inner)
+                    // and dst ([d,h,q], token outer): disambiguate by ne size
+                    (int) (Q->nb[1] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
+                    (int) (Q->nb[2] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
+                    (int) ((dst->ne[1] == q_len ? dst->nb[1] : dst->nb[2]) / sizeof(float)),
+                    (int) ((dst->ne[1] == q_len ? dst->nb[2] : dst->nb[1]) / sizeof(float)),
+                    softmax_scale_log2);
             }
             sm70_d256_probe("ACCEPT: sm70 decomp T2 compute", cc, Q, K, V, mask);
+            {
+                static bool dumped = false;
+                if (!dumped) {
+                    dumped = true;
+                    fprintf(stderr,
+                        "[decomp-layout] q_nb1=%d q_nb2=%d o_nb1=%d o_nb2=%d "
+                        "qne1=%lld qne2=%lld dnb1=%lld dnb2=%lld gqa=%d\n",
+                        (int) (Q->nb[1] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
+                        (int) (Q->nb[2] / (Q->type == GGML_TYPE_F16 ? 2 : 4)),
+                        (int) (dst->nb[1] / sizeof(float)),
+                        (int) (dst->nb[2] / sizeof(float)),
+                        (long long) Q->ne[1], (long long) Q->ne[2],
+                        (long long) dst->nb[1], (long long) dst->nb[2],
+                        gqa);
+                }
+            }
             return;
         }
         sm70_d256_probe("REJECT: decomp T2 shape/type, Path A fallback",

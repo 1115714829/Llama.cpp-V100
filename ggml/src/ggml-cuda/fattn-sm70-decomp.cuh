@@ -99,12 +99,14 @@ __global__ void sm70_decomp_pack_q_kernel(
         const void * __restrict__ Q,
         bool q_f16,
         int g0, int gqa, int q_len, int hq,
+        int q_t, int q_h,
         half * __restrict__ Qp) {
     for (int c = (int) blockIdx.x * blockDim.x + threadIdx.x;
             c < q_len * gqa; c += (int) blockDim.x * gridDim.x) {
         const int t  = c / gqa;
         const int hh = c % gqa;
-        const index_t src = (index_t) (g0 + hh) * 256 + (index_t) t * hq * 256;
+        const index_t src =
+            (index_t) (g0 + hh) * q_h + (index_t) t * q_t;
         half * dst = Qp + (index_t) c * 256;
         if (q_f16) {
             const half * s = (const half *) Q + src;
@@ -116,19 +118,20 @@ __global__ void sm70_decomp_pack_q_kernel(
     }
 }
 
-// O *= 1/row_sum -> scatter into dst with the measured [d, h, q] layout:
-// (d, t, h) at d + h*256 + t*hq*256.
+// O *= 1/row_sum -> scatter into dst using its REAL nb strides (dst may be
+// canonical [d, q, h] or the [d, h, q] family - strides decide, never assume).
 __global__ void sm70_decomp_epilogue_kernel(
         const float * __restrict__ O,
         float       * __restrict__ out,
         const float * __restrict__ row_sum,
-        int q6, int gqa, int hq, int g0) {
+        int q6, int gqa, int g0,
+        int o_t, int o_h) {
     for (int mm = (int) blockIdx.x * blockDim.x + threadIdx.x;
             mm < q6; mm += (int) blockDim.x * gridDim.x) {
         const int t  = mm / gqa;
         const int hh = mm % gqa;
         const float inv = 1.0f / row_sum[mm];
-        float * base = out + (index_t) (g0 + hh) * 256 + (index_t) t * hq * 256;
+        float * base = out + (index_t) (g0 + hh) * o_h + (index_t) t * o_t;
         for (int d = 0; d < 256; ++d) {
             base[d] = O[d + (index_t) mm * 256] * inv;
         }
@@ -165,20 +168,22 @@ static void sm70_decomp_group(
         const void   * mask,
         bool mask_f16,
         int q6, int q_len, int hq, int g0, int kbn_total, int kBlockN, int gqa,
+        int q_t, int q_h, int o_t, int o_h,
         float softmax_scale_log2) {
     const int n_kv = kbn_total;
+    const int kbn_blk = kBlockN < kbn_total ? kBlockN : kbn_total;
 
-    // workspace partition: Qp [256, q6] f16, S/P [q6, kBlockN], O [256, q6],
+    // workspace partition: Qp [256, q6] f16, S/P [q6, kbn_blk], O [256, q6],
     // row_max/row_sum [q6]
     half  * Qp      = (half *) ws;
     float * S       = (float *) (Qp + (size_t) 256 * q6);
-    half  * P       = (half *) (S + (size_t) kBlockN * q6);
-    float * O       = (float *) (P + (size_t) kBlockN * q6);
+    half  * P       = (half *) (S + (size_t) kbn_blk * q6);
+    float * O       = (float *) (P + (size_t) kbn_blk * q6);
     float * row_max = O + (size_t) 256 * q6;
     float * row_sum = row_max + q6;
 
     sm70_decomp_pack_q_kernel<<<(unsigned) ((q6 + 255) / 256), 256, 0, stream>>>(
-        Q_raw, q_type == CUDA_R_16F, g0, gqa, q_len, hq, Qp);
+        Q_raw, q_type == CUDA_R_16F, g0, gqa, q_len, hq, q_t, q_h, Qp);
     CUDA_CHECK(cudaGetLastError());
 
     CUDA_CHECK(cudaMemsetAsync(row_sum, 0, (size_t) q6 * sizeof(float), stream));
@@ -223,7 +228,7 @@ static void sm70_decomp_group(
     }
 
     sm70_decomp_epilogue_kernel<<<(unsigned) min(q6, 256), 32, 0, stream>>>(
-        O, out_raw, row_sum, q6, gqa, hq, g0);
+        O, out_raw, row_sum, q6, gqa, g0, o_t, o_h);
     CUDA_CHECK(cudaGetLastError());
 }
 
