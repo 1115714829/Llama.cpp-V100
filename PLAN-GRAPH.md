@@ -452,6 +452,9 @@ flowchart TD
   P3MEM ==>|显存前置约束 (立项必带)| PP3FIX
   P3RSK -.->|立项风险表| PP3FIX
   VER -.->|报告落地| P3RE
+  BLINE["★★★ R292 三基线标准线 (stress-256k, 256K 90% 填充, 同 prompt/同长度):<br/>**BL1 vLLM 标准线 = 152.5s / 1549 t/s 预填充 / 124.6 t/s 吐字 (tpot 8ms)**<br/>BL2 官方 llama = **结构性不可用** (D7 硬崩 ggml-backend-meta.cpp:543, 434ddbb 与 b11053 双版本同崩) = 0 分基线<br/>BL3 B5 = 289.2s / 817 / 32.7 (tpot 30.5ms, AL 0.28) @TP4 四卡 11.3GB 合包络<br/>=> **追平山 = 预填充 1.90x / 吐字 3.86x**; 详见账本 R292"]:::hot
+  BLINE ==>|终极验收重定义 (AGENTS 1.0)| G
+  BLINE -.->|基线值随报告携带| PP3FIX
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
   classDef fact fill:#e8e8e8,stroke:#666
   classDef hot  fill:#ffcccc,stroke:#cc0000,stroke-width:2px

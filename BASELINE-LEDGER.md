@@ -15,6 +15,17 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
+### R292 ★★★ **三基线标准线测定（stress-256k，256K 90% 填充综合压测）：BL1 = 152.5s/1549/124.6；BL2 = 结构性不可用（D7 硬崩）；BL3 B5 = 289.2s/817/32.7**（2026-09-23）
+
+- **口径**：ctx 262144 的 90.14% 填充（prompt 236,313 tok；每 rep 加盐防 prefix cache、句序号防投机刷分）；gen 128；thinking on；同 prompt 字节、同生成长度。**BL1** = `vllm-1cat.service` 原样（FP8+DFlash2+TP4 卡 0,1,3,4，chunked prefill 2048）；**BL2** = 官方 llama（q8_0+DFlash2+256K）；**BL3** = B5（`/root/libdir-t8b`，TP4 卡 0,1,2,3，`--parallel 1 --ctx-size 262144`，ub 512，DFlash2 n-max 7）。
+- **BL1 标准线（双 rep 离散 0.37%）**：TTFT **152.26/152.82 s**、预填充 **1552.0/1546.4 t/s**、吐字 **118.0/131.1 t/s**（tpot 8.47/7.63 ms）。
+- **BL2 = 结构性不可用（0 分基线）**：官方 434ddbb 与 b11053 原版库（libdir-pristine）**双双启动 0.05s 硬崩** `ggml-backend-meta.cpp:543 GGML_ASSERT(src_ss[0].axis != SPLIT_AXIS_0)`（core dumped）= **D7 实锤**（DFlash2 selector top-k × vocab 切分）；官方版另证 butterfly AllReduce 仅支持 2 卡。**B5 的 D7 修复 = 该负载能跑的入场券**。
+- **BL3 B5（双 rep 离散 0.06%）**：TTFT **289.36/289.02 s**、预填充 **816.7/817.6 t/s**（服务端 prompt_ms 288.5/288.1 双源吻合）、吐字 **32.29/33.19 t/s**（tpot 30.9/30.0 ms）、**AL 0.271/0.289（mean len 2.89/2.95）**。
+- ⇒ **追平山 = 预填充 1.90x、吐字 3.86x**（tpot 8.0 vs 30.5 ms）。显存包络：BL3 TP4 四卡各 11.3 GB ✓ 合格（TP3 深 KV OOM：双 KV 头 rank +578 MiB 分配失败 → meta:1726 断言）。
+- ⚠ 解读注记：合成 prompt 对双方投机解码均有可预测性红利（句序号已压低：llama AL 0.28 vs R282 真实文本 0.41），**横向公平**；勿与 1cat 文档真实文本 256K decode 50 t/s 直接混比。vLLM 不报 AL。
+- **压测工具战痕（stress-256k 客户端已内建对策）**：API key 连字符截断→401；thinking 流走 `reasoning_content`/`reasoning` 字段；prefix cache 吃掉预填充→每 rep 加盐；重复 prompt 刷高投机 tg→句序号；llama OAI 严格字段→变体降级重试（记录所用变体）；llama `--ctx-size` 按 `--parallel` 均分→单序列语义；llama stdout 块缓冲→flush。
+- vLLM 测后已恢复停机（用户交付状态）；BL2/BL3 为测试实例（8082），测后停机。
+
 ### R291 ★★★ **P-P0 预填充 TP 扫描 + M1 失衡锚：加卡全线负收益、M1 吞吐杠杆证伪 ⇒ 部署 = 全场景 TP3，卡数只按显存包络定**（2026-09-23，llama-bench 同源臂，判读规则**预登记**于 `p0-scripts/P0-PREREG.md`）
 
 - **口径**：llama-bench pp-only（`-n 0` ⇒ **greedy sha256 门不适用**，R271 先例）；库 `/root/libdir-t8b`（md5 30876545/19675f8b/031009ae/d3affdd2 = B5 账本值 ✓）；env 恒定 `LLAMA_SM70_D256=1 / GGML_GALLOCR_SLOTS=3 / GGML_CUDA_P2P=1`；**唯一变量 = `-ts` + CUDA_VISIBLE_DEVICES**；模型 `/mnt/3.84t/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf`，q8_0 KV + `-fa on`；**NODROP 诊断口径（页缓存热）**；镜像臂序消漂移；TP4 分片机制自证 ✓（运行中四卡各 ~10.5 GB 均载快照）。

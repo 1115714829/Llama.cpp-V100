@@ -6,9 +6,14 @@
 #   2. --model -> Qwen3.8-27B-Q8_0.gguf       (the "q8_0" request, /mnt/3.84t, red-line path)
 #   3. --spec-type draft-mtp -> draft-dflash + --model-draft (user asked q8_0+DFlash2;
 #      spec line = the fixed-yardstick caliber of /root/p60-ab-harness.sh: n-max 7)
-#   4. CVD 2,5 -> 0,1,2 + --tensor-split 1,1,1 (q8_0 27 GB does not fit 2 cards: R275 TP2 OOM)
+#   4. CVD 2,5 -> 0,1,2,3 + --tensor-split 1,1,1,1 (q8_0 27 GB does not fit 2 cards:
+#      R275 TP2 OOM; TP3 OOM'd at 256K deep-KV on the dual-KV-head rank - 578 MiB alloc
+#      failed at 15.1 GB - so TP4, which also matches BL1's card count and the
+#      <=4xV100-16GB envelope)
 #   5. --mmproj dropped (text-only stress; q8_0 yardstick is text)
 #   6. port 8080 -> 8082 (never touch the delivered service port), api-key-file dropped (test instance)
+#   7. --parallel 2 -> 1 (forced: llama-server divides --ctx-size across slots, so parallel 2
+#      gives only 131072/slot and 400s on a 236K prompt; also matches vLLM standard max-num-seqs 1)
 # All other args copied verbatim from the original unit.
 [Unit]
 Description=llama.cpp Qwen3.8-27B Q8_0 DFlash2 256K BL2 baseline (test copy)
