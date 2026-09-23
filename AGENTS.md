@@ -29,6 +29,8 @@
 >
 > **BL3 口径**：同 BL1 prompt/生成长度、thinking on、DFlash2 n-max 7、**TP4 卡 0,1,2,3**（TP3 深 KV OOM：双 KV 头 rank +578 MiB 分配失败）、`--parallel 1 --ctx-size 262144`（llama 把 ctx 按槽均分）、ub 512、库 `/root/libdir-t8b`。**BL2 = 结构性不可用**：官方 434ddbb 与 b11053 原版均 0.05s 内 D7 硬崩（`ggml-backend-meta.cpp:543`，DFlash2 selector top-k × vocab 切分），B5 的 D7 修复是入场券（账本 R292）。⚠ 合成 prompt 对双方投机都有可预测性红利（横向公平），勿与 1cat 文档真实文本 50 t/s 直接比。
 
+**当前差距分解（R293，256K 同口径）**：tg 3.81x = 纯 decode 步 1.44x × **投机轮放大差 2.65x**（我方 round≈2.57×单步 vs vLLM≈1.10×）；预填充 1.70–1.90x。主刀 = P-D 轮结构（P-D3/P-D1/P-D5）与 P-P3 预填充线。
+
 ### 1.1 维护 [`1cat-vllm-v100-study/PLAN-GRAPH.md`](1cat-vllm-v100-study/PLAN-GRAPH.md)
 
 1. **先读图再动手**；汇报用节点 id（N0/X5/P-D1…）。
