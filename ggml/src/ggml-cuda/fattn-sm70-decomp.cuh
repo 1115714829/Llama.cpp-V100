@@ -45,11 +45,12 @@ __global__ void sm70_decomp_softmax_block_kernel(
         float       * __restrict__ O,       // [256, q6]
         const void  * __restrict__ mask,    // [n_kv, q_len], (j,t) at j + t*n_kv
         bool mask_f16,
-        int kbn, int q6, int q_len, int n_kv, int j0,
+        int kbn, int q6, int q_len, int n_kv, int j0, int gqa,
         float softmax_scale_log2, bool first_block) {
     const int m0 = (int) blockIdx.x * kQ6PerBlk;
     for (int mm = m0; mm < m0 + kQ6PerBlk && mm < q6; ++mm) {
-        const int t = mm % q_len;
+        // packed column order is token-major: m = t*gqa + h (Q layout [d,h,q])
+        const int t = mm / gqa;
         // 1) block max over raw dots + add-mask
         float bmax = -INFINITY;
         for (int j = 0; j < kbn; ++j) {
@@ -58,53 +59,95 @@ __global__ void sm70_decomp_softmax_block_kernel(
             const float s = S[(index_t) j * q6 + mm] + mv;
             if (s > bmax) { bmax = s; }
         }
-        const float safe_max = bmax == -INFINITY ? 0.0f : bmax;
-        // 2) running max / O rescale (exact fp32 merge across blocks)
-        if (!first_block) {
-            const float factor =
-                exp2f((row_max[mm] - safe_max) * softmax_scale_log2);
-            row_sum[mm] *= factor;
+        float rmax = first_block ? -INFINITY : row_max[mm];
+        float rsum = first_block ? 0.0f : row_sum[mm];
+        if (bmax == -INFINITY) {
+            // fully masked block (bucket padding tail): contributes nothing
+            row_max[mm] = rmax;
+            row_sum[mm] = rsum;
+            continue;
+        }
+        // 2) running max update + O/sum rescale (factor <= 1)
+        const float new_max = bmax > rmax ? bmax : rmax;
+        if (new_max != rmax && rmax != -INFINITY) {
+            const float factor = exp2f((rmax - new_max) * softmax_scale_log2);
+            rsum *= factor;
             for (int d = 0; d < 256; ++d) {
                 O[d + (index_t) mm * 256] *= factor;
             }
         }
-        if (bmax > row_max[mm]) { row_max[mm] = bmax; }
-        // 3) exp -> P (f16) + block sum
+        // 3) exp -> P (f16) relative to new_max + block sum
         float bsum = 0.0f;
         for (int j = 0; j < kbn; ++j) {
             const float mv =
                 sm70_decomp_mask_at(mask, mask_f16, (j0 + j) + (index_t) t * n_kv);
             const float e = exp2f(
-                (S[(index_t) j * q6 + mm] + mv - safe_max) * softmax_scale_log2);
+                (S[(index_t) j * q6 + mm] + mv - new_max) * softmax_scale_log2);
             P[(index_t) j * q6 + mm] = (half) e;
             bsum += e;
         }
-        row_sum[mm] += bsum;
+        row_max[mm] = new_max;
+        row_sum[mm] = rsum + bsum;
     }
 }
 
-// O *= 1/row_sum -> out, both [256, q6] (d + m*256).
+// Pack one KV-head group of Q into [256, q6] col-major (f16: cublasGemmEx
+// requires uniform operand types). Source layout is GGML [d, h, q]:
+// (d, t, h) at d + h*256 + t*hq*256 (measured, R299 diag).
+// Column order c = t*gqa + hh (token-major) - matches O/mask conventions.
+__global__ void sm70_decomp_pack_q_kernel(
+        const void * __restrict__ Q,
+        bool q_f16,
+        int g0, int gqa, int q_len, int hq,
+        half * __restrict__ Qp) {
+    for (int c = (int) blockIdx.x * blockDim.x + threadIdx.x;
+            c < q_len * gqa; c += (int) blockDim.x * gridDim.x) {
+        const int t  = c / gqa;
+        const int hh = c % gqa;
+        const index_t src = (index_t) (g0 + hh) * 256 + (index_t) t * hq * 256;
+        half * dst = Qp + (index_t) c * 256;
+        if (q_f16) {
+            const half * s = (const half *) Q + src;
+            for (int d = 0; d < 256; ++d) { dst[d] = s[d]; }
+        } else {
+            const float * s = (const float *) Q + src;
+            for (int d = 0; d < 256; ++d) { dst[d] = (half) s[d]; }
+        }
+    }
+}
+
+// O *= 1/row_sum -> scatter into dst with the measured [d, h, q] layout:
+// (d, t, h) at d + h*256 + t*hq*256.
 __global__ void sm70_decomp_epilogue_kernel(
         const float * __restrict__ O,
         float       * __restrict__ out,
         const float * __restrict__ row_sum,
-        int q6) {
-    for (int mm = (int) blockIdx.x; mm < q6; mm += (int) gridDim.x) {
+        int q6, int gqa, int hq, int g0) {
+    for (int mm = (int) blockIdx.x * blockDim.x + threadIdx.x;
+            mm < q6; mm += (int) blockDim.x * gridDim.x) {
+        const int t  = mm / gqa;
+        const int hh = mm % gqa;
         const float inv = 1.0f / row_sum[mm];
+        float * base = out + (index_t) (g0 + hh) * 256 + (index_t) t * hq * 256;
         for (int d = 0; d < 256; ++d) {
-            out[d + (index_t) mm * 256] = O[d + (index_t) mm * 256] * inv;
+            base[d] = O[d + (index_t) mm * 256] * inv;
         }
     }
 }
 
-// Private cublas handle for the decomposed path (process-lifetime).
-inline cublasHandle_t sm70_decomp_cublas() {
-    static const cublasHandle_t handle = [] {
-        cublasHandle_t h = nullptr;
-        CUBLAS_CHECK(cublasCreate(&h));
-        return h;
-    }();
-    return handle;
+// Private cublas handles + resident workspaces, PER DEVICE (TP runs several
+// devices concurrently; a single global pointer/handle cross-wires them).
+constexpr int kDecompMaxDev = 16;
+
+struct sm70_decomp_dev {
+    cublasHandle_t cublas;
+    void * ws;
+    size_t ws_bytes;
+};
+
+inline sm70_decomp_dev & sm70_decomp_state(int id) {
+    static sm70_decomp_dev devs[kDecompMaxDev] = {};
+    return devs[id];
 }
 
 // Full decomposed attention for one KV-head group (6 packed Q heads).
@@ -112,28 +155,36 @@ inline cublasHandle_t sm70_decomp_cublas() {
 // matching [256, q6] f32 output slice. ws is the private resident workspace.
 static void sm70_decomp_group(
         cudaStream_t stream,
-        const half   * Qg,
+        int dev_id,
+        const void   * Q_raw,   // [256, q_len, hq] GGML layout (d,h,q)
+        cudaDataType_t q_type,
         const half   * Kg,
         const half   * Vg,
-        float        * out_g,
+        float        * out_raw,
         float        * ws,
         const void   * mask,
         bool mask_f16,
-        int q6, int q_len, int kbn_total, int kBlockN,
+        int q6, int q_len, int hq, int g0, int kbn_total, int kBlockN, int gqa,
         float softmax_scale_log2) {
     const int n_kv = kbn_total;
 
-    // workspace partition: S/P [q6, kBlockN], O [256, q6], row_max/row_sum [q6]
-    float * S       = ws;
+    // workspace partition: Qp [256, q6] f16, S/P [q6, kBlockN], O [256, q6],
+    // row_max/row_sum [q6]
+    half  * Qp      = (half *) ws;
+    float * S       = (float *) (Qp + (size_t) 256 * q6);
     half  * P       = (half *) (S + (size_t) kBlockN * q6);
     float * O       = (float *) (P + (size_t) kBlockN * q6);
     float * row_max = O + (size_t) 256 * q6;
     float * row_sum = row_max + q6;
 
+    sm70_decomp_pack_q_kernel<<<(unsigned) ((q6 + 255) / 256), 256, 0, stream>>>(
+        Q_raw, q_type == CUDA_R_16F, g0, gqa, q_len, hq, Qp);
+    CUDA_CHECK(cudaGetLastError());
+
     CUDA_CHECK(cudaMemsetAsync(row_sum, 0, (size_t) q6 * sizeof(float), stream));
     CUDA_CHECK(cudaMemsetAsync(O, 0, (size_t) 256 * q6 * sizeof(float), stream));
 
-    cublasHandle_t cublas = sm70_decomp_cublas();
+    cublasHandle_t cublas = sm70_decomp_state(dev_id).cublas;
     CUBLAS_CHECK(cublasSetStream(cublas, stream));
 
     const float alpha = 1.0f;
@@ -145,10 +196,10 @@ static void sm70_decomp_group(
         const half * Kblk = Kg + (size_t) j0 * 256;
         const half * Vblk = Vg + (size_t) j0 * 256;
 
-        // QK: S[q6, kbn] = Qg^T[q6, 256] x Kg_blk[256, kbn], fp32 accumulate.
+        // QK: S[q6, kbn] = Qp^T[q6, 256] x Kg_blk[256, kbn], fp32 accumulate.
         CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_T, CUBLAS_OP_N,
                 q6, kbn, 256, &alpha,
-                Qg, CUDA_R_16F, 256,
+                Qp, CUDA_R_16F, 256,
                 Kblk, CUDA_R_16F, 256,
                 &beta0, S, CUDA_R_32F, q6,
                 CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
@@ -157,9 +208,10 @@ static void sm70_decomp_group(
         sm70_decomp_softmax_block_kernel<32><<<
             (unsigned) ((q6 + 31) / 32), 128, 0, stream>>>(
                 S, P, row_max, row_sum, O, mask, mask_f16,
-                kbn, q6, q_len, n_kv, j0,
+                kbn, q6, q_len, n_kv, j0, gqa,
                 softmax_scale_log2, j0 == 0);
         CUDA_CHECK(cudaGetLastError());
+        (void) 0;
 
         // PV: O[256, q6] += Vblk[256, kbn] x P^T[kbn, q6], fp32 accumulate.
         CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_N, CUBLAS_OP_T,
@@ -171,7 +223,7 @@ static void sm70_decomp_group(
     }
 
     sm70_decomp_epilogue_kernel<<<(unsigned) min(q6, 256), 32, 0, stream>>>(
-        O, out_g, row_sum, q6);
+        O, out_raw, row_sum, q6, gqa, hq, g0);
     CUDA_CHECK(cudaGetLastError());
 }
 
