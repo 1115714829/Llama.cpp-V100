@@ -16,6 +16,9 @@ if [ ! -f /tmp/p3-fattn-sm70-d256.cu ] || [ ! -f /tmp/p3-fattn-sm70-decomp.cuh ]
 fi
 sed 's/\r$//' /tmp/p3-fattn-sm70-d256.cu > ggml/src/ggml-cuda/fattn-sm70-d256.cu
 sed 's/\r$//' /tmp/p3-fattn-sm70-decomp.cuh > ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
+if [ -f /tmp/p3-ggml-alloc.c ]; then
+  sed 's/\r$//' /tmp/p3-ggml-alloc.c > ggml/src/ggml-alloc.c
+fi
 echo "SRC_MD5:"
 md5sum ggml/src/ggml-cuda/fattn-sm70-d256.cu ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
 echo "MARK_DECOMP_ENV=$(grep -c LLAMA_SM70_FA_DECOMP ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
