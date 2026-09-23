@@ -23,6 +23,8 @@
 - **阶段 bug 尸检（累计 8 个真 bug，各带实证）**：mask f16 类型 / Q 布局 [d,h,q] / 多卡单例交叉 / GEMM 混型禁令 / 块 softmax rescale 反向+全 mask 块 / 步长语义反转（Q vs dst）/ **K-V 头行交错（本案主犯）** / 头索引 gkv。方法论战果：块不变性二分、dump-diff 定量、nb 实测三板斧全程禁臆想。
 - **下一步 = T2 性能 A/B**（预登记及格线：FA 算子 ≤230 ms（+25%）或 256K TTFT ≤194.7 s（+7%），基线 r=1.08 采用值）→ T4 收口（门值重立须报）。
 
+### R299-T2 ★★ **P-P3 分解 T2 阶段记录：全链跑通（576/576 进新路径、零崩溃）但 PPL 陪审未过（+1.68% > 0.1%）⇒ 数值 bug 待 dump 二分定位**（2026-09-24）
+
 - **已跑通**：GQA 打包（Q 组打包 kernel，[d,h,q] 实测布局）+ 双 cuBLAS GEMM（QK/PV，fp32 累加）+ 精确块 softmax + 散写 dst；per-device workspace/cublas 句柄；probe 576/576 ACCEPT、0 REJECT。
 - **连环修掉 5 个真 bug**（每条都有实证定位）：① mask f16/f32 类型链；② Q 布局 [d, h, q]（诊断打印 `qnb1=6144=1024×ne[2]` 定案，"预转置"必须件第三次显灵）；③ **多卡单例交叉**（ws/cublas 句柄全局 → per-device，97 调用后跨卡指针崩）；④ cublasGemmEx **禁止混型操作数**（A32F×B16F = NotSupported → Q 打包直接出 f16）；⑤ 块 softmax **rescale 方向反 + 全 mask 块垃圾因子**（桶尾 -inf 块）。
 - **PPL 陪审（判据 ≤0.1% 相对差）**：decomp=0 **1.0025±0.00036** vs decomp=1 **1.0193±0.00071** = **+1.68%（超 17 倍）⇒ 数值真 bug，T2 不采用**。e2e 贪心第 ~10 token 分叉（0.185 overlap）与此一致。
