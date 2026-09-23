@@ -9,4 +9,4 @@ python3 /root/llm/test/stress_client.py \
   --model Qwen3.8-27B-FP8 \
   --prompt-tokens 235930 \
   --prompt-file /root/llm/test/bl-prompt90.txt \
-  --gen 128 --reps 2 --tag BL1
+  --gen 128 --reps 2 --tag ${TAG:-BL1}

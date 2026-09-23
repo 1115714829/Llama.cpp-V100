@@ -15,6 +15,22 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
+### R293 ★★★ **吐字 3.81x 分解实验（spec-off 对照 + journal SpecDecoding metrics）：主敌 = 投机轮结构开销 2.65x，纯 decode 步差仅 1.44x**（2026-09-23）
+
+- **臂**：BL3NS（B5 + `NO_SPEC=1`）/ BL1NS（vLLM 去 `--speculative-config`）——唯一变量 = 投机开关；同 prompt（236,313 tok / 90.14%）、同 gen 128、同 TP4。双 rep 离散 ≤1%。
+- **分解表**：
+
+| 256K 同口径 | B5 llama | vLLM BL1 | 比 |
+|---|---|---|---|
+| 纯 decode（spec-off） | **28.9 t/s（34.5 ms/token）** | **41.5 t/s（24.1 ms/token）** | **1.44x** |
+| tg（spec-on） | 32.7（AL 2.89/2.95） | 124.6（AL 3.28/3.66，journal） | 3.81x |
+| **投机轮放大（on÷off）** | **1.13x**（round 88.7 ms = **2.57× 单步**） | **3.00x**（round 27.3 ms = **1.10× 单步**） | **2.65x** |
+| 预填充 off / on | 876.5 / 817.2 t/s（draft 吃 **6.8%**） | 1486 / 1549 t/s（spec-on 反 **+4%**，机制未查，标未验证） | 1.70–1.90x |
+
+- ⇒ **tg 差 3.81x = 纯步 1.44x × 轮放大差 2.65x**（AL 差仅 1.17x 是小头）。**主敌 = 我方 DFlash2 轮的结构开销**：round ≈ 2.57 个单步（draft 2 次调用 + selector CPU 1.5–4.3 ms + meta 主机循环 = E16 轮账碎件）；vLLM 证明 draft/verify 可压到 ≈1.1 个单步（draft 近免费）。
+- ⇒ **吐字线主刀重排：P-D 轮结构（P-D3 两 draft 合一 / P-D1 meta 容器 Fix B / P-D5 selector 上 GPU）>> 纯 decode 内核微调（1.44x 是次要战场）**。
+- **基建（本轮起生效）**：vLLM 测试走本地 NVMe 快载（`bl1-run.sh`，`WITH_SPEC` 开关；模型同性已验证 config.json 逐字节同、29G 同容 = 口径零变化；无盘机 NFS 加载 18 min vs NVMe 2–3 min）；模型路径转 `/mnt/3.84t/**`（红线合规）。原服务单元未动（mtime 9/17 自证）。
+
 ### R292 ★★★ **三基线标准线测定（stress-256k，256K 90% 填充综合压测）：BL1 = 152.5s/1549/124.6；BL2 = 结构性不可用（D7 硬崩）；BL3 B5 = 289.2s/817/32.7**（2026-09-23）
 
 - **口径**：ctx 262144 的 90.14% 填充（prompt 236,313 tok；每 rep 加盐防 prefix cache、句序号防投机刷分）；gen 128；thinking on；同 prompt 字节、同生成长度。**BL1** = `vllm-1cat.service` 原样（FP8+DFlash2+TP4 卡 0,1,3,4，chunked prefill 2048）；**BL2** = 官方 llama（q8_0+DFlash2+256K）；**BL3** = B5（`/root/libdir-t8b`，TP4 卡 0,1,2,3，`--parallel 1 --ctx-size 262144`，ub 512，DFlash2 n-max 7）。

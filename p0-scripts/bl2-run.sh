@@ -8,6 +8,10 @@ set -u
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 export LD_LIBRARY_PATH=${LIBS:+$LIBS:}/usr/local/cuda/lib64
 if [ -n "${SLOTS:-}" ]; then export GGML_GALLOCR_SLOTS=$SLOTS; fi
+SPEC_ARGS=""
+if [ "${NO_SPEC:-}" != "1" ]; then
+  SPEC_ARGS="--model-draft /mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max 7"
+fi
 exec /root/llm/llama.cpp/bin/llama-server \
   --model /mnt/3.84t/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf \
   --alias Qwen3.8-27B-Q8_0-BL2 \
@@ -16,8 +20,7 @@ exec /root/llm/llama.cpp/bin/llama-server \
   --split-mode tensor --tensor-split 1,1,1,1 \
   --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 \
   --parallel 1 \
-  --model-draft /mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf \
-  --spec-type draft-dflash --spec-draft-n-max 7 \
+  $SPEC_ARGS \
   --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 \
   --presence-penalty 0.0 --repeat-penalty 1.0 \
   --reasoning on --reasoning-preserve \
