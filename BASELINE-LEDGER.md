@@ -23,6 +23,8 @@
 - **下一步（已定方法）**：dump 二分定位——env 门控 dump S（QK 后）/P/O/dst 首值，S 已错 ⇒ QK/打包几何错；S 对 O 错 ⇒ softmax/PV 错。禁止继续盲推（第五定律二连）。
 - 工具链战痕累计（本 feature）：pwsh `$( )` 本地抢算、`tail -3` 裁掉 PPL 正式行、编辑失配 ×2（注释措辞/已替块）——全部自抓，数据未污染。
 
+### R299-T1 ★★ **P-P3 分解 T1（门控 + 私有常驻 workspace + 直通）验收全过：=0/=1 双判据位级等价**（2026-09-24）
+
 - **实现**（commit `0da82d593`，分支 `feat/p3-decomp`，fattn.cu 零改动）：`LLAMA_SM70_FA_DECOMP`（判值）+ 私有常驻 workspace（static 设备缓冲，不入图防多槽翻倍 = P3-RECON [S2]-1）+ T1 直通（Path A 本体照跑）。
 - **五臂门**：gb-off/gb-off-nospec/gb-on/gb-on-nospec 全绿（无回归）+ t1-decomp 臂 `f3edac19…` ——但 **probe=0 自曝验证空洞**：门臂 greedy q<256 不进 sm70 路径 ⇒ =1 判据未覆盖。
 - **补 q≥256 端到端对照（t1-e2e.sh，greedy/seed 固定，~4500 tok prompt，双臂）**：
