@@ -213,6 +213,50 @@ static bool sm70_q4_direct() {
     return enabled;
 }
 
+// q8-direct (Path B): same architecture as q4-direct for production q8_0 KV.
+// Rounding matches convert.cu dequantize_block_q8_0_f16 (__hmul2 half*half).
+// Default OFF until the same-source A/B adopts it; LLAMA_SM70_Q8_DIRECT=1 opts in.
+static bool sm70_q8_direct() {
+    static const bool enabled = [] {
+        const char * e = getenv("LLAMA_SM70_Q8_DIRECT");
+        return e && e[0] == '1';
+    }();
+    return enabled;
+}
+
+// FA_GEMM (P-P3): wide D-chunk tiles (kDChunk=128). Pair with LLAMA_SM70_REGP=1
+// for the Wide+RegP arm. Default OFF. Judge the VALUE (=0 is off).
+static bool sm70_fa_gemm() {
+    static const bool enabled = [] {
+        const char * e = getenv("LLAMA_SM70_FA_GEMM");
+        return e && e[0] == '1';
+    }();
+    return enabled;
+}
+
+// Direct-load mode for one KV tensor: 0=staged, 1=q4_0, 2=q8_0.
+static int sm70_kv_direct_mode(const ggml_tensor * T) {
+    if (T->type == GGML_TYPE_Q4_0 && sm70_q4_direct()) {
+        return 1;
+    }
+    if (T->type == GGML_TYPE_Q8_0 && sm70_q8_direct()) {
+        return 2;
+    }
+    return 0;
+}
+
+// Pair mode for (K,V). Mixed q4+q8 is not instantiated - stage both sides.
+// MUST be used by BOTH alloc_size and launch (same env, same types).
+static void sm70_kv_direct_modes(const ggml_tensor * K, const ggml_tensor * V,
+                                 int & k_mode, int & v_mode) {
+    k_mode = sm70_kv_direct_mode(K);
+    v_mode = sm70_kv_direct_mode(V);
+    if (k_mode != 0 && v_mode != 0 && k_mode != v_mode) {
+        k_mode = 0;
+        v_mode = 0;
+    }
+}
+
 // Feature ? (2026-09-17): small-prefill D256 - lower the q_len gate.
 //
 // WHY the gate was q_len >= 256 (investigated before changing it, per the
@@ -417,13 +461,18 @@ bool ggml_cuda_sm70_d256_supported(int cc, const ggml_tensor * dst) {
         sm70_d256_probe("REJECT: V rows not contiguous", cc, Q, K, V, mask);
         return false;
     }
-    // q4-direct: raw block reads require block-contiguous rows (nb[0] == 18).
+    // Direct KV: raw block reads require block-contiguous rows.
     // Real caches always satisfy this; exotic strided views fall to stock.
-    if (sm70_q4_direct()) {
-        const size_t q4_blk = ggml_type_size(GGML_TYPE_Q4_0);
-        if ((K->type == GGML_TYPE_Q4_0 && K->nb[0] != q4_blk)
-         || (V->type == GGML_TYPE_Q4_0 && V->nb[0] != q4_blk)) {
-            sm70_d256_probe("REJECT: q4 rows not block-contiguous", cc, Q, K, V, mask);
+    {
+        int k_mode = 0;
+        int v_mode = 0;
+        sm70_kv_direct_modes(K, V, k_mode, v_mode);
+        if (k_mode != 0 && K->nb[0] != ggml_type_size(K->type)) {
+            sm70_d256_probe("REJECT: K rows not block-contiguous", cc, Q, K, V, mask);
+            return false;
+        }
+        if (v_mode != 0 && V->nb[0] != ggml_type_size(V->type)) {
+            sm70_d256_probe("REJECT: V rows not block-contiguous", cc, Q, K, V, mask);
             return false;
         }
     }
@@ -431,10 +480,19 @@ bool ggml_cuda_sm70_d256_supported(int cc, const ggml_tensor * dst) {
     // lowered the gate (sm70_d256_min_q()==17). Surface it so an A/B run can
     // confirm the small-prefill path is really taken (Feature ?).
     const bool small_prefill = (Q->ne[1] < 256);
+    int probe_k_mode = 0;
+    int probe_v_mode = 0;
+    sm70_kv_direct_modes(K, V, probe_k_mode, probe_v_mode);
     const char * base_reason =
-        (K->type == GGML_TYPE_Q4_0 || V->type == GGML_TYPE_Q4_0) && sm70_q4_direct()
-            ? "ACCEPT: sm70 d256 + q4-direct"
-            : "ACCEPT: sm70 d256 kernel selected";
+        (probe_k_mode == 2 || probe_v_mode == 2)
+            ? "ACCEPT: sm70 d256 + q8-direct"
+            : (probe_k_mode == 1 || probe_v_mode == 1)
+                ? "ACCEPT: sm70 d256 + q4-direct"
+                : sm70_fa_gemm()
+                    ? (regp_env_on()
+                        ? "ACCEPT: sm70 d256 + fa-gemm wide+regp"
+                        : "ACCEPT: sm70 d256 + fa-gemm wide")
+                    : "ACCEPT: sm70 d256 kernel selected";
     if (regp_env_on()) {
         // RegP active (LLAMA_SM70_REGP=1): the launcher will pick the RegP
         // (register-only P) kernel set. Surface it in the routing log so an
@@ -459,11 +517,14 @@ size_t ggml_cuda_sm70_d256_alloc_size(const ggml_tensor * dst) {
     const ggml_tensor * V = dst->src[2];
 
     const bool V_is_K_view = V->view_src && (V->view_src == K || (V->view_src == K->view_src && V->view_offs == K->view_offs));
-    // q4-direct: raw in-kernel reads need no f16 mirror for that tensor.
-    // MUST stay consistent with the launcher's k_direct/v_direct predicate
+    // Direct KV: raw in-kernel reads need no f16 mirror for that tensor.
+    // MUST stay consistent with the launcher's k_mode/v_mode predicate
     // (same env, same types) or the launcher would deref a null f16_extra.
-    const bool k_direct = K->type == GGML_TYPE_Q4_0 && sm70_q4_direct();
-    const bool v_direct = V->type == GGML_TYPE_Q4_0 && sm70_q4_direct();
+    int k_mode = 0;
+    int v_mode = 0;
+    sm70_kv_direct_modes(K, V, k_mode, v_mode);
+    const bool k_direct = k_mode != 0;
+    const bool v_direct = v_mode != 0;
     const bool need_f16_K = K->type != GGML_TYPE_F16 && !k_direct;
     // MUST match the launcher's need_f16_V exactly (edge case: V is a view of
     // a non-f16 K - the launcher still dequants V, so the alloc must cover it).
@@ -525,10 +586,13 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     // base = start of the get_alloc_size extra region (right after dst out)
     const char * base = (const char *) dst->data + ggml_nbytes(dst);
 
-    // q4-direct: K/V q4_0 served from the raw block cache in-kernel - no f16
+    // Direct KV (q4/q8): served from the raw block cache in-kernel - no f16
     // mirror allocation, no dequant pass (alloc_size computed the same way).
-    const bool k_direct = K->type == GGML_TYPE_Q4_0 && sm70_q4_direct();
-    const bool v_direct = V->type == GGML_TYPE_Q4_0 && sm70_q4_direct();
+    int k_mode = 0;
+    int v_mode = 0;
+    sm70_kv_direct_modes(K, V, k_mode, v_mode);
+    const bool k_direct = k_mode != 0;
+    const bool v_direct = v_mode != 0;
 
     const ggml_cuda_flash_attn_ext_f16_extra_data f16_extra =
         ggml_cuda_flash_attn_ext_get_f16_extra_data(dst,
@@ -562,7 +626,7 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
         k_head_stride  = K->nb[2] / sizeof(half);
     } else if (k_direct) {
         // q4-direct: raw block bytes; strides in BYTES ([ctx][head][block]
-        // pos-major: nb[1] = ctx stride, nb[2] = head stride). The Kq4 kernel
+        // pos-major: nb[1] = ctx stride, nb[2] = head stride). The direct kernel
         // branch reinterprets the pointer/strides accordingly.
         K_h2 = (const half *) K->data;
         k_row_stride   = K->nb[1];
@@ -611,28 +675,46 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     // 8/23 cause hunt: capture this (first) invocation's kernel inputs.
     // (q4-direct skips the dump: K_h2/V_h2 are raw block bytes, not the f16
     // tensors the dump/repro tooling consumes.)
+    // (direct skips the dump: K_h2/V_h2 are raw block bytes, not the f16
+    // tensors the dump/repro tooling consumes.)
     if (!k_direct && !v_direct) {
         sm70_dump_kernel_inputs(K_h2, k_row_stride, k_head_stride,
                                 V_h2, v_row_stride, v_head_stride,
                                 Qs, q_pad, kv_len, q_len, hkv, hkv * gqa);
     }
     using Traits = FLASH_NAMESPACE::Sm70D256SplitDTraits;
+    using Wide = FLASH_NAMESPACE::Sm70D256WideTraits;
     using El = cutlass::half_t;
     // ElOut=float: attention output stays f32 end-to-end (8/23 review - the f16
     // Os staging was the largest sm70-side per-layer rounding source).
-    // 8 instantiations: {dense, SplitKV3} x {staged/f16, Kq4, Vq4, Kq4+Vq4}.
-    auto kernel_00 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, false, false>;
-    auto kernel_10 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, true,  false>;
-    auto kernel_01 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, false, true>;
-    auto kernel_11 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, true,  true>;
+    // Modes: 0=staged, 1=q4_0 direct, 2=q8_0 direct (Path B).
+    // Instantiated pairs: (0,0)(1,0)(0,1)(1,1)(2,0)(0,2)(2,2). Mixed q4+q8
+    // is staged both sides at pick time (rare; production is q8_0 pair).
+    // P-P3 Wide: kDChunk=128; staged (0,0) only (direct stays on stock tiles).
+    auto kernel_00 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 0, 0>;
+    auto kernel_10 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 1, 0>;
+    auto kernel_01 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 0, 1>;
+    auto kernel_11 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 1, 1>;
+    auto kernel_20 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 2, 0>;
+    auto kernel_02 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 0, 2>;
+    auto kernel_22 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 2, 2>;
+    // Wide (kDChunk=128) is NOT instantiated yet: splitd_pv_gemm_tt's B
+    // fragment is a fixed 8-half m8n8k4 atom and cute::gemm requires
+    // size<1>(B)==size<2>(C). Widen PV B to match the larger N tile first
+    // (see spec fa-gemm-pp3 T2). Do not guess that algebra - block on it.
+    // auto wide_00 = ...<Wide, ...>;
     // SplitKV3 (upstream sm70_flash_attn_d256_splitkv3 patch, 8/23 port):
     // 3-way KV split for long-prefix prefill - triples the CTA count so late
     // chunks of a long prefill stop serializing their KV sweep on a saturated
     // SM grid. Env-tunable threshold (default 2048; 0 disables).
-    auto kernel_s3_00 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, false, false>;
-    auto kernel_s3_10 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, true,  false>;
-    auto kernel_s3_01 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, false, true>;
-    auto kernel_s3_11 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, true,  true>;
+    auto kernel_s3_00 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 0, 0>;
+    auto kernel_s3_10 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 1, 0>;
+    auto kernel_s3_01 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 0, 1>;
+    auto kernel_s3_11 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 1, 1>;
+    auto kernel_s3_20 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 2, 0>;
+    auto kernel_s3_02 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 0, 2>;
+    auto kernel_s3_22 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 2, 2>;
+    // wide_s3_* : same PV B-fragment block as wide_00.
 
     // Black Magic ? (RegP): register-only softmax->PV. Each warp keeps its
     // own 8-row P in registers (converted from the QK C fragment by a
@@ -642,28 +724,43 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     // layout, and scratch layout to the stock path - only the kernel
     // selection differs. Gate: LLAMA_SM70_REGP=1 (default 0).
     const bool use_regp = regp_env_on();
-    auto regp_00  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, false, false, true>;
-    auto regp_10  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, true,  false, true>;
-    auto regp_01  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, false, true,  true>;
-    auto regp_11  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, false, true,  true,  true>;
-    auto regp_s3_00 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, false, false, true>;
-    auto regp_s3_10 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, true,  false, true>;
-    auto regp_s3_01 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, false, true,  true>;
-    auto regp_s3_11 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<El, false, float, true, true,  true,  true>;
+    auto regp_00  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 0, 0, true>;
+    auto regp_10  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 1, 0, true>;
+    auto regp_01  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 0, 1, true>;
+    auto regp_11  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 1, 1, true>;
+    auto regp_20  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 2, 0, true>;
+    auto regp_02  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 0, 2, true>;
+    auto regp_22  = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, false, 2, 2, true>;
+    auto regp_s3_00 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 0, 0, true>;
+    auto regp_s3_10 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 1, 0, true>;
+    auto regp_s3_01 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 0, 1, true>;
+    auto regp_s3_11 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 1, 1, true>;
+    auto regp_s3_20 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 2, 0, true>;
+    auto regp_s3_02 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 0, 2, true>;
+    auto regp_s3_22 = FLASH_NAMESPACE::sm70_d256_splitd_dense_kernel<Traits, El, false, float, true, 2, 2, true>;
 
     static bool smem_raised = false;
     if (!smem_raised) {
         for (const void * kfn : {(const void *) kernel_00, (const void *) kernel_10,
                                  (const void *) kernel_01, (const void *) kernel_11,
+                                 (const void *) kernel_20, (const void *) kernel_02,
+                                 (const void *) kernel_22,
                                  (const void *) kernel_s3_00, (const void *) kernel_s3_10,
                                  (const void *) kernel_s3_01, (const void *) kernel_s3_11,
+                                 (const void *) kernel_s3_20, (const void *) kernel_s3_02,
+                                 (const void *) kernel_s3_22,
                                  (const void *) regp_00, (const void *) regp_10,
                                  (const void *) regp_01, (const void *) regp_11,
+                                 (const void *) regp_20, (const void *) regp_02,
+                                 (const void *) regp_22,
                                  (const void *) regp_s3_00, (const void *) regp_s3_10,
-                                 (const void *) regp_s3_01, (const void *) regp_s3_11}) {
+                                 (const void *) regp_s3_01, (const void *) regp_s3_11,
+                                 (const void *) regp_s3_20, (const void *) regp_s3_02,
+                                 (const void *) regp_s3_22}) {
             CUDA_CHECK(cudaFuncSetAttribute(kfn,
                 cudaFuncAttributeMaxDynamicSharedMemorySize, Traits::kSmemBytes));
         }
+        // Wide kernels not instantiated (PV B-fragment) - see above.
         smem_raised = true;
     }
 
@@ -673,6 +770,9 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     }();
     const bool use_splitkv3 = nb == 1 && splitkv3_min_kv > 0
         && kv_len >= splitkv3_min_kv && kv_len > q_len;
+    // P-P3 Wide: gated but not selected until PV B-fragment is generalized.
+    const bool use_wide = false && sm70_fa_gemm() && k_mode == 0 && v_mode == 0;
+    size_t smem_bytes = use_wide ? (size_t) Wide::kSmemBytes : (size_t) Traits::kSmemBytes;
 
     const dim3 block(Traits::kNThreads);
     const dim3 grid(q_pad / SM70_D256_BLOCK_M,
@@ -686,12 +786,29 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     float * partial_sum = partial_max + 3 * rows3;
 
     if (use_splitkv3) {
-        const auto kfn = use_regp
-            ? (k_direct ? (v_direct ? regp_s3_11 : regp_s3_10)
-                        : (v_direct ? regp_s3_01 : regp_s3_00))
-            : (k_direct ? (v_direct ? kernel_s3_11 : kernel_s3_10)
-                        : (v_direct ? kernel_s3_01 : kernel_s3_00));
-        kfn<<<grid, block, Traits::kSmemBytes, stream>>>(
+        decltype(kernel_s3_00) kfn = kernel_s3_00;
+        if (use_wide) {
+            // kfn = wide_s3_* once PV B-fragment matches wide N tile.
+        } else if (use_regp) {
+            if (k_mode == 2) {
+                kfn = (decltype(kfn)) (v_mode == 2 ? regp_s3_22 : regp_s3_20);
+            } else if (k_mode == 1) {
+                kfn = (decltype(kfn)) (v_mode == 1 ? regp_s3_11 : regp_s3_10);
+            } else {
+                kfn = (decltype(kfn)) (v_mode == 2 ? regp_s3_02
+                                    : v_mode == 1 ? regp_s3_01 : regp_s3_00);
+            }
+        } else {
+            if (k_mode == 2) {
+                kfn = (decltype(kfn)) (v_mode == 2 ? kernel_s3_22 : kernel_s3_20);
+            } else if (k_mode == 1) {
+                kfn = (decltype(kfn)) (v_mode == 1 ? kernel_s3_11 : kernel_s3_10);
+            } else {
+                kfn = (decltype(kfn)) (v_mode == 2 ? kernel_s3_02
+                                    : v_mode == 1 ? kernel_s3_01 : kernel_s3_00);
+            }
+        }
+        kfn<<<grid, block, smem_bytes, stream>>>(
                 (const El *) Qs,
                 (const El *) K_h2,
                 (const El *) V_h2,
@@ -714,12 +831,29 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
                 nullptr, 0, 0,
                 partial_out, partial_max, partial_sum);
     } else {
-        const auto kfn = use_regp
-            ? (k_direct ? (v_direct ? regp_11 : regp_10)
-                        : (v_direct ? regp_01 : regp_00))
-            : (k_direct ? (v_direct ? kernel_11 : kernel_10)
-                        : (v_direct ? kernel_01 : kernel_00));
-        kfn<<<grid, block, Traits::kSmemBytes, stream>>>(
+        decltype(kernel_00) kfn = kernel_00;
+        if (use_wide) {
+            // kfn = wide_* once PV B-fragment matches wide N tile.
+        } else if (use_regp) {
+            if (k_mode == 2) {
+                kfn = (decltype(kfn)) (v_mode == 2 ? regp_22 : regp_20);
+            } else if (k_mode == 1) {
+                kfn = (decltype(kfn)) (v_mode == 1 ? regp_11 : regp_10);
+            } else {
+                kfn = (decltype(kfn)) (v_mode == 2 ? regp_02
+                                    : v_mode == 1 ? regp_01 : regp_00);
+            }
+        } else {
+            if (k_mode == 2) {
+                kfn = (decltype(kfn)) (v_mode == 2 ? kernel_22 : kernel_20);
+            } else if (k_mode == 1) {
+                kfn = (decltype(kfn)) (v_mode == 1 ? kernel_11 : kernel_10);
+            } else {
+                kfn = (decltype(kfn)) (v_mode == 2 ? kernel_02
+                                    : v_mode == 1 ? kernel_01 : kernel_00);
+            }
+        }
+        kfn<<<grid, block, smem_bytes, stream>>>(
                 (const El *) Qs,
                 (const El *) K_h2,
                 (const El *) V_h2,

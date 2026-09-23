@@ -43,7 +43,10 @@ namespace FLASH_NAMESPACE {
 
 using namespace cute;
 
-struct Sm70D256SplitDTraits {
+// DChunk: 64 = stock Path A Split-D; 128 = FA_GEMM wide (fatter HMMA tiles,
+// half the inner QK/PV trips). See docs/compose/spec/fa-gemm-pp3.md.
+template <int DChunk = 64>
+struct Sm70D256SplitDTraitsT {
     using Element = cutlass::half_t;
     using MmaAtom = MMA_Atom<SM70_8x8x4_F32F16F16F32_TN>;
     using PvMmaAtom = MMA_Atom<SM70_8x8x4_F32F16F16F32_TT>;
@@ -51,7 +54,7 @@ struct Sm70D256SplitDTraits {
     static constexpr int kHeadDim = 256;
     static constexpr int kBlockM = 64;
     static constexpr int kBlockN = 32;
-    static constexpr int kDChunk = 64;
+    static constexpr int kDChunk = DChunk;
     static constexpr int kDChunks = kHeadDim / kDChunk;
     static constexpr int kOwnedDChunks = kDChunks / 2;
     static constexpr int kNThreads = 256;
@@ -166,8 +169,13 @@ struct Sm70D256SplitDTraits {
     static constexpr int kExchangeBytes =
         2 * kExchangeRows * sizeof(float);
     static constexpr int kSmemBytes = kTensorSmemBytes + kExchangeBytes;
-    static_assert(kSmemBytes == 45568);
+    // Stock (DChunk=64) is 45568 (2 CTA/SM). Wide (128) is larger (1 CTA/SM).
+    static_assert(kSmemBytes <= 65536);
 };
+
+using Sm70D256SplitDTraits = Sm70D256SplitDTraitsT<64>;
+using Sm70D256WideTraits = Sm70D256SplitDTraitsT<128>;
+static_assert(Sm70D256SplitDTraits::kSmemBytes == 45568);
 
 template <typename TiledCopy, typename SrcTensor, typename DstTensor>
 __device__ __forceinline__ void copy_even_tile(
@@ -280,14 +288,15 @@ __device__ __forceinline__ void splitd_pv_gemm_tt(
     const SmemTensor &sV,
     TiledMma tiled_mma,
     int lane) {
-    using Element = typename Sm70D256SplitDTraits::Element;
+    using Element = typename Sm70D256SplitDTraitsT<64>::Element;
     using BLayout = Layout<Shape<_4, _2>, Stride<_1, _4>>;
     auto b0 = make_tensor<Element>(BLayout{});
     auto b1 = make_tensor<Element>(BLayout{});
     auto b0_words = recast<uint32_t>(b0);
     auto b1_words = recast<uint32_t>(b1);
+    // PV K-steps along P's N (= BlockN) are 4-wide; count is BlockN/4.
     static_assert(decltype(size<2>(tPrP))::value
-                  == Sm70D256SplitDTraits::kBlockN / 4);
+                  == Sm70D256SplitDTraitsT<64>::kBlockN / 4);
     static_assert(decltype(size(b0))::value == 8);
     static_assert(decltype(size<0>(b0_words))::value == 2);
     static_assert(decltype(size<1>(b0_words))::value == 2);
@@ -319,8 +328,8 @@ __device__ __forceinline__ void splitd_n32_online_softmax(
     TensorScores &acc_s,
     float (&o_storage)[kOChunks][kOElements],
     OLayout o_layout,
-    float (&row_max)[Sm70D256SplitDTraits::kQkRowsPerThread],
-    float (&row_sum)[Sm70D256SplitDTraits::kQkRowsPerThread],
+    float (&row_max)[Sm70D256SplitDTraitsT<64>::kQkRowsPerThread],
+    float (&row_sum)[Sm70D256SplitDTraitsT<64>::kQkRowsPerThread],
     float *row_scale_exchange,
     int mma_group,
     int n_warp,
@@ -465,7 +474,7 @@ __device__ __forceinline__ void sm70_q4_dequant_group(
 // kGrp is the tiled copy's value-group size (K: Shape<_1,_4> -> 4 consecutive
 // cols; V: Shape<_1,_8> -> 8). Consecutiveness is verified at runtime and
 // falls back to per-element dequant if the assumption ever breaks.
-template <int kGrp, typename FragT, typename CoordT>
+template <typename Traits, int kGrp, typename FragT, typename CoordT>
 __device__ __forceinline__ void sm70_q4_fill_kv(
         const uint8_t * __restrict__ head_base,
         const int64_t row_stride,
@@ -473,7 +482,7 @@ __device__ __forceinline__ void sm70_q4_fill_kv(
         const int d_chunk,
         FragT & frag,
         const CoordT & coords) {
-    constexpr int kDChunk = Sm70D256SplitDTraits::kDChunk;
+    constexpr int kDChunk = Traits::kDChunk;
 #pragma unroll
     for (int i = 0; i < size(frag); i += kGrp) {
         const int row = get<0>(coords(i));
@@ -503,7 +512,102 @@ __device__ __forceinline__ void sm70_q4_fill_kv(
     }
 }
 
-template <int kThreadsPerRow, int kRowsPerThread, int kElemsPerLoad>
+// ---------------------------------------------------------------------------
+// q8_0 in-kernel dequant (Path B, twin of q4-direct).
+//
+// Block layout: [f16 scale (2B)][32 x int8 quants (32B)] = 34B per 32 dims.
+// Addressing under Kq8/Vq8: same byte-stride dense layout as q4-direct
+// ([ctx][head][block]; row_base + token*row_stride).
+//
+// Rounding parity with the staged path (convert.cu dequantize_block_q8_0_f16):
+// y = __hmul2(int8_as_half2, half2(d, d)) - half x half, NOT f32 product.
+// Matching that exact form keeps the greedy gate bit-stable vs Path A staging.
+// ---------------------------------------------------------------------------
+
+__device__ __forceinline__ __half sm70_q8_dequant_one(
+        const uint8_t * __restrict__ row_base, const int d) {
+    const uint8_t * b = row_base + (d >> 5) * 34;
+    const half dsc = *reinterpret_cast<const half *>(b);
+    const int8_t q = static_cast<int8_t>(b[2 + (d & 31)]);
+    return __hmul2(make_half2(q, q), __half2half2(dsc)).x;
+}
+
+template <int kGrp>
+__device__ __forceinline__ void sm70_q8_dequant_group(
+        const uint8_t * __restrict__ row_base, const int d, __half out[kGrp]) {
+    static_assert(kGrp == 4 || kGrp == 8, "group must be 4 or 8");
+    const uint8_t * b = row_base + (d >> 5) * 34;
+    const half dsc = *reinterpret_cast<const half *>(b);
+    const uint8_t * q = b + 2 + (d & 31);
+    // u16 pairs (2-aligned like the q4 path). Quants sit at 2+(d&31), which is
+    // 2 mod 4 - do not widen to u32.
+    const int n16 = kGrp / 2;
+#pragma unroll
+    for (int t = 0; t < n16; ++t) {
+        const uint16_t w = *reinterpret_cast<const uint16_t *>(q + 2 * t);
+        const int8_t q0 = static_cast<int8_t>(w & 0xFF);
+        const int8_t q1 = static_cast<int8_t>((w >> 8) & 0xFF);
+        out[2 * t + 0] = __hmul2(make_half2(q0, q0), __half2half2(dsc)).x;
+        out[2 * t + 1] = __hmul2(make_half2(q1, q1), __half2half2(dsc)).x;
+    }
+}
+
+template <typename Traits, int kGrp, typename FragT, typename CoordT>
+__device__ __forceinline__ void sm70_q8_fill_kv(
+        const uint8_t * __restrict__ head_base,
+        const int64_t row_stride,
+        const int token0,
+        const int d_chunk,
+        FragT & frag,
+        const CoordT & coords) {
+    constexpr int kDChunk = Traits::kDChunk;
+#pragma unroll
+    for (int i = 0; i < size(frag); i += kGrp) {
+        const int row = get<0>(coords(i));
+        const int col = get<1>(coords(i));
+        bool consec = true;
+#pragma unroll
+        for (int j = 1; j < kGrp; ++j) {
+            consec = consec && get<0>(coords(i + j)) == row
+                            && get<1>(coords(i + j)) == col + j;
+        }
+        const uint8_t * row_base = head_base
+            + static_cast<int64_t>(token0 + row) * row_stride;
+        const int d = d_chunk * kDChunk + col;
+        __half tmp[kGrp];
+        if (consec) {
+            sm70_q8_dequant_group<kGrp>(row_base, d, tmp);
+        } else {
+#pragma unroll
+            for (int j = 0; j < kGrp; ++j) {
+                tmp[j] = sm70_q8_dequant_one(row_base, d + j);
+            }
+        }
+#pragma unroll
+        for (int j = 0; j < kGrp; ++j) {
+            frag(i + j) = tmp[j];
+        }
+    }
+}
+
+// Mode: 1 = q4_0 raw, 2 = q8_0 raw. Shared fill entry for the dense direct path.
+template <typename Traits, int Mode, int kGrp, typename FragT, typename CoordT>
+__device__ __forceinline__ void sm70_direct_fill_kv(
+        const uint8_t * __restrict__ head_base,
+        const int64_t row_stride,
+        const int token0,
+        const int d_chunk,
+        FragT & frag,
+        const CoordT & coords) {
+    static_assert(Mode == 1 || Mode == 2, "direct fill mode must be q4 or q8");
+    if constexpr (Mode == 1) {
+        sm70_q4_fill_kv<Traits, kGrp>(head_base, row_stride, token0, d_chunk, frag, coords);
+    } else {
+        sm70_q8_fill_kv<Traits, kGrp>(head_base, row_stride, token0, d_chunk, frag, coords);
+    }
+}
+
+template <typename Traits, int kThreadsPerRow, int kRowsPerThread, int kElemsPerLoad>
 __device__ __forceinline__ int64_t paged_kv_thread_offset(
     int tid,
     int n_block,
@@ -514,12 +618,12 @@ __device__ __forceinline__ int64_t paged_kv_thread_offset(
     int64_t row_stride) {
     const int row_in_tile =
         (tid / kThreadsPerRow) * kRowsPerThread;
-    const int logical_row = n_block * Sm70D256SplitDTraits::kBlockN
+    const int logical_row = n_block * Traits::kBlockN
         + row_in_tile;
     const int physical_page = block_table[logical_row / page_size];
     return static_cast<int64_t>(physical_page) * page_stride
         + static_cast<int64_t>(logical_row % page_size) * row_stride
-        + d_chunk * Sm70D256SplitDTraits::kDChunk
+        + d_chunk * Traits::kDChunk
         + (tid % kThreadsPerRow) * kElemsPerLoad;
 }
 
@@ -529,19 +633,14 @@ __device__ __forceinline__ int64_t paged_kv_thread_offset(
 // Q/K/V must stay f16 (HMMA operand constraint). Upstream-deviation note:
 // template parameter + the single `out[offset] = ElementOut(...)` store below.
 //
-// Kq4/Vq4 (8/23 q4-direct port, from the 1Cat XQA load_xqa_tc_kv_vector
-// <KV_DTYPE> architecture): when set, the `k`/`v` args point at the RAW q4_0
-// block cache (byte pointer) and k/v row/head strides are BYTES - layout
-// [ctx][head][block], 8 blocks x 18B per 256-d row (nb[1] = ctx stride,
-// nb[2] = head stride). The kernel dequantizes straight into the register
-// fragments / smem panels, replacing the whole-cache to_fp16 staging pass
-// (which re-dequantized the entire cache on EVERY prefill chunk - O(n^2)
-// traffic for chunked server prefill). Rounding is bit-identical to the
-// staged path (convert.cu dequantize_block_q4_0: d*(q-8) exact in f32, one
-// RN to half). Loads amortize the block/scale address derivation per
-// 4/8-element group (the #268 wide-load idea adapted: no page tables here,
-// so the amortization is block addressing, and nibble pairs are read as
-// aligned u16s). Dense path only (static_assert against PagedKV).
+// KMode/VMode (was Kq4/Vq4; Path B adds q8_0):
+//   0 = staged/f16 (stock to_fp16 mirror or native f16)
+//   1 = q4_0 raw direct (8/23 port)
+//   2 = q8_0 raw direct (Path B)
+// When nonzero, the `k`/`v` args point at the RAW block cache (byte pointer)
+// and k/v row/head strides are BYTES - layout [ctx][head][block].
+// The kernel dequantizes straight into the register fragments / smem panels,
+// replacing the whole-cache to_fp16 staging pass. Dense path only.
 // RegP (Black Magic ?): per-warp register-only P->half2 PV. When true, the
 // attention probabilities P stay in registers (each warp does its own 8-row PV
 // over the full 256-wide V) instead of round-tripping through shared memory
@@ -549,9 +648,9 @@ __device__ __forceinline__ int64_t paged_kv_thread_offset(
 // path byte-for-byte unchanged. Gated by LLAMA_SM70_REGP (default off);
 // split out of FISHLIKEXIE_BLACK_MAGIC on 2026-09-17 (? concluded: correct,
 // no measurable perf gain - see graft-research/regp-debug/).
-template <typename Element, bool PagedKV, typename ElementOut = Element, bool SplitKV3 = false,
-          bool Kq4 = false, bool Vq4 = false, bool RegP = false>
-__global__ __launch_bounds__(Sm70D256SplitDTraits::kNThreads, 1)
+template <typename TraitsT, typename Element, bool PagedKV, typename ElementOut = Element,
+          bool SplitKV3 = false, int KMode = 0, int VMode = 0, bool RegP = false>
+__global__ __launch_bounds__(256, 1)
 void sm70_d256_splitd_dense_kernel(
     const Element *__restrict__ q,
     const Element *__restrict__ k,
@@ -578,9 +677,13 @@ void sm70_d256_splitd_dense_kernel(
     float *__restrict__ partial_out,
     float *__restrict__ partial_max,
     float *__restrict__ partial_sum) {
-    using Traits = Sm70D256SplitDTraits;
-    static_assert(!(PagedKV && (Kq4 || Vq4)),
-                  "q4-direct implements the dense (non-paged) path only");
+    using Traits = TraitsT;
+    static_assert(KMode >= 0 && KMode <= 2 && VMode >= 0 && VMode <= 2,
+                  "KMode/VMode must be 0=staged, 1=q4, 2=q8");
+    static_assert(!(PagedKV && (KMode != 0 || VMode != 0)),
+                  "direct KV modes implement the dense (non-paged) path only");
+    constexpr bool KDirect = (KMode != 0);
+    constexpr bool VDirect = (VMode != 0);
     constexpr int kBlockM = Traits::kBlockM;
     constexpr int kBlockN = Traits::kBlockN;
     constexpr int kDChunk = Traits::kDChunk;
@@ -672,8 +775,10 @@ void sm70_d256_splitd_dense_kernel(
         Shape<Int<Traits::kQkWarpRows>, Int<kDChunk>>{}));
     constexpr int kORegElements = decltype(size(ORegFragment{}))::value;
     using ORegLayout = typename ORegFragment::layout_type;
-    static_assert(kORegElements == Traits::kDChunks * 4,
-                  "per-warp O fragment must be 16 elements per thread");
+    // Per-thread C fragment length grows with the PV N tile (kDChunk/4 mmas
+    // x 4 floats). Stock kDChunk=64 -> 16; wide 128 -> 32.
+    static_assert(kORegElements == kDChunk / 4,
+                  "per-warp O fragment length must track kDChunk/4");
     using SFragment = decltype(partition_fragment_C(
         qk_tiled_mma,
         Shape<Int<Traits::kQkWarpRows>, Int<kBlockN>>{}));
@@ -729,15 +834,15 @@ void sm70_d256_splitd_dense_kernel(
         ? 0
         : static_cast<int64_t>(batch)
             * k_outer_stride;
-    // q4-direct: hoisted per-CTA head base (byte pointer). Under Kq4/Vq4 the
-    // k/v args are raw block bytes and the row/head strides are BYTES
+    // direct KV: hoisted per-CTA head base (byte pointer). Under KMode/VMode
+    // != 0 the k/v args are raw block bytes and the row/head strides are BYTES
     // ([ctx][head][block]); per-tile addressing reduces to
     // head_base + (n_block*kBlockN + row) * row_stride.
-    const uint8_t * k_q4_head_base = Kq4
+    const uint8_t * k_direct_head_base = KDirect
         ? reinterpret_cast<const uint8_t *>(k)
               + static_cast<int64_t>(head_kv) * k_head_stride
         : nullptr;
-    const uint8_t * v_q4_head_base = Vq4
+    const uint8_t * v_direct_head_base = VDirect
         ? reinterpret_cast<const uint8_t *>(v)
               + static_cast<int64_t>(head_kv) * v_head_stride
         : nullptr;
@@ -755,9 +860,9 @@ void sm70_d256_splitd_dense_kernel(
     // (the tVcV pattern). Drives the q4-direct fills.
     auto cK = make_identity_tensor(Shape<Int<kBlockN>, Int<kDChunk>>{});
     auto tKcK = gmem_k_thread.partition_S(cK);
-    if constexpr (Kq4) {
-        sm70_q4_fill_kv<4>(k_q4_head_base, k_row_stride,
-                           n_block_first * kBlockN, 0, tKsK, tKcK);
+    if constexpr (KDirect) {
+        sm70_direct_fill_kv<Traits, KMode, 4>(k_direct_head_base, k_row_stride,
+                                      n_block_first * kBlockN, 0, tKsK, tKcK);
     } else {
         auto gKFirst = local_tile(
             mK,
@@ -767,7 +872,7 @@ void sm70_d256_splitd_dense_kernel(
         auto tKgKFirst = reshape_kv_thread_tensor<PagedKV>(tKgKFirstRaw);
         int64_t k_thread_tile_base = 0;
         if constexpr (PagedKV) {
-            k_thread_tile_base = paged_kv_thread_offset<
+            k_thread_tile_base = paged_kv_thread_offset<Traits,
                 Traits::kGmemKThreadsPerRow,
                 Traits::kGmemKRowsPerThread,
                 Traits::kGmemKElemsPerLoad>(
@@ -793,10 +898,10 @@ void sm70_d256_splitd_dense_kernel(
 #pragma unroll
         for (int d_chunk = 0; d_chunk < Traits::kDChunks; ++d_chunk) {
             if (d_chunk + 1 < Traits::kDChunks) {
-                if constexpr (Kq4) {
-                    sm70_q4_fill_kv<4>(k_q4_head_base, k_row_stride,
-                                       n_block * kBlockN, d_chunk + 1,
-                                       tKrKNext, tKcK);
+                if constexpr (KDirect) {
+                    sm70_direct_fill_kv<Traits, KMode, 4>(k_direct_head_base, k_row_stride,
+                                                  n_block * kBlockN, d_chunk + 1,
+                                                  tKrKNext, tKcK);
                 } else {
                     auto gKNext = local_tile(
                         mK,
@@ -807,7 +912,7 @@ void sm70_d256_splitd_dense_kernel(
                         reshape_kv_thread_tensor<PagedKV>(tKgKNextRaw);
                     if constexpr (PagedKV) {
                         tKgKNext.data() = mK.data()
-                            + paged_kv_thread_offset<
+                            + paged_kv_thread_offset<Traits,
                                   Traits::kGmemKThreadsPerRow,
                                   Traits::kGmemKRowsPerThread,
                                   Traits::kGmemKElemsPerLoad>(
@@ -884,16 +989,16 @@ void sm70_d256_splitd_dense_kernel(
         auto tVgV2Raw = gmem_v_thread.partition_S(gV2);
         auto tVgV0 = reshape_kv_thread_tensor<PagedKV>(tVgV0Raw);
         auto tVgV2 = reshape_kv_thread_tensor<PagedKV>(tVgV2Raw);
-        if constexpr (Vq4) {
-            sm70_q4_fill_kv<8>(v_q4_head_base, v_row_stride,
-                               n_block * kBlockN, 0, tVrV0, tVcV);
-            sm70_q4_fill_kv<8>(v_q4_head_base, v_row_stride,
-                               n_block * kBlockN, Traits::kOwnedDChunks,
-                               tVrV1, tVcV);
+        if constexpr (VDirect) {
+            sm70_direct_fill_kv<Traits, VMode, 8>(v_direct_head_base, v_row_stride,
+                                          n_block * kBlockN, 0, tVrV0, tVcV);
+            sm70_direct_fill_kv<Traits, VMode, 8>(v_direct_head_base, v_row_stride,
+                                          n_block * kBlockN, Traits::kOwnedDChunks,
+                                          tVrV1, tVcV);
         } else {
             int64_t v_thread_tile_base = 0;
             if constexpr (PagedKV) {
-                v_thread_tile_base = paged_kv_thread_offset<
+                v_thread_tile_base = paged_kv_thread_offset<Traits,
                     Traits::kGmemThreadsPerRow,
                     Traits::kGmemRowsPerThread,
                     Traits::kGmemElemsPerLoad>(
@@ -972,16 +1077,16 @@ void sm70_d256_splitd_dense_kernel(
         auto tVgV3Raw = gmem_v_thread.partition_S(gV3);
         auto tVgV1 = reshape_kv_thread_tensor<PagedKV>(tVgV1Raw);
         auto tVgV3 = reshape_kv_thread_tensor<PagedKV>(tVgV3Raw);
-        if constexpr (Vq4) {
-            sm70_q4_fill_kv<8>(v_q4_head_base, v_row_stride,
-                               n_block * kBlockN, 1, tVrV0, tVcV);
-            sm70_q4_fill_kv<8>(v_q4_head_base, v_row_stride,
-                               n_block * kBlockN,
-                               Traits::kOwnedDChunks + 1, tVrV1, tVcV);
+        if constexpr (VDirect) {
+            sm70_direct_fill_kv<Traits, VMode, 8>(v_direct_head_base, v_row_stride,
+                                          n_block * kBlockN, 1, tVrV0, tVcV);
+            sm70_direct_fill_kv<Traits, VMode, 8>(v_direct_head_base, v_row_stride,
+                                          n_block * kBlockN,
+                                          Traits::kOwnedDChunks + 1, tVrV1, tVcV);
         } else {
             if constexpr (PagedKV) {
                 tVgV1.data() = mV.data()
-                    + paged_kv_thread_offset<
+                    + paged_kv_thread_offset<Traits,
                           Traits::kGmemThreadsPerRow,
                           Traits::kGmemRowsPerThread,
                           Traits::kGmemElemsPerLoad>(
@@ -989,7 +1094,7 @@ void sm70_d256_splitd_dense_kernel(
                           sequence_block_table, v_outer_stride, v_row_stride)
                     + kDChunk;
                 tVgV3.data() = mV.data()
-                    + paged_kv_thread_offset<
+                    + paged_kv_thread_offset<Traits,
                           Traits::kGmemThreadsPerRow,
                           Traits::kGmemRowsPerThread,
                           Traits::kGmemElemsPerLoad>(
@@ -1060,9 +1165,9 @@ void sm70_d256_splitd_dense_kernel(
             store_v_fragment_128_swizzled(tVrV1, tVsV1, tVcV);
             __syncthreads();
             if (n_block > n_block_min) {
-                if constexpr (Kq4) {
-                    sm70_q4_fill_kv<4>(
-                        k_q4_head_base, k_row_stride,
+                if constexpr (KDirect) {
+                    sm70_direct_fill_kv<Traits, KMode, 4>(
+                        k_direct_head_base, k_row_stride,
                         (n_block - 1) * kBlockN, 0, tKrKNext, tKcK);
                 } else {
                     auto gKNextBlock = local_tile(
@@ -1076,7 +1181,7 @@ void sm70_d256_splitd_dense_kernel(
                             tKgKNextBlockRaw);
                     if constexpr (PagedKV) {
                         tKgKNextBlock.data() = mK.data()
-                            + paged_kv_thread_offset<
+                            + paged_kv_thread_offset<Traits,
                                   Traits::kGmemKThreadsPerRow,
                                   Traits::kGmemKRowsPerThread,
                                   Traits::kGmemKElemsPerLoad>(
@@ -1144,9 +1249,9 @@ void sm70_d256_splitd_dense_kernel(
                     store_v_fragment_128_swizzled(tVrV1, tVsV1, tVcV);
                     __syncthreads();
                     if (n_block > n_block_min) {
-                        if constexpr (Kq4) {
-                            sm70_q4_fill_kv<4>(
-                                k_q4_head_base, k_row_stride,
+                        if constexpr (KDirect) {
+                            sm70_direct_fill_kv<Traits, KMode, 4>(
+                                k_direct_head_base, k_row_stride,
                                 (n_block - 1) * kBlockN, 0, tKrKNext, tKcK);
                         } else {
                             auto gKNextBlock = local_tile(
@@ -1160,7 +1265,7 @@ void sm70_d256_splitd_dense_kernel(
                                     tKgKNextBlockRaw);
                             if constexpr (PagedKV) {
                                 tKgKNextBlock.data() = mK.data()
-                                    + paged_kv_thread_offset<
+                                    + paged_kv_thread_offset<Traits,
                                           Traits::kGmemKThreadsPerRow,
                                           Traits::kGmemKRowsPerThread,
                                           Traits::kGmemKElemsPerLoad>(
@@ -1369,7 +1474,7 @@ void sm70_d256_splitd_dense_kernel(
 // patch): combines the three partial segments per output row. Writes into the
 // f32 Os staging buffer (same [row][D] layout the dense path produces and the
 // scatter kernel consumes).
-__global__ __launch_bounds__(Sm70D256SplitDTraits::kHeadDim, 1)
+__global__ __launch_bounds__(256, 1)
 void sm70_d256_splitkv3_merge_kernel(
         const float *__restrict__ partial_out,
         const float *__restrict__ partial_max,
@@ -1399,8 +1504,8 @@ void sm70_d256_splitkv3_merge_kernel(
     }
     __syncthreads();
 
-    const int64_t element = row * Sm70D256SplitDTraits::kHeadDim + d;
-    const int64_t split_stride = rows * Sm70D256SplitDTraits::kHeadDim;
+    const int64_t element = row * Sm70D256SplitDTraitsT<64>::kHeadDim + d;
+    const int64_t split_stride = rows * Sm70D256SplitDTraitsT<64>::kHeadDim;
     const float numerator =
         (partial_out[2 * split_stride + element] * merge[2]
          + partial_out[split_stride + element] * merge[1])
