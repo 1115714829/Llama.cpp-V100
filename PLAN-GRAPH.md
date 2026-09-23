@@ -83,7 +83,7 @@ flowchart TD
     F2C["F2-1c 调用序重排（进行中, env 门控<br/>GGML_SPEC_EARLY_PROCESS）<br/>特征拷贝前置(:2031 提到 :1954 前) +<br/>process() 入同步窗(:3703 llama_synchronize 前) +<br/>gate 前置于 topk 扫描<br/>预期 -0.8~1.5 ms/轮；零语义"]:::next
     FPDN["FPD 判决: 单槽指纹 last_graph_fp<br/>对三形交替（target/注入/块）workload<br/>结构性永不命中（skipped=0 真因）<br/>TOP 破字段 = (reshaped):RESHAPE.nb2/ne0<br/>= 逐调用新生的视图节点"]:::warn
     B2BLK["B2 图内 selector TP 化: 机制全清<br/>但本模型几何受阻（n_embd_dec=32 行槽<br/>装不下 3k 候选 lattice 240 行/gate 256 行）<br/>复活条件 = 大 hidden draft（槽>=286 行）<br/>残值 -2~3 ms/轮"]:::warn
-    RULES["战役纪律新条目（R278-R279 固化）:<br/>① 特性 A/B 必须带机制自证计数<br/>（F1 假零效果 = 机制未生效白读墙钟）<br/>② 分账先于设计（[META]/[GALLOC_FAST] 解剖）<br/>③ 构建验证与 A/B 启动分两步（两次踩坑）<br/>④ 采样计数器须饱和段校准<br/>⑤ 备份用绝对路径 + 新文件入拷贝清单<br/>⑥ 还原须走【树+影子源(/tmp/t15)】双通道<br/>还原后标记串三查（strings 含被撤 env 名=0）<br/>（影子源尸体教训: 假还原 +3.6 潜伏三轮）"]:::tool
+    RULES["战役纪律新条目（R278-R279 固化）:<br/>① 特性 A/B 必须带机制自证计数<br/>（F1 假零效果 = 机制未生效白读墙钟）<br/>② 分账先于设计（[META]/[GALLOC_FAST] 解剖）<br/>③ 构建验证与 A/B 启动分两步（两次踩坑）<br/>④ 采样计数器须饱和段校准<br/>⑤ 备份用绝对路径 + 新文件入拷贝清单<br/>⑥ 还原须走【树+影子源(/tmp/t15)】双通道<br/>还原后标记串三查（strings 含被撤 env 名=0）<br/>（影子源尸体教训: 假还原 +3.6 潜伏三轮）⑦ **多线程实机互斥（用户 2026-09-23）**: 实机占用由主代理统一排期, 任何实机测试/探针/构建前先盘点 job_list + 子代理清单 + nvidia-smi 只读查询, 有占用即让行"]:::tool
   end
   B5NOW --> CALIB
   FLOOR --> CALIB
@@ -430,6 +430,28 @@ flowchart TD
   FAD256 ==>|已走 Path A| SM70P
   OPS --> FA78
   MMVQW -.->|R262 实测: +17.3% 慢 ⇒ 已否证| NCU8
+  subgraph RFILT["R289 重过滤更正 (2026-09-23, docs/v100-dev 已同步)"]
+    LAD["★ FA 定标: stock 35.8 / Path A 45.9 TFLOPS (R269 口径 x24 头; 1.49 已作废)<br/>78.4% = 峰值 ubatch 口径; 全程 32K~19% / 256K~2/3<br/>梯子 17.92 -> 46.6-47.1 (v1.3.0 Split-D = 移植源) -> 60.8 (PR#286/79T)<br/>=> 真差距 1.33x (非 3.1x); 及格线重立: 探针 FA>=+5% 或 256K>=+3%; 分解 FA>=+25% 或 256K>=+15%"]:::hot
+    PP3FIX["P-P3 合同三处更正: ① tile 加大 = 每 FLOP 开销摊薄 (HMMA.884 固定 ISA, 非每条 mma 更多 FLOP)<br/>② rescale 降频属 kBlockN 轴, 合同 kBlockN=32 买不到 => 承诺删除<br/>③ T2 阻塞加深: SmemLayoutV kDChunk=128 非双射 (偏移 128 两解碰撞) = 错布局<br/>解法: 显式 mma.m8n8k4 PV + 常量按 kDChunk 泛化 (jusko/NF10 形态, 推荐)"]:::hot
+    DANGLE["★★ 悬空实验 (账面与 P-P3 同级, 先关): M1 TP3 KV 头 1/1/2 失衡 (4 卡=1/1/1/1, 有效并行 2x->3x, 零代码)<br/>+ 预填充 TP 扩展扫描 (R223 预登记后 '已派' 无归档)"]:::next
+    VER["版本事实 (已核): 我方移植 = tag v1.3.0 commit 6ada86ed64<br/>v100-refs/1cat-vllm = 1.5.0 main b711d53 (PR#645); 79T 在树 (csrc/attention/sm70_79t/)<br/>Split-D 后裔在树 (sm70_v37/tail.cu, splitd_pv_gemm_tt 同名, B 碎片同样未泛化)<br/>=> P-P3/P-P3-T 学习源都在本地; DFlash2 属解码线, 不改预填充算术"]:::fact
+  end
+  LAD ==>|真天花板| PP3FIX
+  DANGLE -.->|同量级零代码, 排最前| LAD
+  VER -.->|学习源定位| PP3FIX
+  R269 -.->|口径闭合| LAD
+  FA78 -.->|78.4% 收窄为峰值 ubatch 口径| LAD
+  SM70P -.->|梯子定位 = Split-D 台阶| LAD
+  PP3FIX ==>|探针 P-P3-T 先行| G
+  subgraph P3R["R290 P-P3 设计侦察 (2026-09-23, 全文见 P3-DESIGN-RECON.md)"]
+    P3RE["79T 数据流定案: QK=一次 cuBLAS 大 GEMM 物化 score 块 -> PV=CUTLASS 大 GEMM (FP16 操作数/FP32 累加/FP32 块输出)<br/>-> 每 kBlockN=24576 行一次 FP32 rescale; prefix 零 mask + 因果尾批三角 + 首 64 token 修复 (prefill.cu:6121-6636)<br/>数值配方原文 = sm70_79t/README:37-51 + VALIDATION:41-72 (实现 stable_rows.cuh:8-94); 66KB 优化史是 page-784 另一条线<br/>必须件 10 / 可省件 9; **op 形态 = 单算子内部双流 + 私有 workspace, 不拆 QK/rescale/PV 三段** (拆段令 score 入图被多槽按槽翻倍 = R282 式 OOM)"]:::hot
+    P3MEM["★ 条件结论 (显存账): score ws = rows x kBlockN x 2B, rows = n_q x 6/组; 1cat 2.4GB = 48000x24576x2<br/>我方 TP3 (KV 1/1/2, Q 6/6/12): n_q=2048 -> 0.60 GB/组 (rank2 0.60/1.21); n_q=8192 -> 2.42 GB/组 (kBlockN=8192 降档则 0.81)<br/>16 GB 判定: rank2 负重约 15.8-18.2 GB (KV/镜像为公式估算) => n_q=2048+24576 块 **可行但贴边** (锚 R272 跑通)<br/>⇐ 限槽 + 组间共享单缓冲; n_q=8192+24576 **不可行** (7/23 -b8192/ub8192 已 OOM) ⇐ 须 kBlockN 三档自适应降档 + tail 串行"]:::cond
+    P3RSK["风险台账: FP16 分子溢出 (实测 75310>65504) / 采样 max 漏尖峰 / KV 非 32 对齐静默错值 (+8/16/24 = 误差 72/48/24%)<br/>q8_0 镜像将叠至 3 份全 KV f16 / TP3 rank2 双组耦合 (与 P-P0/M1 同账) / CUDA graph 捕获 x op 内多流互斥 (我方捕获栈未验)<br/>近似路径必破 greedy sha256 门 (须重立一次, 配额留给 P-P3)"]:::warn
+  end
+  P3RE ==>|结构件清单 + op 形态定案| PP3FIX
+  P3MEM ==>|显存前置约束 (立项必带)| PP3FIX
+  P3RSK -.->|立项风险表| PP3FIX
+  VER -.->|报告落地| P3RE
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
   classDef fact fill:#e8e8e8,stroke:#666
   classDef hot  fill:#ffcccc,stroke:#cc0000,stroke-width:2px

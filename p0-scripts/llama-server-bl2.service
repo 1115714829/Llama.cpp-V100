@@ -1,0 +1,51 @@
+# Test copy of /root/llm/systemd/llama-server.service -- BL2 baseline (256K, q8_0, DFlash2).
+# Original is READ-ONLY (red line); this copy lives in /root/llm/test/ only.
+# Changed per user 2026-09-23 instruction ("仅修改为 256 和模型为 q8_0") plus the
+# minimum forced by that change (recorded, nothing else touched):
+#   1. --ctx-size 131072 -> 262144            (the "256" request)
+#   2. --model -> Qwen3.8-27B-Q8_0.gguf       (the "q8_0" request, /mnt/3.84t, red-line path)
+#   3. --spec-type draft-mtp -> draft-dflash + --model-draft (user asked q8_0+DFlash2;
+#      spec line = the fixed-yardstick caliber of /root/p60-ab-harness.sh: n-max 7)
+#   4. CVD 2,5 -> 0,1,2 + --tensor-split 1,1,1 (q8_0 27 GB does not fit 2 cards: R275 TP2 OOM)
+#   5. --mmproj dropped (text-only stress; q8_0 yardstick is text)
+#   6. port 8080 -> 8082 (never touch the delivered service port), api-key-file dropped (test instance)
+# All other args copied verbatim from the original unit.
+[Unit]
+Description=llama.cpp Qwen3.8-27B Q8_0 DFlash2 256K BL2 baseline (test copy)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/llm/llama.cpp
+Environment="CUDA_VISIBLE_DEVICES=0,1,2"
+Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+ExecStart=/root/llm/llama.cpp/bin/llama-server \
+  --model /mnt/3.84t/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf \
+  --alias Qwen3.8-27B-Q8_0-BL2 \
+  --ctx-size 262144 \
+  --n-gpu-layers 999 \
+  --split-mode tensor --tensor-split 1,1,1 \
+  --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 \
+  --parallel 2 \
+  --model-draft /mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf \
+  --spec-type draft-dflash --spec-draft-n-max 7 \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 \
+  --presence-penalty 0.0 --repeat-penalty 1.0 \
+  --reasoning on --reasoning-preserve \
+  --slot-save-path /home/llama-slot-cache \
+  --host 0.0.0.0 --port 8082 --metrics
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=300s
+TimeoutStopSec=60s
+KillSignal=SIGTERM
+LimitNOFILE=1048576
+TasksMax=infinity
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llama-server-bl2
+
+[Install]
+WantedBy=multi-user.target
