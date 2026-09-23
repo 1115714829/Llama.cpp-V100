@@ -21,11 +21,13 @@
 
 | 256K 指标 | BL1 vLLM（标准线） | BL2 官方 llama | BL3 B5 | 我们（目标） |
 |---|---|---|---|---|
-| 预填充 TTFT / pp t/s | **152.5 s / 1549 t/s**（152.26/152.82） | 待测填入 | 待测填入 | **≥ BL1** |
-| 吐字 tg t/s（附 AL） | **124.6 t/s**（118.0/131.1） | 待测填入 | 待测填入 | **≥ BL1** |
-| 体感 tpot / ms 每轮 | **≈8.0 ms**（8.47/7.63） | 待测填入 | 待测填入 | **≥ BL1** |
+| 预填充 TTFT / pp t/s | **152.5 s / 1549 t/s**（152.26/152.82） | **不可用**（D7 硬崩） | **289.2 s / 817 t/s**（289.36/289.02） | **≥ BL1** |
+| 吐字 tg t/s（附 AL） | **124.6 t/s**（118.0/131.1） | **不可用**（D7 硬崩） | **32.7 t/s**（32.29/33.19；AL 0.28，mean len 2.9） | **≥ BL1** |
+| 体感 tpot / ms 每轮 | **≈8.0 ms**（8.47/7.63） | **不可用**（D7 硬崩） | **≈30.5 ms**（30.88/30.04） | **≥ BL1** |
 
 > **BL1 口径（2026-09-23 实测，stress-256k 技能）**：ctx 262144 的 **90.14% 填充**（prompt 236,313 tokens；每 rep 加盐防 prefix cache、句序号防投机刷分）；gen 128；thinking on、chunked prefill 2048、DFlash2、TP4 卡 0,1,3,4；服务**原样启动参数**（`vllm-1cat.service`）。比 1cat 文档 2438 t/s 低是因为那是 chunk 8192 pure prefill 契约——本表是**标准服务基本参数实测**，即标准线本体。
+>
+> **BL3 口径**：同 BL1 prompt/生成长度、thinking on、DFlash2 n-max 7、**TP4 卡 0,1,2,3**（TP3 深 KV OOM：双 KV 头 rank +578 MiB 分配失败）、`--parallel 1 --ctx-size 262144`（llama 把 ctx 按槽均分）、ub 512、库 `/root/libdir-t8b`。**BL2 = 结构性不可用**：官方 434ddbb 与 b11053 原版均 0.05s 内 D7 硬崩（`ggml-backend-meta.cpp:543`，DFlash2 selector top-k × vocab 切分），B5 的 D7 修复是入场券（账本 R292）。⚠ 合成 prompt 对双方投机都有可预测性红利（横向公平），勿与 1cat 文档真实文本 50 t/s 直接比。
 
 ### 1.1 维护 [`1cat-vllm-v100-study/PLAN-GRAPH.md`](1cat-vllm-v100-study/PLAN-GRAPH.md)
 
