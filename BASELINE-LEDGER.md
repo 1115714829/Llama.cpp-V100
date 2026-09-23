@@ -23,6 +23,7 @@
 - ⇒ **下一刀 R298 = sched 规划缓存/免重做**（按图指纹缓存 split/assign 结果，复用轮直达 submit）。**天花板测算**：enqueue 264→~30 ms/call ⇒ TTFT 192→**~100-115 s（spec-off）⇒ 反超 BL1（152.5 s）在射程内**。
 - 口径注记：[SCHED] P10 探针无输出（打印条件待查，不影响主账）；[META] calls 口径（4224）与 rounds（505）的映射未完全厘清，7 ms/call 下界结论不受影响。
 - **⚠ 修正（同日读码，第三定律）**：`enqueue_us` 打印源 = `t_rt_compute_us` = **`ggml_backend_sched_graph_compute_async` 全程**（`llama-context.cpp:1452/2610`；`graph_compute` 的 `batched` 参数只是线程池选择，**非同步标志**）⇒ **"纯 sched 规划税"解读不成立**：263.7 ms/call 真身 = {sched 规划 O(大图) + split 边界隐式 GPU 等待} 二选一/混合。**R298 刀向暂缓**，双对照臂定性后动刀：(a) GBON2NS + `LLAMA_ROUND_TIMING_SYNC=1`（sync 单列）；(b) r=0 同口径 [RT] 账（桶化收益 77s 的来源闭合）。禁臆想第三定律本轮再立功。
+- **★★ 终局定性（SYNC 分离臂，R298-P 收口）**：`sync_us=190.2s`（= compute 起点到同步完成）− `compute 37.6s` ⇒ **真实 GPU 等待 152.6 s = 预填充墙钟 192 s 的 79%**；CPU 侧（dispatch 37.6 + alloc 4.9 + setin 10.5）≈ 53 s = 21%。**⇒ 预填充 = GPU-bound 定性（账全闭合）**：桶化 +38% = 纯 CPU 侧收益（CPU ~115→40s，算术闭合）；**剩余最大肉 = GPU 内核（FA 占 GPU ~60-70%）⇒ 主刀最终定案：P-P3 内核线 > R298 调度线（仅剩 CPU ~15-30s 小头）> 吐字轮结构**。无 SYNC 臂的 compute=133.1s = 调度 + split 边界隐式等待的混合体（口径注记）。
 
 ### R297 ★★★ **桶化 r=1.08 采用（P-GRAPHTAX 收口）：256K 预填充 +38.4%（289.2→208.9 s），距 BL1 1.90x→1.37x；纯步 -0.3% 不回退**（2026-09-23/24）
 
