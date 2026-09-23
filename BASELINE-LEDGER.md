@@ -15,6 +15,22 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
+### R296 ★★★ **P-GRAPHTAX 形状桶化（GGML_KV_BUCKET_RATIO）v1：target 路径位级等价已证；draft 路径交互病灶待修**（2026-09-23）
+
+- **实现**：`llama-kv-cache.h` 桶函数（几何比值 env，默认关）+ `llama-graph.cpp` mask 定尺/复现判据 + `llama-kv-cache.cpp` K/V 视图桶化 + mask 尾部 -inf。分支 `feat/graph-shape-bucket`（bb6d4a788）。构建 BUILD_RC=0 / 标记串三查绿（MARK_LIB_BUCKET=1）。
+- **四臂门值矩阵**（p60 固定尺 harness，NPRED=512）：
+
+| 臂 | sha256 | 判 |
+|---|---|---|
+| gb-off（无桶+投机） | `f3edac19…` | 门 ✓（B5 门值复现） |
+| gb-off-nospec | `69207026…`（len 160） | 无投机谱系基准 |
+| gb-on（桶+投机） | **CUDA `unspecified launch failure` @`common_speculative_impl_draft_dflash::draft`** | draft 交互病灶 |
+| **gb-on-nospec（桶+无投机）** | **`69207026…` 逐字同对照** | **位级等价 ✓✓** |
+
+- ⇒ **[S2] 数值论证成立**（target 路径 padding 全 mask 位级不变）；投机/无投机两谱系差 = DFlash2 概率采样改输出分布（len 158 vs 160），各自自洽。
+- ⇒ **病灶锁定 draft 路径 × 桶化交互**（异步 CUDA fault 归因在 draft()；机制候选：dflash 注入图按真实 n_kv 定形的 gather/concat/k_idxs 与桶化视图错位——下一步读 `src/models/dflash.cpp` 注入图定修法）。
+- 复盘注记：途中三次工具链笔误（判别臂参数未接线 / 调用点拆词 ×2）已修，均未污染数据；gb-off 门值三连复现稳定。
+
 ### R295 ★★ **ub 口径对齐臂（BL3UB2K）：host 税归因首战验证——调用数 462→116 = 预填充 +27%，但吐字 -20%**（2026-09-23）
 
 - **臂**：BL3 同栈（t8b/TP4/spec on）仅 `--ubatch-size 2048`（对齐 vLLM 标准 chunked-prefill 2048 基本参数）+ `SLOTS=1`（SLOTS=3 在 ub2048×深 KV 下 OOM：**1715 MiB = [n_kv×2048] f32 mask**，R282/m1 同族）。双 rep 离散 0.1%。
