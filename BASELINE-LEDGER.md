@@ -22,6 +22,7 @@
 - ⇒ **桶化已让图复现（rebuild 66）但 sched 规划仍逐调用重做** —— r=1.08 收益饱和的真因。
 - ⇒ **下一刀 R298 = sched 规划缓存/免重做**（按图指纹缓存 split/assign 结果，复用轮直达 submit）。**天花板测算**：enqueue 264→~30 ms/call ⇒ TTFT 192→**~100-115 s（spec-off）⇒ 反超 BL1（152.5 s）在射程内**。
 - 口径注记：[SCHED] P10 探针无输出（打印条件待查，不影响主账）；[META] calls 口径（4224）与 rounds（505）的映射未完全厘清，7 ms/call 下界结论不受影响。
+- **⚠ 修正（同日读码，第三定律）**：`enqueue_us` 打印源 = `t_rt_compute_us` = **`ggml_backend_sched_graph_compute_async` 全程**（`llama-context.cpp:1452/2610`；`graph_compute` 的 `batched` 参数只是线程池选择，**非同步标志**）⇒ **"纯 sched 规划税"解读不成立**：263.7 ms/call 真身 = {sched 规划 O(大图) + split 边界隐式 GPU 等待} 二选一/混合。**R298 刀向暂缓**，双对照臂定性后动刀：(a) GBON2NS + `LLAMA_ROUND_TIMING_SYNC=1`（sync 单列）；(b) r=0 同口径 [RT] 账（桶化收益 77s 的来源闭合）。禁臆想第三定律本轮再立功。
 
 ### R297 ★★★ **桶化 r=1.08 采用（P-GRAPHTAX 收口）：256K 预填充 +38.4%（289.2→208.9 s），距 BL1 1.90x→1.37x；纯步 -0.3% 不回退**（2026-09-23/24）
 
