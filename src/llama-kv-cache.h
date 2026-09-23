@@ -10,23 +10,25 @@
 
 #include <cstdlib>
 
-// R296: quantize n_kv to a geometric bucket so graph shapes repeat across calls.
-// Disabled (exact n_kv) unless GGML_KV_BUCKET_RATIO > 1; the kq_mask reuse check
-// and the K/V views must call this with the same (n_kv, n_cap) to stay shape-equal.
+// R296: quantize n_kv to a geometric bucket (256-aligned so it stays on the
+// instantiated flash-attn shape rails, like llama's own 256 padding) so graph
+// shapes repeat across calls. Disabled (exact n_kv) unless GGML_KV_BUCKET_RATIO > 1.
+// r is a measured tradeoff (R296b): r=1.25 -> TTFT +35% / tg -12%; r=1.08 pending.
 inline int64_t llama_kv_bucket_n(int64_t n_kv, int64_t n_cap) {
     const char * e = getenv("GGML_KV_BUCKET_RATIO");
     const double r = e ? atof(e) : 0.0;
-    if (!(r > 1.0) || n_kv <= 32) {
+    if (!(r > 1.0) || n_kv <= 256) {
         return n_kv;
     }
-    double b = 32.0;
+    double b = 256.0;
     while (b < (double) n_kv) {
         b *= r;
     }
-    if (b > (double) n_cap) {
-        b = (double) n_cap;
+    int64_t res = ((int64_t) ((b + 255.0) / 256.0)) * 256;
+    const int64_t cap = n_cap / 256 * 256;
+    if (res > cap) {
+        res = cap;
     }
-    const int64_t res = (int64_t) b;
     return res < n_kv ? n_kv : res;
 }
 
@@ -412,6 +414,7 @@ public:
     //
 
     uint32_t get_n_kv() const;
+    uint32_t get_n_kv_bucketed() const;
 
     ggml_type type_k() const;
     ggml_type type_v() const;
