@@ -8,6 +8,28 @@
 #include <unordered_map>
 #include <vector>
 
+#include <cstdlib>
+
+// R296: quantize n_kv to a geometric bucket so graph shapes repeat across calls.
+// Disabled (exact n_kv) unless GGML_KV_BUCKET_RATIO > 1; the kq_mask reuse check
+// and the K/V views must call this with the same (n_kv, n_cap) to stay shape-equal.
+inline int64_t llama_kv_bucket_n(int64_t n_kv, int64_t n_cap) {
+    const char * e = getenv("GGML_KV_BUCKET_RATIO");
+    const double r = e ? atof(e) : 0.0;
+    if (!(r > 1.0) || n_kv <= 32) {
+        return n_kv;
+    }
+    double b = 32.0;
+    while (b < (double) n_kv) {
+        b *= r;
+    }
+    if (b > (double) n_cap) {
+        b = (double) n_cap;
+    }
+    const int64_t res = (int64_t) b;
+    return res < n_kv ? n_kv : res;
+}
+
 struct llama_cparams;
 struct llama_hparams;
 struct llama_model;

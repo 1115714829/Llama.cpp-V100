@@ -31,7 +31,7 @@ static ggml_tensor * build_attn_inp_kq_mask(
         const llama_kv_cache_context * mctx,
         const llama_ubatch & ubatch,
         const llama_cparams & cparams) {
-    const auto n_kv     = mctx->get_n_kv();
+    const auto n_kv     = llama_kv_bucket_n(mctx->get_n_kv(), cparams.n_ctx);
     const auto n_tokens = ubatch.n_tokens;
     const auto n_stream = cparams.kv_unified ? 1 : ubatch.n_seqs_unq;
 
@@ -50,7 +50,7 @@ static bool can_reuse_kq_mask(
         const llama_kv_cache_context * mctx,
         const llama_ubatch & ubatch,
         const llama_cparams & cparams) {
-    const auto n_kv     = mctx->get_n_kv();
+    const auto n_kv     = llama_kv_bucket_n(mctx->get_n_kv(), cparams.n_ctx);
     const auto n_tokens = ubatch.n_tokens;
     const auto n_stream = cparams.kv_unified ? 1 : ubatch.n_seqs_unq;
 

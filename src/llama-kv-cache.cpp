@@ -2751,11 +2751,11 @@ ggml_type llama_kv_cache_context::type_v() const {
 }
 
 ggml_tensor * llama_kv_cache_context::get_k(ggml_context * ctx, int32_t il) const {
-    return kv->get_k(ctx, il, n_kv, sinfos[i_cur]);
+    return kv->get_k(ctx, il, llama_kv_bucket_n(n_kv, kv->get_size()), sinfos[i_cur]);
 }
 
 ggml_tensor * llama_kv_cache_context::get_v(ggml_context * ctx, int32_t il) const {
-    return kv->get_v(ctx, il, n_kv, sinfos[i_cur]);
+    return kv->get_v(ctx, il, llama_kv_bucket_n(n_kv, kv->get_size()), sinfos[i_cur]);
 }
 
 ggml_tensor * llama_kv_cache_context::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il) const {
@@ -2796,6 +2796,21 @@ void llama_kv_cache_context::set_input_v_idxs(ggml_tensor * dst, const llama_uba
 
 void llama_kv_cache_context::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * ubatch, bool causal_attn) const {
     kv->set_input_kq_mask(dst, ubatch, causal_attn);
+
+    // R296: bucketed mask tail is fully masked so padded KV rows stay invisible.
+    const int64_t n_rows = dst->ne[0];
+    if (n_rows > (int64_t) n_kv) {
+        const int64_t n_cols = ggml_nelements(dst) / n_rows;
+        for (int64_t i = 0; i < n_cols; ++i) {
+            for (int64_t j = n_kv; j < n_rows; ++j) {
+                if (dst->type == GGML_TYPE_F16) {
+                    ((ggml_fp16_t *) dst->data)[j + i*n_rows] = llama_cast<ggml_fp16_t>(-INFINITY);
+                } else {
+                    ((float *) dst->data)[j + i*n_rows] = -INFINITY;
+                }
+            }
+        }
+    }
 }
 
 void llama_kv_cache_context::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
