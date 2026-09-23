@@ -27,6 +27,6 @@ run() {
   nvidia-smi --query-gpu=index,memory.used --format=csv,noheader | head -3
   grep -aE 'perf: ctx=Qwen3.8-27B ' /root/llm/test/ub-$tag.log | tail -1
 }
-run U2K 2048 0 3
-run U512 512 0 3
+run U2K 2048 0 1
+run U512 512 0 1
 echo UB_DONE
