@@ -234,6 +234,31 @@ static bool sm70_fa_gemm() {
     return enabled;
 }
 
+// P-P3 decomposition path (p3-decomp spec). Judge the VALUE (=0 off). T1 is a
+// passthrough (same output as Path A) that exercises the gate, the probe and
+// the private resident workspace; T2 swaps in the decomposed compute.
+static bool sm70_fa_decomp() {
+    const char * e = getenv("LLAMA_SM70_FA_DECOMP");
+    return e != nullptr && atof(e) != 0.0;
+}
+
+// Private resident workspace for the decomposed path: never enters the graph,
+// never multiplies per allocation slot (p3-decomp [S2]-1). Lazily grown and
+// kept until process exit so repeat calls skip the alloc entirely.
+static void * sm70_decomp_ws = nullptr;
+static size_t sm70_decomp_ws_bytes = 0;
+
+static void sm70_decomp_ws_reserve(size_t bytes) {
+    if (bytes <= sm70_decomp_ws_bytes) {
+        return;
+    }
+    if (sm70_decomp_ws != nullptr) {
+        CUDA_CHECK(cudaFree(sm70_decomp_ws));
+    }
+    CUDA_CHECK(cudaMalloc(&sm70_decomp_ws, bytes));
+    sm70_decomp_ws_bytes = bytes;
+}
+
 // Direct-load mode for one KV tensor: 0=staged, 1=q4_0, 2=q8_0.
 static int sm70_kv_direct_mode(const ggml_tensor * T) {
     if (T->type == GGML_TYPE_Q4_0 && sm70_q4_direct()) {
@@ -570,6 +595,15 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     // independently. Do NOT assert K->type == V->type.
     GGML_ASSERT(sm70_d256_kv_type_ok(K->type));
     GGML_ASSERT(sm70_d256_kv_type_ok(V->type));
+
+    if (sm70_fa_decomp()) {
+        // T1 passthrough (p3-decomp spec [S2]-1/9): gate + probe + resident
+        // workspace only; the Path A body below runs unchanged => bit-identical.
+        const int kbn = q_len <= 2048 ? 24576 : 8192;
+        sm70_decomp_ws_reserve(
+            (size_t) hkv * (size_t) (q_len * gqa) * (size_t) kbn * 2);
+        sm70_d256_probe("ACCEPT: sm70 decomp T1 passthrough", cc, Q, K, V, mask);
+    }
 
     const int q_pad = ((q_len + SM70_D256_BLOCK_M - 1) / SM70_D256_BLOCK_M) * SM70_D256_BLOCK_M;
 
