@@ -122,6 +122,15 @@
 - **工装警示**：`GGML_CUDA_OP_TIMING=1` 的 `total/avg` **不可靠**（事件复用致负值/万亿 ms）；仅 `gpu_total=14.765 ms/ubatch` 与 call 计数可信。后续逐算子分账改用 **test-backend-ops**（R212 配方）或差分口径。
 - **下一步**：P5（GDN 融合，1cat 四件套同构）+ P6（fused W13/W2 + M=1 GEMV）；两者都以门值 sha + 每轮墙钟双验。
 
+- **R334 ★★★ 吐字线 GPU 刀施工序被逐算子真值重排：P7 decode 注意力 = 头号（194 GB/s，~12 ms/轮）；GDN 状态算子仅 6.9 µs（P5 状态融合头寸可忽略，真身 = GDN 小投影 37 GB/s）；权重 GEMV 已 680-765 GB/s（P6 头寸小）**（2026-09-25）
+
+- **工具**：`test-export-graph-ops -m <Q8_0> -o /tmp/ops.txt`（91 独立算子：50 prefill + **41 decode**）+ `test-backend-ops perf --test-file /tmp/ops.txt -b CUDA0`（R212 配方）= 逐算子真值 ✓（`GGML_CUDA_OP_TIMING` 已判不可用）。
+- **decode（M=1）真值**：`FLASH_ATTN_EXT`（256K KV f16）**5147 µs/1.05 GB/194 GB/s**（峰值 900 的 22%）；`result_output`（LM head）**1540 µs/1.32 GB/817 GB/s**；`ffn_gate/ffn_out/Qcur_full/node_13/z-0/linear_attn_out` = **681-765 GB/s**（高效 ✓）；`node_36`（GDN 投影 48 列）**37.5 GB/s**；`GATED_DELTA_NET` **6.92 µs**、`SSM_CONV` 2.43 µs（状态算子极小 ✓）。
+- **256K 每轮 86.8 ms 闭合分解**：host ~36 + 权重 GEMV ~25（含 GDN 小投影低效）+ **注意力 ~12**（q8_0 KV 下 0.53 GB/call ≈ 2.7 ms × 16 全注意力层，与 R333 差分 +13 ms 吻合 ✓）+ **LM head ~6.4**（TP4 分片后 0.4 ms/位置 × 16 位置）+ 小项 ~7。
+- **施工序重排（数据驱动）**：① **P7 decode 注意力**（194→600 GB/s ⇒ 12→2.6 ms/轮，**-9**；1cat = `sm70_grouped_long/scalar-attention.cu` + `E4M3_LONG_ATTENTION_MANIFEST`）② **host 收尾**（-20~25）③ **P5 GDN 小投影融合**（`node_36` 37 GB/s ⇒ 融合进大 GEMM = `FUSED_GDN_INPUT_FP16` 同构）④ **P4 LM head**（top-1 融合/少位置 ⇒ 6.4→2）。
+- **判据修正（不删史）**：P5"状态融合"（GDN 状态算子）头寸可忽略（6.9 µs/层级）；P6"权重 GEMV 形态"头寸小（已 680-765 GB/s）；两者改为"小投影/融合"与"形状调优"口径。
+- **红线提醒**：Q8_0 全量 = 验收硬纪律 ⇒ 字节刀（NVFP4 30 GB）不可用；上述四刀全在"效率/结构"面。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
