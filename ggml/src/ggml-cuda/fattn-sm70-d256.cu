@@ -600,7 +600,35 @@ size_t ggml_cuda_sm70_d256_alloc_size(const ggml_tensor * dst) {
                     + 2 * (size_t) 3 * rows3 * sizeof(float), 128);
 }
 
+extern "C" cudaError_t onecat_79t_prefill_q2048(
+    const void * q, const void * k, const void * v,
+    float * state_max, float * state_sum, void * out,
+    int query_len, int kv_len, int heads_q, int heads_kv,
+    float softmax_scale, cudaStream_t stream);
+
 void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    // T1-C dispatch: 79T Q8000-core prefix engine behind LLAMA_SM70_79T=1.
+    // Any admission miss or engine error falls through to the fused kernel.
+    static const bool t1c_on = getenv("LLAMA_SM70_79T") != nullptr &&
+        std::atof(getenv("LLAMA_SM70_79T")) != 0.0;
+    if (t1c_on) {
+        const ggml_tensor * Q = dst->src[0];
+        const ggml_tensor * K = dst->src[1];
+        const ggml_tensor * V = dst->src[2];
+        const int q_len  = (int) Q->ne[1];
+        const int kv_len = (int) K->ne[1];
+        const int hq     = (int) Q->ne[2];
+        const int hkv    = (int) K->ne[2];
+        const float scale = *(const float *) dst->op_params;
+        float scratch_max[1] = {0};
+        float scratch_sum[1] = {0};
+        const cudaError_t st = onecat_79t_prefill_q2048(
+            Q->data, K->data, V->data, scratch_max, scratch_sum, dst->data,
+            q_len, kv_len, hq, hkv, scale, ctx.stream());
+        if (st == cudaSuccess) {
+            return;
+        }
+    }
     const int id = ggml_cuda_get_device();
     const int cc = ggml_cuda_info().devices[id].cc;
     GGML_ASSERT(cc == GGML_CUDA_CC_VOLTA);

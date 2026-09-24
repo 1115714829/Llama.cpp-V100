@@ -3108,6 +3108,228 @@ struct CublasTailSliceOperators {
 };
 #endif
 
+// T1-C local shape constants (shared section has no torch-half Workspace).
+static constexpr int kHeadDim = 256;
+static constexpr int kRows = 2048 * 6;
+static constexpr int kBlockN = PREFIX_TORCH_BLOCK_N;
+static constexpr int kMaxTotalKV = 262144;
+
+// T1-C small transpose: (t,h,d) D-inner source -> [d, t*h] packed rows.
+__global__ void transpose_dh_t_kernel(const Element * src, Element * dst,
+                                      int t, int h, int d, long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % d);
+  const long th = i / d;
+  const int hh = (int) (th % h);
+  const long tt = th / h;
+  const long row = tt * h + hh;
+  dst[(long) dd * (t * h) + row] = src[i];
+}
+
+// T1-C finalize: vacc/psum * value_scale + value_center into half scratch.
+__global__ void t1c_finalize_kernel(const float * vacc, const float * psum,
+                                    const float * center, const float * vmax,
+                                    Element * out, int rows, long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  int d = (int) (i % kHeadDim);
+  int row = (int) (i / kHeadDim);
+  float denom = psum[row];
+  float scale = fmaxf(*vmax, 1.0f);
+  int exponent;
+  float mantissa = frexpf(scale, &exponent);
+  scale = ldexpf(1.0f, exponent - (mantissa == 0.5f)) * 64.0f;
+  float value = denom > 0.0f ? vacc[i] / denom * scale + center[d] : 0.0f;
+  out[i] = (Element) value;
+}
+
+// T1-C triangular tail mask: scores[row, col] invalid where global col > global row.
+__global__ void t1c_tail_tri_mask(ScoreElement * scores, int rows, int width,
+                                  int row_base, int col_base) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  long total = (long) rows * width;
+  if (i >= total) return;
+  int col = (int) (i % width);
+  int row = (int) (i / width);
+  long grow = (long) row_base + row;
+  long gcol = (long) col_base + col;
+  if (gcol > grow) {
+    scores[i] = (ScoreElement) (-INFINITY);
+  }
+}
+
+// T1-C entry: stateful per-ub prefix engine inside the anonymous namespace
+// so the launchers/kernels above are reachable. Folds one query segment into
+// (state_max, state_sum) online - llama chunked prefill semantics.
+extern "C" cudaError_t onecat_79t_prefill_q2048(
+    const void * q, const void * k, const void * v,
+    float * state_max, float * state_sum, void * out,
+    int query_len, int kv_len, int heads_q, int heads_kv,
+    float softmax_scale, cudaStream_t stream) {
+  if (q == nullptr || k == nullptr || v == nullptr || out == nullptr ||
+      query_len <= 0 || query_len > 2048 || query_len % 256 != 0 ||
+      kv_len < query_len || kv_len % 32 != 0 ||
+      heads_q <= 0 || heads_kv <= 0 || heads_q % heads_kv != 0 ||
+      heads_q / heads_kv != 6) {
+    return cudaErrorNotSupported;
+  }
+  const int rows = query_len * 6;
+  const int prefix = kv_len - query_len;
+  {
+    const int rows_h = rows;
+    cudaMemcpyToSymbol(g_rows, &rows_h, sizeof(rows_h));
+  }
+  // Per-device resident workspace.
+  struct EntryWS {
+    Element * qt; Element * kt; ScoreElement * scores;
+    float * num; float * bsum; float * bmax;
+    float * psum; float * pmax; float * mpart; float * vacc;
+    Element * vscaled; float * vcenter; float * vmax;
+    cublasHandle_t cublas;
+    size_t cap;
+  };
+  static std::mutex ws_mtx;
+  static std::map<int, EntryWS> ws_map;
+  EntryWS ws;
+  {
+    std::lock_guard<std::mutex> lk(ws_mtx);
+    int dev = 0;
+    cudaGetDevice(&dev);
+    EntryWS & slot = ws_map[dev];
+    const size_t need =
+        sizeof(Element) * kHeadDim * size_t(kRows) * 2 +
+        sizeof(ScoreElement) * size_t(kBlockN) * kRows +
+        sizeof(float) * kRows * (kHeadDim * 2 + 5) +
+        sizeof(float) * 16 * kRows +
+        sizeof(Element) * size_t(kMaxTotalKV) * kHeadDim +
+        sizeof(float) * (kHeadDim + 1);
+    if (slot.cap < need) {
+      char * base = nullptr;
+      if (cudaMalloc(&base, need) != cudaSuccess) {
+        return cudaErrorMemoryAllocation;
+      }
+      char * p = base;
+      auto take = [&](size_t b) { void * o = p; p += b; return o; };
+      slot.qt    = (Element *) take(sizeof(Element) * kHeadDim * kRows);
+      slot.kt    = (Element *) take(sizeof(Element) * kHeadDim * kRows);
+      slot.scores= (ScoreElement *) take(sizeof(ScoreElement) * size_t(kBlockN) * kRows);
+      slot.num   = (float *) take(sizeof(float) * kRows * kHeadDim);
+      slot.bsum  = (float *) take(sizeof(float) * kRows);
+      slot.bmax  = (float *) take(sizeof(float) * kRows);
+      slot.psum  = (float *) take(sizeof(float) * kRows);
+      slot.pmax  = (float *) take(sizeof(float) * kRows);
+      slot.mpart = (float *) take(sizeof(float) * 16 * kRows);
+      slot.vacc  = (float *) take(sizeof(float) * kRows * kHeadDim);
+      slot.vscaled = (Element *) take(sizeof(Element) * kMaxTotalKV * kHeadDim);
+      slot.vcenter = (float *) take(sizeof(float) * kHeadDim);
+      slot.vmax  = (float *) take(sizeof(float));
+      slot.cap   = need;
+    }
+    if (slot.cublas == nullptr) {
+      cublasCreate(&slot.cublas);
+    }
+    ws = slot;
+  }
+  // 1) Transpose Q [d,h,t] (D-inner) into qt [256, rows]; K prefix into kt.
+  //    rows are ordered (t,h): row = t*6 + h for the GQA-packed M dimension.
+  {
+    const int threads = 256;
+    const long total = (long) rows * kHeadDim;
+    transpose_dh_t_kernel<<<(int) ((total + threads - 1) / threads), threads, 0, stream>>>(
+        (const Element *) q, ws.qt, query_len, heads_q, kHeadDim, total);
+    const long ktotal = (long) prefix * kHeadDim;
+    if (prefix > 0) {
+      transpose_dh_t_kernel<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+          (const Element *) k, ws.kt, prefix, heads_kv, kHeadDim, ktotal);
+    }
+  }
+  // 2) 24K prefix blocks: QK -> block max -> FP32 PV -> online merge.
+  const int n_blocks = (prefix + kBlockN - 1) / kBlockN;
+  for (int b = 0; b < n_blocks; ++b) {
+    const int begin = b * kBlockN;
+    const int width = std::min(kBlockN, prefix - begin);
+    CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + (size_t) begin * kHeadDim,
+                        ws.scores, rows, width, rows, prefix};
+    qk.launch(stream);
+    const int tiles = (width + 8191) / 8192;
+    stable_row_max_partials<false>
+        <<<dim3((rows + 255) / 256, tiles), 128, 0, stream>>>(
+            reinterpret_cast<__half const *>(ws.scores), ws.mpart, rows, width);
+    stable_finish_max<<<(rows + 255) / 256, 256, 0, stream>>>(
+        ws.mpart, ws.bmax, rows, tiles);
+    PrefixFloatPVLauncher pv(ws.scores,
+                             reinterpret_cast<Element *>(ws.vscaled) + (size_t) begin * kHeadDim,
+                             ws.num, rows, width, false);
+    pv.launch(stream);
+    stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
+        reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
+        ws.vacc, ws.psum, ws.pmax, b == 0);
+  }
+  // 2.5) V guards: per-dim center, residual amax, exact-power-of-two scaling.
+  const long v_elements = (long) kv_len * kHeadDim;
+  {
+    stable_value_center<<<1, 256, 0, stream>>>(
+        reinterpret_cast<__half const *>(v), ws.vcenter, kv_len);
+    cudaMemsetAsync(ws.vmax, 0, sizeof(float), stream);
+    stable_value_amax<<<256, 256, 0, stream>>>(
+        reinterpret_cast<__half const *>(v), ws.vcenter, ws.vmax,
+        (int) v_elements);
+    stable_scale_values<<<256, 256, 0, stream>>>(
+        reinterpret_cast<__half const *>(v),
+        reinterpret_cast<__half *>(ws.vscaled), ws.vcenter, ws.vmax,
+        (int) v_elements);
+  }
+  // 3) Triangular tail = one more masked block over the segment's own kv slice.
+  {
+    const int begin = prefix;
+    CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + (size_t) begin * kHeadDim,
+                        ws.scores, rows, query_len, rows, prefix};
+    qk.launch(stream);
+    const int threads = 256;
+    long total = (long) rows * query_len;
+    t1c_tail_tri_mask<<<(int) ((total + threads - 1) / threads), threads, 0,
+                        stream>>>(ws.scores, rows, query_len, 0, prefix);
+    stable_row_max_partials<true>
+        <<<dim3((rows + 255) / 256, (query_len + 8191) / 8192), 128, 0,
+           stream>>>(
+            reinterpret_cast<__half const *>(ws.scores), ws.mpart, rows,
+            query_len);
+    stable_finish_max<<<(rows + 255) / 256, 256, 0, stream>>>(
+        ws.mpart, ws.bmax, rows, (query_len + 8191) / 8192);
+    PrefixFloatPVLauncher pv(
+        ws.scores,
+        reinterpret_cast<Element *>(ws.vscaled) + (size_t) begin * kHeadDim,
+        ws.num, rows, query_len, false);
+    pv.launch(stream);
+    stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
+        reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
+        ws.vacc, ws.psum, ws.pmax, n_blocks == 0);
+  }
+  // 4) Final normalize: out = vacc / psum * value_scale + value_center, then
+  //    transpose back to llama layout [d, t*h]; export row stats.
+  {
+    const int threads = 256;
+    long total = (long) rows * kHeadDim;
+    t1c_finalize_kernel<<<(int) ((total + threads - 1) / threads), threads, 0,
+                          stream>>>(ws.vacc, ws.psum, ws.vcenter, ws.vmax,
+                                    ws.qt, rows, total);
+    transpose_dh_t_kernel<<<(int) ((total + threads - 1) / threads), threads, 0,
+                            stream>>>(ws.qt, (Element *) out, query_len, heads_q,
+                                      kHeadDim, total);
+  }
+  if (state_max != nullptr) {
+    cudaMemcpyAsync(state_max, ws.pmax, sizeof(float) * rows,
+                    cudaMemcpyDeviceToDevice, stream);
+  }
+  if (state_sum != nullptr) {
+    cudaMemcpyAsync(state_sum, ws.psum, sizeof(float) * rows,
+                    cudaMemcpyDeviceToDevice, stream);
+  }
+  (void) softmax_scale;
+  return cudaSuccess;
+}
+
 }  // namespace
 
 #if !defined(PREFIX_TORCH_EXTENSION)
@@ -6164,7 +6386,7 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
                                           at::Tensor& out) {
   using Workspace = Sm70GqaHalf2Workspace;
   const int total_kv = static_cast<int>(k.size(1));
-  const int prefix = total_kv - Workspace::kQuery;
+  const int prefix = total_kv - kQuery;
   auto workspace = get_sm70_gqa_half2_workspace(q);
   std::unique_lock<std::mutex> launch_lock(workspace->launch_mutex);
   cudaStream_t caller_stream = at::cuda::getCurrentCUDAStream();
@@ -6205,10 +6427,10 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
   C10_CUDA_CHECK(cudaEventRecord(workspace->input_ready, caller_stream));
   C10_CUDA_CHECK(cudaStreamWaitEvent(prefix_stream, workspace->input_ready, 0));
   C10_CUDA_CHECK(cudaMemsetAsync(
-      prefix_sum, 0, Workspace::kRows * sizeof(float), prefix_stream));
+      prefix_sum, 0, kRows * sizeof(float), prefix_stream));
   C10_CUDA_CHECK(cudaMemsetAsync(tail_row_sums, 0,
-                                 size_t(Workspace::kFinePVTasks) *
-                                     Workspace::kTailTileRows * sizeof(float),
+                                 size_t(kFinePVTasks) *
+                                     kTailTileRows * sizeof(float),
                                  prefix_stream));
 
     #if defined(PREFIX_TORCH_STABLE_ROWS)
@@ -6220,7 +6442,7 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
   float* value_center = workspace->value_center.data_ptr<float>();
   auto* scaled_value =
       reinterpret_cast<__half*>(workspace->value_scaled.data_ptr<at::Half>());
-  C10_CUDA_CHECK(cudaMemsetAsync(block_sum, 0, Workspace::kRows * sizeof(float),
+  C10_CUDA_CHECK(cudaMemsetAsync(block_sum, 0, kRows * sizeof(float),
                                  prefix_stream));
   C10_CUDA_CHECK(
       cudaMemsetAsync(maximum_value, 0, sizeof(float), prefix_stream));
@@ -6228,10 +6450,10 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
       reinterpret_cast<__half const*>(value), value_center, total_kv);
   stable_value_amax<<<1024, 256, 0, prefix_stream>>>(
       reinterpret_cast<__half const*>(value), value_center, maximum_value,
-      total_kv * Workspace::kHeadDim);
+      total_kv * kHeadDim);
   stable_scale_values<<<1024, 256, 0, prefix_stream>>>(
       reinterpret_cast<__half const*>(value), scaled_value, value_center,
-      maximum_value, total_kv * Workspace::kHeadDim);
+      maximum_value, total_kv * kHeadDim);
   value = reinterpret_cast<Element*>(scaled_value);
   C10_CUDA_CHECK(
       cudaMemcpyToSymbolAsync(g_row_max, &block_max, sizeof(block_max), 0,
@@ -6240,13 +6462,13 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
       cudaMemcpyToSymbolAsync(g_79t_tail_row_max, &tail_max, sizeof(tail_max),
                               0, cudaMemcpyHostToDevice, prefix_stream));
     #endif
-  int prefix_rows = Workspace::kRows;
+  int prefix_rows = kRows;
     #if defined(PREFIX_TORCH_STABLE_ROWS)
   float* prefix_sum_output = block_sum;
     #else
   float* prefix_sum_output = prefix_sum;
     #endif
-  int tail_rows = Workspace::kTailTileRows;
+  int tail_rows = kTailTileRows;
   float* tail_sum_output = tail_row_sums;
   int task_base = 0;
   C10_CUDA_CHECK(
@@ -6266,38 +6488,38 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
                               cudaMemcpyHostToDevice, prefix_stream));
 
   dim3 transpose_threads(32, 8);
-  dim3 query_transpose_grid((Workspace::kHeadDim + 31) / 32,
-                            (Workspace::kRows + 31) / 32);
-  dim3 key_transpose_grid((Workspace::kHeadDim + 31) / 32,
+  dim3 query_transpose_grid((kHeadDim + 31) / 32,
+                            (kRows + 31) / 32);
+  dim3 key_transpose_grid((kHeadDim + 31) / 32,
                           (total_kv + 31) / 32);
   transpose_half_32x32<<<query_transpose_grid, transpose_threads, 0,
                          prefix_stream>>>(
       reinterpret_cast<__half const*>(query),
-      reinterpret_cast<__half*>(query_transposed), Workspace::kRows,
-      Workspace::kHeadDim);
+      reinterpret_cast<__half*>(query_transposed), kRows,
+      kHeadDim);
   transpose_half_32x32<<<key_transpose_grid, transpose_threads, 0,
                          prefix_stream>>>(
       reinterpret_cast<__half const*>(key),
-      reinterpret_cast<__half*>(key_transposed), total_kv, Workspace::kHeadDim);
+      reinterpret_cast<__half*>(key_transposed), total_kv, kHeadDim);
 
   workspace->host_tail_q_ptrs.clear();
   workspace->host_tail_k_ptrs.clear();
   workspace->host_tail_score_ptrs.clear();
   size_t query_score_offset = 0;
-  for (int query_tile = 0; query_tile < Workspace::kTailTiles; ++query_tile) {
+  for (int query_tile = 0; query_tile < kTailTiles; ++query_tile) {
     auto* query_scores = tail_scores + query_score_offset;
     for (int key_tile = 0; key_tile <= query_tile; ++key_tile) {
       workspace->host_tail_q_ptrs.push_back(
-          query_transposed + size_t(query_tile) * Workspace::kTailTileRows);
+          query_transposed + size_t(query_tile) * kTailTileRows);
       workspace->host_tail_k_ptrs.push_back(key_transposed + prefix +
                                             size_t(key_tile) *
-                                                Workspace::kTailTileTokens);
+                                                kTailTileTokens);
       workspace->host_tail_score_ptrs.push_back(
-          query_scores + size_t(key_tile) * Workspace::kTailTileRows *
-                             Workspace::kTailTileTokens);
+          query_scores + size_t(key_tile) * kTailTileRows *
+                             kTailTileTokens);
     }
-    query_score_offset += size_t(Workspace::kTailTileRows) * (query_tile + 1) *
-                          Workspace::kTailTileTokens;
+    query_score_offset += size_t(kTailTileRows) * (query_tile + 1) *
+                          kTailTileTokens;
   }
   C10_CUDA_CHECK(
       cudaMemcpyAsync(workspace->tail_q_ptrs.data_ptr<uint8_t>(),
@@ -6322,22 +6544,22 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
   std::vector<std::unique_ptr<PVLauncher>> prefix_pv;
     #endif
   const int kPrefixBlocks =
-      (prefix + Workspace::kBlockN - 1) / Workspace::kBlockN;
+      (prefix + kBlockN - 1) / kBlockN;
   prefix_qk.reserve(kPrefixBlocks);
   prefix_pv.reserve(kPrefixBlocks);
   for (int block = 0; block < kPrefixBlocks; ++block) {
-    int begin = block * Workspace::kBlockN;
-    int width = std::min(Workspace::kBlockN, prefix - begin);
+    int begin = block * kBlockN;
+    int width = std::min(kBlockN, prefix - begin);
     prefix_qk.push_back(std::make_unique<CublasQKLauncher>(CublasQKLauncher{
         workspace->prefix_cublas, query_transposed, key_transposed + begin,
-        scores, Workspace::kRows, width, Workspace::kRows, total_kv}));
+        scores, kRows, width, kRows, total_kv}));
     #if defined(PREFIX_TORCH_PREFIX_FP32_OUTPUT)
     prefix_pv.push_back(std::make_unique<PrefixFloatPVLauncher>(
     #else
     prefix_pv.push_back(std::make_unique<PVLauncher>(
     #endif
-        scores, value + size_t(begin) * Workspace::kHeadDim, prefix_numerator,
-        Workspace::kRows, width,
+        scores, value + size_t(begin) * kHeadDim, prefix_numerator,
+        kRows, width,
     #if defined(PREFIX_TORCH_STABLE_ROWS)
         false));
     #else
@@ -6350,24 +6572,24 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
   dim3 tail_pv_block;
   int tail_pv_smem_bytes = 0;
   int fine_task = 0;
-  for (int round = 0; round < Workspace::kFinePVRounds; ++round) {
-    int key_tile_begin = round * Workspace::kFinePVGroupTiles;
-    for (int query_tile = key_tile_begin; query_tile < Workspace::kTailTiles;
+  for (int round = 0; round < kFinePVRounds; ++round) {
+    int key_tile_begin = round * kFinePVGroupTiles;
+    for (int query_tile = key_tile_begin; query_tile < kTailTiles;
          ++query_tile) {
-      int key_tiles = std::min(Workspace::kFinePVGroupTiles,
+      int key_tiles = std::min(kFinePVGroupTiles,
                                query_tile + 1 - key_tile_begin);
-      size_t query_score_offset = size_t(Workspace::kTailTileRows) *
-                                  size_t(Workspace::kTailTileTokens) *
+      size_t query_score_offset = size_t(kTailTileRows) *
+                                  size_t(kTailTileTokens) *
                                   query_tile * (query_tile + 1) / 2;
       TailPVLauncher task_pv(
           tail_scores + query_score_offset +
-              size_t(key_tile_begin) * Workspace::kTailTileRows *
-                  Workspace::kTailTileTokens,
-          value + size_t(prefix + key_tile_begin * Workspace::kTailTileTokens) *
-                      Workspace::kHeadDim,
-          tail_numerator + size_t(query_tile) * Workspace::kTailTileRows *
-                               Workspace::kHeadDim,
-          Workspace::kTailTileRows, key_tiles * Workspace::kTailTileTokens,
+              size_t(key_tile_begin) * kTailTileRows *
+                  kTailTileTokens,
+          value + size_t(prefix + key_tile_begin * kTailTileTokens) *
+                      kHeadDim,
+          tail_numerator + size_t(query_tile) * kTailTileRows *
+                               kHeadDim,
+          kTailTileRows, key_tiles * kTailTileTokens,
           round != 0);
       workspace->host_tail_pv_params.push_back(task_pv.params);
       if (fine_task++ == 0) {
@@ -6400,7 +6622,7 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
               << ",b=" << static_cast<void*>(first_params.ref_B.data())
               << ",expected_b="
               << static_cast<void*>(value +
-                                    size_t(prefix) * Workspace::kHeadDim)
+                                    size_t(prefix) * kHeadDim)
               << ",d=" << static_cast<void*>(first_params.ref_D.data())
               << ",expected_d=" << static_cast<void*>(tail_numerator) << "}\n";
   }
@@ -6420,35 +6642,35 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
     #endif
     TORCH_CHECK(cublasGemmBatchedEx(
                     workspace->tail_cublas, CUBLAS_OP_N, CUBLAS_OP_T,
-                    Workspace::kTailTileRows, Workspace::kTailTileTokens,
-                    Workspace::kHeadDim, &alpha,
+                    kTailTileRows, kTailTileTokens,
+                    kHeadDim, &alpha,
                     reinterpret_cast<void const* const*>(
                         workspace->tail_q_ptrs.data_ptr<uint8_t>()),
-                    CUDA_R_16F, Workspace::kRows,
+                    CUDA_R_16F, kRows,
                     reinterpret_cast<void const* const*>(
                         workspace->tail_k_ptrs.data_ptr<uint8_t>()),
                     CUDA_R_16F, total_kv, &beta,
                     reinterpret_cast<void* const*>(
                         workspace->tail_score_ptrs.data_ptr<uint8_t>()),
-                    CUDA_R_16F, Workspace::kTailTileRows, Workspace::kTailTasks,
+                    CUDA_R_16F, kTailTileRows, kTailTasks,
                     kTorchTailQKComputeType,
                     PREFIX_BATCHED_TAIL_QK_ALGO) == CUBLAS_STATUS_SUCCESS,
                 "launch SM70 half2 triangular-tail QK failed");
     int64_t mask_elements =
-        int64_t(Workspace::kTailTileRows) * Workspace::kTailTileTokens;
-    dim3 mask_grid((mask_elements + 255) / 256, Workspace::kTailTiles);
+        int64_t(kTailTileRows) * kTailTileTokens;
+    dim3 mask_grid((mask_elements + 255) / 256, kTailTiles);
     mask_batched_tri_tail_diagonal<<<mask_grid, 256, 0, tail_stream>>>(
-        reinterpret_cast<__half*>(tail_scores), Workspace::kTailTileRows,
-        Workspace::kTailTileTokens, 0);
+        reinterpret_cast<__half*>(tail_scores), kTailTileRows,
+        kTailTileTokens, 0);
     #if defined(PREFIX_TORCH_STABLE_ROWS)
-    dim3 max_grid((Workspace::kRows + 255) / 256, 1);
+    dim3 max_grid((kRows + 255) / 256, 1);
     stable_row_max_partials<true><<<max_grid, 128, 0, tail_stream>>>(
         reinterpret_cast<__half const*>(tail_scores),
-        workspace->tail_max_partials.data_ptr<float>(), Workspace::kRows,
-        Workspace::kQuery);
-    stable_finish_max<<<(Workspace::kRows + 255) / 256, 256, 0, tail_stream>>>(
+        workspace->tail_max_partials.data_ptr<float>(), kRows,
+        kQuery);
+    stable_finish_max<<<(kRows + 255) / 256, 256, 0, tail_stream>>>(
         workspace->tail_max_partials.data_ptr<float>(), tail_max,
-        Workspace::kRows, 1);
+        kRows, 1);
     #endif
     if (direct_tail_debug) {
       set_pv_task_base_kernel<<<1, 1, 0, tail_stream>>>(0);
@@ -6459,9 +6681,9 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
               workspace->host_tail_pv_params[0]);
     } else {
       int direct_task_base = 0;
-      for (int round = 0; round < Workspace::kFinePVRounds; ++round) {
+      for (int round = 0; round < kFinePVRounds; ++round) {
         int round_tasks =
-            Workspace::kTailTiles - round * Workspace::kFinePVGroupTiles;
+            kTailTiles - round * kFinePVGroupTiles;
         set_pv_task_base_kernel<<<1, 1, 0, tail_stream>>>(direct_task_base);
         dim3 round_grid = tail_pv_grid;
         round_grid.z = unsigned(round_tasks);
@@ -6477,7 +6699,7 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
   if (kPrefixBlocks == 0 && !exact_tail_debug) {
     C10_CUDA_CHECK(
         cudaMemsetAsync(prefix_numerator, 0,
-                        size_t(Workspace::kRows) * Workspace::kHeadDim *
+                        size_t(kRows) * kHeadDim *
                             sizeof(*prefix_numerator),
                         prefix_stream));
     C10_CUDA_CHECK(cudaEventRecord(workspace->prefix_pv_ready, prefix_stream));
@@ -6493,20 +6715,20 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
     }
     #if defined(PREFIX_TORCH_STABLE_ROWS)
     int width =
-        std::min(Workspace::kBlockN, prefix - block * Workspace::kBlockN);
+        std::min(kBlockN, prefix - block * kBlockN);
     int tiles = (width + 8191) / 8192;
-    dim3 max_grid((Workspace::kRows + 255) / 256, tiles);
+    dim3 max_grid((kRows + 255) / 256, tiles);
     stable_row_max_partials<false><<<max_grid, 128, 0, prefix_stream>>>(
         reinterpret_cast<__half const*>(scores),
-        workspace->max_partials.data_ptr<float>(), Workspace::kRows, width);
-    stable_finish_max<<<(Workspace::kRows + 255) / 256, 256, 0,
+        workspace->max_partials.data_ptr<float>(), kRows, width);
+    stable_finish_max<<<(kRows + 255) / 256, 256, 0,
                         prefix_stream>>>(
-        workspace->max_partials.data_ptr<float>(), block_max, Workspace::kRows,
+        workspace->max_partials.data_ptr<float>(), block_max, kRows,
         tiles);
     #endif
     prefix_pv[block]->launch(prefix_stream);
     #if defined(PREFIX_TORCH_STABLE_ROWS)
-    stable_merge_prefix<<<(Workspace::kRows + 3) / 4, 256, 0, prefix_stream>>>(
+    stable_merge_prefix<<<(kRows + 3) / 4, 256, 0, prefix_stream>>>(
         reinterpret_cast<StablePrefixPartial const*>(prefix_numerator),
         block_sum, block_max, prefix_accumulator, prefix_sum, prefix_max,
         block == 0);
@@ -6527,21 +6749,21 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
   int repaired_rows = PREFIX_BATCHED_TRI_REPAIR_TOKENS * 6;
   if (exact_tail_debug) {
     C10_CUDA_CHECK(onecat_sm70_d256_dense_state_raw(
-        query, key + size_t(prefix) * Workspace::kHeadDim,
-        value + size_t(prefix) * Workspace::kHeadDim, tail_max, tail_sum,
-        tail_numerator, Workspace::kQuery, Workspace::kQuery, 6, 1, 0.0625f,
+        query, key + size_t(prefix) * kHeadDim,
+        value + size_t(prefix) * kHeadDim, tail_max, tail_sum,
+        tail_numerator, kQuery, kQuery, 6, 1, 0.0625f,
         prefix_stream));
-    repaired_rows = Workspace::kRows;
+    repaired_rows = kRows;
   } else {
     C10_CUDA_CHECK(cudaStreamWaitEvent(prefix_stream, workspace->tail_done, 0));
-    finalize_round_major_tail_state<<<(Workspace::kRows + 255) / 256, 256, 0,
+    finalize_round_major_tail_state<<<(kRows + 255) / 256, 256, 0,
                                       prefix_stream>>>(
-        tail_row_sums, tail_max, tail_sum, Workspace::kTailTileRows,
-        Workspace::kRows);
+        tail_row_sums, tail_max, tail_sum, kTailTileRows,
+        kRows);
     if (dump_tail_debug) {
       constexpr int kDebugRows[] = {384, 1920, 12000, 24000, 47994};
       constexpr int kDebugCount = sizeof(kDebugRows) / sizeof(kDebugRows[0]);
-      constexpr int kDebugRounds = Workspace::kFinePVRounds;
+      constexpr int kDebugRounds = kFinePVRounds;
       float approximate_sum[kDebugCount] = {};
       __half approximate_numerator[kDebugCount] = {};
       float partial_sum[kDebugCount][kDebugRounds] = {};
@@ -6557,15 +6779,15 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
       }
       C10_CUDA_CHECK(cudaStreamSynchronize(prefix_stream));
       size_t query1_offset =
-          size_t(Workspace::kTailTileRows) * Workspace::kTailTileTokens;
-      constexpr int kLastTailTile = Workspace::kTailTiles - 1;
-      size_t query_last_offset = size_t(Workspace::kTailTileRows) *
-                                 Workspace::kTailTileTokens * kLastTailTile *
-                                 Workspace::kTailTiles / 2;
+          size_t(kTailTileRows) * kTailTileTokens;
+      constexpr int kLastTailTile = kTailTiles - 1;
+      size_t query_last_offset = size_t(kTailTileRows) *
+                                 kTailTileTokens * kLastTailTile *
+                                 kTailTiles / 2;
       size_t query_last_diagonal =
-          query_last_offset + size_t(kLastTailTile) * Workspace::kTailTileRows *
-                                  Workspace::kTailTileTokens;
-      constexpr int kScoreRows = Workspace::kTailTileRows;
+          query_last_offset + size_t(kLastTailTile) * kTailTileRows *
+                                  kTailTileTokens;
+      constexpr int kScoreRows = kTailTileRows;
       C10_CUDA_CHECK(cudaMemcpy(&score_samples[0], tail_scores, sizeof(__half),
                                 cudaMemcpyDeviceToHost));
       C10_CUDA_CHECK(cudaMemcpy(&score_samples[1], tail_scores + query1_offset,
@@ -6577,8 +6799,8 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
       C10_CUDA_CHECK(
           cudaMemcpy(&score_samples[3],
                      tail_scores + query_last_diagonal +
-                         int64_t(Workspace::kTailTileTokens - 1) * kScoreRows +
-                         Workspace::kTailTileRows - 6,
+                         int64_t(kTailTileTokens - 1) * kScoreRows +
+                         kTailTileRows - 6,
                      sizeof(__half), cudaMemcpyDeviceToHost));
       C10_CUDA_CHECK(cudaMemcpyFromSymbol(&observed_tail_rows, g_tail_rows,
                                           sizeof(observed_tail_rows)));
@@ -6593,23 +6815,23 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
                                   cudaMemcpyDeviceToHost));
         C10_CUDA_CHECK(cudaMemcpy(
             &approximate_numerator[index],
-            tail_numerator + int64_t(kDebugRows[index]) * Workspace::kHeadDim,
+            tail_numerator + int64_t(kDebugRows[index]) * kHeadDim,
             sizeof(__half), cudaMemcpyDeviceToHost));
-        int query_tile = kDebugRows[index] / Workspace::kTailTileRows;
+        int query_tile = kDebugRows[index] / kTailTileRows;
         int local_row =
-            kDebugRows[index] - query_tile * Workspace::kTailTileRows;
-        int rounds = (query_tile + 1 + Workspace::kFinePVGroupTiles - 1) /
-                     Workspace::kFinePVGroupTiles;
+            kDebugRows[index] - query_tile * kTailTileRows;
+        int rounds = (query_tile + 1 + kFinePVGroupTiles - 1) /
+                     kFinePVGroupTiles;
         for (int round = 0; round < rounds; ++round) {
           int first_task =
-              round * Workspace::kTailTiles -
-              Workspace::kFinePVGroupTiles * round * (round - 1) / 2;
+              round * kTailTiles -
+              kFinePVGroupTiles * round * (round - 1) / 2;
           int task =
-              first_task + query_tile - round * Workspace::kFinePVGroupTiles;
+              first_task + query_tile - round * kFinePVGroupTiles;
           partial_task[index][round] = task;
           C10_CUDA_CHECK(cudaMemcpy(
               &partial_sum[index][round],
-              tail_row_sums + int64_t(task) * Workspace::kTailTileRows +
+              tail_row_sums + int64_t(task) * kTailTileRows +
                   local_row,
               sizeof(float), cudaMemcpyDeviceToHost));
         }
@@ -6644,13 +6866,13 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
       std::cerr << "\n";
     }
     C10_CUDA_CHECK(onecat_sm70_d256_dense_state_raw(
-        query, key + size_t(prefix) * Workspace::kHeadDim,
-        value + size_t(prefix) * Workspace::kHeadDim, tail_max, tail_sum,
+        query, key + size_t(prefix) * kHeadDim,
+        value + size_t(prefix) * kHeadDim, tail_max, tail_sum,
         tail_numerator, PREFIX_BATCHED_TRI_REPAIR_TOKENS,
         PREFIX_BATCHED_TRI_REPAIR_TOKENS, 6, 1, 0.0625f, prefix_stream));
   }
     #if defined(PREFIX_TORCH_STABLE_ROWS)
-  stable_merge_final<<<Workspace::kRows, 256, 0, prefix_stream>>>(
+  stable_merge_final<<<kRows, 256, 0, prefix_stream>>>(
       prefix_accumulator, prefix_sum, prefix_max,
       reinterpret_cast<__half const*>(tail_numerator), tail_sum, tail_max,
       value_center, maximum_value, reinterpret_cast<__half*>(output),
@@ -6658,15 +6880,15 @@ at::Tensor sm70_d256_gqa_half2_family_fwd(const at::Tensor& q,
     #else
       #if defined(PREFIX_TORCH_PREFIX_FP32_OUTPUT)
   merge_float_prefix_direct_round_major_tail<<<
-      Workspace::kRows, Workspace::kHeadDim / 2, 0, prefix_stream>>>(
+      kRows, kHeadDim / 2, 0, prefix_stream>>>(
       prefix_numerator,
       #else
   merge_prefix_direct_round_major_tail<<<
-      Workspace::kRows, Workspace::kHeadDim / 2, 0, prefix_stream>>>(
+      kRows, kHeadDim / 2, 0, prefix_stream>>>(
       reinterpret_cast<__half const*>(prefix_numerator),
       #endif
       prefix_sum, reinterpret_cast<__half const*>(tail_numerator), tail_max,
-      tail_sum, reinterpret_cast<__half*>(output), Workspace::kRows,
+      tail_sum, reinterpret_cast<__half*>(output), kRows,
       repaired_rows);
     #endif
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -6730,8 +6952,8 @@ at::Tensor PREFIX_TORCH_ARCHITECTURE_FUNCTION(
   #if defined(PREFIX_QK_CUBLAS_RAW) && defined(PREFIX_BATCHED_TRI_TAIL) && \
       defined(PREFIX_TAIL_IDLE_SM_FINE_PV) &&                              \
       defined(PREFIX_TAIL_FINE_PV_DIRECT_ACCUMULATE)
-  TORCH_CHECK(total_kv >= Sm70GqaHalf2Workspace::kMinTotalKV &&
-                  total_kv <= Sm70GqaHalf2Workspace::kMaxTotalKV,
+  TORCH_CHECK(total_kv >= Sm70GqaHalf2kMinTotalKV &&
+                  total_kv <= Sm70GqaHalf2kMaxTotalKV,
               "SM70 half2 architecture requires KV in [", kMinTotalKV,
               ", 262144]");
   return sm70_d256_gqa_half2_family_fwd(q, k, v, out);
