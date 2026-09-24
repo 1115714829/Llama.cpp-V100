@@ -217,6 +217,13 @@
 - **刀序（终版）**：① P-D3' 完成（host -8~11）② **P8 probabilistic draft 采样**（AL↑）③ 专用 decode 注意力核（重估）④ P5 小投影。
 - **P-D3' 剩余**：设备侧 5 层交错缓冲（batch 布局 [token][layer][dim] ⇒ 需 interleave 核或 backend 内 concat）+ speculative 指针直通 + 门值。
 
+- **R347 ★★ P8 首攻（LLAMA_SPEC_PROB=1 块游走 softmax 采样）判负：AL 2.95 vs 基线 3.43、每轮 78.2 vs 74.0 ⇒ 不采用；BL1 的 `probabilistic` 是别的机制（draft 自身采样/温度/top-k 方案），非游走处裸采样**（2026-09-25）
+
+- **实测（25K/gen96，2 臂 ×2 rep）**：A2（PROB=1）AL 3.56/2.34 = **2.95**、每轮 85.6/70.8 = **78.2**；B2（argmax 基线）AL 3.43/3.43 = **3.43**、每轮 80.5/67.6 = **74.0** ⇒ **采样让块内部一致性下降、接受率跌**。
+- **机制判读**：DFlash 的块是**联合生成**（in-place denoising + lattice walk），逐位独立采样破坏块的相干性 ⇒ AL 反降。BL1 的 `draft_sample_method=probabilistic` 须另找其真身（1cat `vllm/spec_decode` 的 draft 采样路径）再对齐。
+- **保留资产**：`LLAMA_SPEC_PROB=1` env（默认关 ✓ 生产零影响）+ `<random>` include ✓ 可复用作后续 draft 采样实验的基座。
+- **AL 刀序更新**：P8 的朴素形态入灰；改查 1cat 的 draft 采样真身（temperature/top-k/块级采样）后再试；P-D3'（host）仍为第一刀。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
