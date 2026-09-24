@@ -139,6 +139,14 @@
 - **P7 下一步（改图不弃图）**：decode 形状需要**专用小-M QK 路径**（M=6..48 的 GEMV 形态，1cat `sm70_grouped_long/scalar-attention.cu` 同构），或 cuBLAS 小-M 配置 + 入口加 `rows >= kMin`/`kv >= kMin` 下界（防 warmup 误入）；另注意 `kv_len % kBlockN != 0` 的尾块覆盖。
 - **工装新增**：门值 = P7 类改动的**第一判据**（引擎臂崩 = 当场撤），`t1c-gate.sh` 一次 ~2 min ✓ 已是标准流程。
 
+- **R336 ★★ P7 二攻：q=1（rows=6）正确性过门（带 env 门值 g1=g0=bcda0092 ✓），但 q=2（rows=12）cuBLAS QK 仍 status 13 ⇒ 算法阈值非真因（DEFAULT 亦败）⇒ 真因在 GEMM 尺寸/指针设置；env 门控保生产安全**（2026-09-25）
+
+- **正确性（关键里程碑）**：`LLAMA_SM70_79T_DECODE=1` 下门值 **g1 = g0 = bcda0092…**（131 字符）⇒ **decode 注意力经 T1-C 引擎与融合核逐位一致（q=1 口径）** ✓✓。
+- **性能 A/B（25K/gen96，2 臂 ×2 rep）**：arm P（decode 入引擎）**崩**（spec verify 的 q=2 形状 `launch cuBLAS raw QK: cuBLAS status 13`）；arm Q（基线）1901.5/2310.6 ms 正常 ⇒ **P7 未达性能判定条件**（门值已过但形状未全绿）。
+- **根因修正（不删史）**：R335 的"`rows%8`/`rows>=128` 阈值"**不是真因**——`CUBLAS_GEMM_DEFAULT` 对 rows=12 同样 EXECUTION_FAILED；真因在 GEMM 的尺寸/指针相关设置（q=1 rows=6 ✓ 过、q=2 rows=12 ✗ 败 = 尺寸相关）。下一步 = 在 `check()` 失败点打印 m/n/k/lda/ldb/ldc + A/B/C 指针与 `ws.qt/ws.kt/ws.scores` 尺寸，做 q=1 vs q=2 的最小对照。
+- **安全线**：decode 准入 = `LLAMA_SM70_79T_DECODE=1` env 门控（默认关）⇒ 生产路径零影响 ✓（stress arm Q 基线正常可证）。
+- **工装**：门值可带 env 跑（`LLAMA_SM70_79T_DECODE=1 bash t1c-gate.sh`）= P7 类改动的标准正确性检验 ✓。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
