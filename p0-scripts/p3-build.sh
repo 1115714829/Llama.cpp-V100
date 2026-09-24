@@ -34,6 +34,15 @@ fi
 if [ -f /tmp/p3-speculative.cpp ]; then
   sed 's/\r$//' /tmp/p3-speculative.cpp > common/speculative.cpp
 fi
+if [ -f /tmp/p3-llama-context.cpp ]; then
+  sed 's/\r$//' /tmp/p3-llama-context.cpp > src/llama-context.cpp
+fi
+if [ -f /tmp/p3-llama-context.h ]; then
+  sed 's/\r$//' /tmp/p3-llama-context.h > src/llama-context.h
+fi
+if [ -f /tmp/p3-llama-ext.h ]; then
+  sed 's/\r$//' /tmp/p3-llama-ext.h > src/llama-ext.h
+fi
 if [ -f /tmp/p3-ggml-cuda-cmakelists.txt ]; then
   sed 's/\r$//' /tmp/p3-ggml-cuda-cmakelists.txt > ggml/src/ggml-cuda/CMakeLists.txt
 fi

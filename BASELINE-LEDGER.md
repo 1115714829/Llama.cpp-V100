@@ -203,6 +203,13 @@
 - **方法论沉淀**：**动手前先 scoping**（P6 若直接开工会白做 ✓ 本轮用代码实读 + 逐算子名实证避免）✓。
 - **当前吐字线账（25K，68 ms/轮）**：target compute 36.9（提交阻塞 ~23 + GPU 13.8）+ 注入 13 + draft block 15.1 + selector 2.3 ✓；256K 86.8（GPU +13 KV）。
 
+- **R345 ★★ P-D3' 半程实施：设备特征 getter 链落地（`embd_layer_inp_dev` + `llama_get_embeddings_layer_inp_dev`，env `LLAMA_SPEC_DEVFEAT`）；工装缺口发现并修复（p3-build.sh 原不装 llama-context.*/llama-ext.h ⇒ 本轮改动一度是假绿）**（2026-09-25）
+
+- **已落（build 真绿 ✓）**：`llama-context.h` 成员 `embd_layer_inp_dev` + getter 声明；`llama-context.cpp` 的 resize + `extract_layer_inputs` 的 devfeat 分支（记录 `t->data` 设备指针、跳过 D2H）+ `get_embeddings_layer_inp_dev`；`llama-ext.h` C API 声明；`llama-context.cpp` C API 实现（**无 `synchronize()`** ✓）。
+- **剩余（下一轮）**：① 注入的 **5 层拼接设备缓冲**（batch 期望 [n_chunk, n_embd_enc] 连续 ⇒ 设备侧 concat 或 5×D2D）② `speculative.cpp` 注入段的指针直通（去 memcpy + 去 `llama_synchronize`）③ 门值 + `LLAMA_SPEC_TIMING`（sync→~0）+ 每轮 A/B（预期 **-8~11 ms/轮**）。
+- **⚠️ 工装缺口（已修）**：`p3-build.sh` 的 payload 位只覆盖 ggml-cuda + speculative ⇒ `src/llama-context.*`、`src/llama-ext.h` 的改动**不进 build**（"BUILD_RC=0" 假绿）⇒ 已补 3 个 payload 位 ✓。**教训：新改文件必须确认在 payload 名单内，否则 build 绿 = 无效判据**。
+- **门值纪律**：P-D3' 完成后必须过 `SPEC=1 bash t1c-gate.sh`（greedy sha）✓ 第一判据。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
