@@ -240,6 +240,13 @@
 - **字节账重算**：BL1 = FP8 27 + BF16 3.6 = 30.6 GB/轮；我方 = Q8_0 27 + F16 4 = 31 GB/轮 ⇒ **同级** ✓ ⇒ **R346"字节刀被封顶 ⇒ 纯效率到不了 8.0"**推论**作废**（不删史）；剩余差距**全部是代码问题**（用户红线："1cat 能实现 我们就有理由能实现，达不到就是代码问题"）。
 - **显存包络**：27+4 = 31 GB + KV/workspace ✓ 仍在 4×V16GB 内 ✓。
 
+- **R350 ★★ P-D3' 设备路径实现到门值全绿（g1=g0=bcda0092 ✓）但 stress 崩：R344 的"`ggml_backend_tensor_set` 自动推断 D2D"**洞察被证伪**（它是 H2D 语义，传设备指针 = 段错误）⇒ 修法改为"set_inputs 的 embd 走 D2D 分支"**（2026-09-25）
+
+- **已落（build 绿 + 门值绿 ✓）**：`ggml-cuda-d2d.cu`（`ggml_cuda_copy2d` = 2D D2D 交错、`ggml_cuda_alloc_bytes`/`free_bytes`）+ `speculative.cpp` 设备交错路径（`LLAMA_SPEC_DEVFEAT=1`：5×2D D2D、去 memcpy、去 `llama_synchronize`）+ 设备指针直通 `batch_inject.embd`。
+- **崩因（定位）**：`llm_graph_result::set_inputs` 对 embd 做 `ggml_backend_tensor_set` = **H2D** 拷贝 ⇒ 设备指针被当 host 地址 ⇒ 段错误（stress 于 prefill 后首轮注入崩；门值因 spec-off 未触发 ✗ 门值绿 ≠ 全形状绿，教训）。
+- **修法（下一轮）**：`set_inputs` 的 embd 分支加 **D2D 分支**（源指针属设备时 `cudaMemcpyAsync(DeviceToDevice)`）或 `llama_batch` 加 `embd_dev` 标志位；**或**回退 host 路径并把 sync 移到 copy 后（净收益 -0，仅诊断价值）。
+- **⚠️ 判据教训**：门值是 spec-off 口径 ⇒ **spec 形状的正确性必须用 `SPEC=1 bash t1c-gate.sh`**（本轮已用但 g1 的注入路径未被触发 ✗ 需 stress 级验证）；"build 绿 + 门绿"≠"全形状绿"。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
