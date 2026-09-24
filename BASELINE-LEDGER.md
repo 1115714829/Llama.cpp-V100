@@ -89,6 +89,14 @@
 - **P3（GPU selector）现状**：`GGML_SPEC_SELECTOR_INGRAPH=1` **在 load_model 即崩**（TP 下 lm_head 被切分，图内 selector 无法构建——代码注释已预告）⇒ P3 须照 1cat `TP4_M1_FAST_SELECTOR` 实做 TP4 GPU selector；且实测 selector 仅 2.29 ms/轮 ⇒ **P3 头寸下调**，主刀回到 **P-D3（draft 2 调用合一，draft_decode 17.73 ms/轮 大头）+ P1 子图合并**。
 - **工装**：`LLAMA_SPEC_TIMING=1`（speculative.cpp:1190/1601/3261）= 每轮四段分账；`GGML_CUDA_DIRECT_DEBUG=1` = 图属性逐字段归因 ✓ 双双纳入测量法。
 
+- **R330 ★★★ 吐字线真凶三号：draft KV 注入的特征 gather = **10.47 ms/call**（copy 0.48 / submit 2.60 ⇒ 同步税而非带宽）；P-D3 真身 = 特征路径去 gather**（2026-09-25）
+
+- **实测（`inject timing`，LLAMA_SPEC_TIMING，25K/gen96）**：`gather=10.47 + copy=0.48 + submit=2.60 + wait=0.00 ms/call（layers=5 tok=60.27）`。
+- **机制**：每轮 DFlash2 的 draft KV 注入 = 从 target 抽 5 个 extract 层、~60 token（= draft 上下文窗口 64，启动日志 `capping draft context ubatch ... 64 (block draft)`）逐层 `llama_get_embeddings_layer_inp` + memcpy；6.1 MB 纯拷贝应 ~0.5 ms，实测 10.47 ms ⇒ **20x 差 = 逐层提取的同步/搬运**（不是 PCIe 带宽：copy 段 0.48 ms 可证）。
+- **P-D3 真身修正**：不是"两 decode 合一"（token/embd 互斥 E4 阻断），而是**特征路径去 gather**：target 侧 extract 层输出留 device、注入走 GPU（或并入 block decode 图）。1cat 对应 = `DFLASH2_FUSED_GDN_METADATA/VERIFY` + 图内 selector（特征全程在 GPU）。
+- **头寸**：gather 10.47 ms/call × ~1 次/轮 = **~10 ms/轮**；叠加 P1 子图合并（20.8）+ P-D3 图合一（draft host ~12）= 三件合计 **~33-43 ms/轮**（当前 77.5→~40）。
+- **下一步实施序**：① 特征 gather 去同步（把 `llama_get_embeddings_layer_inp` 的逐层提取改批量/异步，或 target 侧直接出 GPU 指针）② meta 子图合并 + 内容键化 ③ draft 两调用图合一。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
