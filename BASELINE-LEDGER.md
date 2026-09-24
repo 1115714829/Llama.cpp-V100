@@ -210,6 +210,13 @@
 - **⚠️ 工装缺口（已修）**：`p3-build.sh` 的 payload 位只覆盖 ggml-cuda + speculative ⇒ `src/llama-context.*`、`src/llama-ext.h` 的改动**不进 build**（"BUILD_RC=0" 假绿）⇒ 已补 3 个 payload 位 ✓。**教训：新改文件必须确认在 payload 名单内，否则 build 绿 = 无效判据**。
 - **门值纪律**：P-D3' 完成后必须过 `SPEC=1 bash t1c-gate.sh`（greedy sha）✓ 第一判据。
 
+- **R346 ★★★ 战略账闭合：追平路径 = host 清零 + AL↑（字节刀被 Q8_0 验收封顶）；AL 的具体落点 = BL1 的 `draft_sample_method: probabilistic`（我方代码缺该机制）**（2026-09-25）
+
+- **战略推演（带宽核算，R333 延伸）**：BL1 轮 27.2 ms / 30 GB（NVFP4）= 1100 GB/s；我方轮地板 43 GB（Q8_0 27 + Q4_K_M 16）/ 1100 = **39 ms** ⇒ **字节刀被 Q8_0 验收纪律封顶 ⇒ 纯靠效率到不了 8.0 ms/token**。但 **AL 2.76→4.0（1.45x）正好抵消字节差 1.44x** ⇒ **追平 = host 清零（P-D3' 等，-10~15）+ AL↑（-1.2x）** ✓✓ 路径闭合。
+- **AL 落点（P8 具体化）**：BL1 的 `--speculative-config '{"method":"dflash",...,"draft_sample_method":"probabilistic"}'`（`vllm-1cat.service` 实读）；我方 `common/speculative.cpp` **无 sample_method 机制**（只有 `sample_from_anchor`/`block_size`/selector/walk）⇒ **probabilistic draft 采样 = AL 2.76→3.4+ 的候选刀** ✓（1cat 同构）。
+- **刀序（终版）**：① P-D3' 完成（host -8~11）② **P8 probabilistic draft 采样**（AL↑）③ 专用 decode 注意力核（重估）④ P5 小投影。
+- **P-D3' 剩余**：设备侧 5 层交错缓冲（batch 布局 [token][layer][dim] ⇒ 需 interleave 核或 backend 内 concat）+ speculative 指针直通 + 门值。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
