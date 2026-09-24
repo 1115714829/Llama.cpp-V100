@@ -565,7 +565,9 @@ static uint64_t ggml_gallocr_plan_key(
         const struct ggml_tensor * t = graph->nodes[i];
         h = h * 0x100000001b3ull + (uint64_t) t->type;
         h = h * 0x100000001b3ull + (uint64_t) t->op;
-        h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t->op_params[0];
+        // R302c-3: op_params excluded - per-call varying params churned the key
+        // and defeats adoption; placement depends on sizes/lifetimes only and
+        // plan_fits validates sizes on every load.
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
         h = h * 0x100000001b3ull + (uint64_t) (node_buffer_ids ? node_buffer_ids[i] : 0);
         for (int j = 0; j < GGML_MAX_SRC; j++) {
