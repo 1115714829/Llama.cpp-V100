@@ -16,6 +16,12 @@ if [ ! -f /tmp/p3-fattn-sm70-d256.cu ] || [ ! -f /tmp/p3-fattn-sm70-decomp.cuh ]
 fi
 sed 's/\r$//' /tmp/p3-fattn-sm70-d256.cu > ggml/src/ggml-cuda/fattn-sm70-d256.cu
 sed 's/\r$//' /tmp/p3-fattn-sm70-decomp.cuh > ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
+if [ -f /tmp/p3-fattn79t-prefill.cu ]; then
+  sed 's/\r$//' /tmp/p3-fattn79t-prefill.cu > ggml/src/ggml-cuda/fattn79t-prefill.cu
+fi
+if [ -f /tmp/p3-fattn79t-src.tgz ]; then
+  tar xzf /tmp/p3-fattn79t-src.tgz -C ggml/src/ggml-cuda/
+fi
 if [ -f /tmp/p3-ggml-alloc.c ]; then
   sed 's/\r$//' /tmp/p3-ggml-alloc.c > ggml/src/ggml-alloc.c
 fi
@@ -32,6 +38,9 @@ echo "SRC_MD5:"
 md5sum ggml/src/ggml-cuda/fattn-sm70-d256.cu ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
 echo "MARK_DECOMP_ENV=$(grep -c LLAMA_SM70_FA_DECOMP ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
 echo "MARK_WS=$(grep -c sm70_decomp_ws_reserve ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
+echo "MARK_T1C=$(grep -c 'T1C' ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
+echo "MARK_79T_FLAT=$(grep -c T1C_CHK ggml/src/ggml-cuda/fattn79t-prefill.cu || true)"
+echo "MARK_79T_OBJ=$(grep -c ggml-cuda-fattn79t ggml/src/ggml-cuda/CMakeLists.txt || true)"
 cmake --build build-instr -j128 --target llama-server llama-bench > "$MAKELOG" 2>&1
 BUILD_RC=$?
 echo "BUILD_RC=$BUILD_RC"
