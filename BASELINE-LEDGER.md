@@ -27,6 +27,7 @@
 - **分相账（q6=3072, kbn=512 浅段块）**：pack 0.32 / **qk 4.81** / soft 0.04 / rest 0.00 ms ⇒ QK GEMM 本体 0.805 GFLOP / 4.81 ms = **0.167 TFLOPS**（cuBLAS 该形状 = 小 N(512) 启发式塌方；softmax 无辜）。
 - **三重意涵**：① T2 慢的隐藏主凶补全（S 物化 + **每块 GEMM 小 N 形状塌方**双重税）；② Path A 融合内核（45.9 TFLOPS）**远超** GEMM 组合形态 = 融合 mma 形态本身就是当前水位的持有者；③ **P-P3-T 论证修正：cuBLAS 不是形态上限参考**（同形状更慢）⇒ 41% 峰值利用率或已是 m8n8k4 形状真实水位，显式 mma 空间须**内核内实验**（非 GEMM 对标）。
 - **待补**：深段块（kbn=24576）分相采样被 `nd<64` 截断（PPL 前 64 调用全浅段）——一行改深段采样定全形状结论。
+- **R304-P 补记（工具线插曲后收线）**：DPROF 探针在 llama-perplexity 第 ~65 调用（kv_len 首增处）稳定崩于 `ggml_cuda_compute_forward`（异步归因 = 探针自身路径，零块守卫不治根）；**无探针的 decomp 运行全部正常** ⇒ 探针之罪、计算无恙。64 条浅段样本有效（0.167 TFLOPS 结论保持）；深段数字**对 P-P3-T 判决非必需**（40:1 + 41% 峰值 + M1 已闭环）——**不再追探针，主线先行**。工具线战果：mcp-ssh 常驻 shell + tmux 具名会话 + 结束符秒查 = 新作业形态（长活 tmux、绝不久睡）。
 - 教训链补全："比率是数据" + "形状是数据"（GEMM 效率是形状的函数，微基准的形状组合必须逐一对齐生产负载——T2 用生产形状跑出 0.167 TFLOPS 即为实证）。
 
 - **T1 实现蓝图（作废：被 R303-R 证伪，只改灰不删）**：smem 50→82 KB ✓ 免缩 kBlockM；寄存器 ≈150→222 ✓ <256（minBlocks=1）；**配对陷阱已识别**：必须组内配对 `head_q = j·gqa + 2c' + pass`（跨界对 (5,6) 跨 kv-head 禁忌），grid.z' = hkv·gqa/2；**mask = 解析式因果**（:1016 `Mask<true,false,false>(kv_len, kv_len-kv_offset)`——sm70 内核不读 kq_mask 张量！T2 学到的张量 mask 语义不适用于此内核，重要辨析）；三接缝 = ① Q 暂存双 tile（sQ×2）② QK-softmax-PV 双 pass（acc_s 复用、row 状态/o_storage/P-smem 逐 pass）③ K/V 预取提至 n_block 顶（tKrKNext/tVrV0-1 加载一次、双 pass 共读 smem）；epilogue 逐 pass（row_sum allreduce + out 写带 `head_q = z'·2+kPass`）。
