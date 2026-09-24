@@ -1978,9 +1978,9 @@ struct CublasQKLauncher {
 
   void launch(cudaStream_t stream) const {
     check(cublasSetStream(handle, stream), "set cuBLAS QK stream");
-    // R335: Tensor Core algorithms reject small M (decode rows = q*heads_q = 6..48 ->
-    // cuBLAS status 13 EXECUTION_FAILED). Pick the default path when rows % 8 != 0.
-    cublasGemmAlgo_t qk_algorithm = (rows % 8 == 0) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT;
+    // R335: Tensor Core algorithms reject small M (cuBLAS status 13). Warmup and
+    // decode shapes have rows = q*heads_q < 128 -> default path.
+    cublasGemmAlgo_t qk_algorithm = (rows >= 128) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT;
     if (char const* runtime_algorithm =
             std::getenv("PREFIX_QK_CUBLAS_ALGO_RUNTIME")) {
       qk_algorithm =
@@ -3306,11 +3306,12 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                std::chrono::steady_clock::now() - t1c_t0)
         .count();
   };
-  // Segmentation tolerance: llama splits the prompt at batch boundaries, so a
-  // chunk is a multiple of 8 rather than of 256. The engine handles any row
-  // count; the 256K service shape lands on 2048.
+  // R335: decode admission is opt-in (LLAMA_SM70_79T_DECODE=1); rows>=128 keeps the
+  // Tensor Core QK path, smaller rows use the default cuBLAS algorithm.
+  static const bool t1c_decode_env = getenv("LLAMA_SM70_79T_DECODE") != nullptr;
   if (q == nullptr || k == nullptr || v == nullptr || out == nullptr ||
-      query_len <= 0 || query_len > 2048 || query_len % 8 != 0 ||
+      query_len <= 0 || query_len > 2048 ||
+      (query_len % 8 != 0 && !t1c_decode_env) ||
       kv_len < query_len || kv_len % 32 != 0 ||
       heads_q <= 0 || heads_kv <= 0 || heads_q % heads_kv != 0 ||
       heads_q / heads_kv != 6) {
@@ -3579,7 +3580,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                           rows, sub_n, kHeadDim, &alpha, ws.qt, CUDA_R_16F, rows,
                           ws.kt + (size_t) (begin + sub) * kHeadDim, CUDA_R_16F, kv_len, &beta,
                           ws.scores + (size_t) sub * rows, CUDA_R_16F, rows, CUBLAS_COMPUTE_16F,
-                          (rows % 8 == 0) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT);
+                          (rows >= 128) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT);
       if (cst != CUBLAS_STATUS_SUCCESS) break;
     }
     fprintf(stderr, "[T1C] t3qk-post cst=%d\n", (int) cst);

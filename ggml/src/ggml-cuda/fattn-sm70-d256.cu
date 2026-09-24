@@ -480,7 +480,9 @@ bool ggml_cuda_sm70_d256_supported(int cc, const ggml_tensor * dst) {
         sm70_d256_probe("REJECT: head_dim != 256", cc, Q, K, V, mask);
         return false;
     }
-    if (!mask || mask->ne[0] < 256 || Q->ne[1] < sm70_d256_min_q()) { // prefill only; decode/MTP/small batches -> stock (min_q=17 under FISHLIKEXIE_BLACK_MAGIC, else 256)
+    // R335: LLAMA_SM70_79T_DECODE=1 opts decode shapes into the T1-C engine.
+    static const bool t1c_decode = getenv("LLAMA_SM70_79T_DECODE") != nullptr;
+    if (!mask || mask->ne[0] < 256 || Q->ne[1] < (t1c_decode ? 1 : sm70_d256_min_q())) { // prefill only unless opted in
         sm70_d256_probe("REJECT: no mask or small batch", cc, Q, K, V, mask);
         return false;
     }
