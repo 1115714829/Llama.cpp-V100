@@ -21,6 +21,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -3110,11 +3111,12 @@ struct CublasTailSliceOperators {
 
 // T1-C local shape constants (shared section has no torch-half Workspace).
 static constexpr int kHeadDim = 256;
-static constexpr int kRows = 2048 * 6;
+static constexpr int kRows = 2048 * 6; // q x heads_q per group (Hq6/Hkv1)
 static constexpr int kBlockN = PREFIX_TORCH_BLOCK_N;
 static constexpr int kMaxTotalKV = 262144;
 
-// T1-C small transpose: (t,h,d) D-inner source -> [d, t*h] packed rows.
+// T1-C small transpose: (t,h,d) D-inner source -> cuBLAS column-major A view
+// [m=rows, k=256], lda=rows: element (row,d) at dd*rows + row (dim-major).
 __global__ void transpose_dh_t_kernel(const Element * src, Element * dst,
                                       int t, int h, int d, long total) {
   long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
@@ -3127,7 +3129,67 @@ __global__ void transpose_dh_t_kernel(const Element * src, Element * dst,
   dst[(long) dd * (t * h) + row] = src[i];
 }
 
-// T1-C finalize: vacc/psum * value_scale + value_center into half scratch.
+// T1-C Q transpose: F32 source [t][h][d] (D-inner) -> half A-view [d][rows],
+// row = t*hq + h. Verified against llama's Q nb: d*4 + t*(hq*1024) + h*1024.
+__global__ void t1c_q_f32_to_half_t(const float * src, Element * dst,
+                                    int t, int h, int d, long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % d);
+  const long th = i / d;
+  const int hh = (int) (th % h);
+  const long tt = th / h;
+  const long row = tt * h + hh;
+  dst[(long) dd * (t * h) + row] = (Element) src[i];
+}
+
+// T1-C K dequant + transpose: q8_0 [kv][256] (tok stride 8*34 B) -> half
+// column-major [d][kv] so cuBLAS reads B with ldb = kv_len.
+__global__ void t1c_k_q8_0_to_half_t(const char * src, Element * dst,
+                                     int kv_len, long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % kHeadDim);
+  const long tok = i / kHeadDim;
+  const char * blk = src + tok * ((kHeadDim / 32) * 34) + (dd / 32) * 34;
+  const float scale = __half2float(*(const __half *) blk);
+  const int q = (int) (signed char) blk[2 + (dd % 32)];
+  dst[(long) dd * kv_len + tok] = (Element) (scale * (float) q);
+}
+
+// T1-C V dequant: q8_0 [kv][256] -> half token-major [kv][256] (the layout
+// stable_value_center/amax/scale and the PV B-operand both expect).
+__global__ void t1c_v_q8_0_to_half(const char * src, Element * dst, long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % kHeadDim);
+  const long tok = i / kHeadDim;
+  const char * blk = src + tok * ((kHeadDim / 32) * 34) + (dd / 32) * 34;
+  const float scale = __half2float(*(const __half *) blk);
+  const int q = (int) (signed char) blk[2 + (dd % 32)];
+  dst[i] = (Element) (scale * (float) q);
+}
+
+// T1-C finalize+store: vacc/psum*scale+center -> strided FP32 dst [d, ...].
+__global__ void t1c_store_kernel(const float * vacc, const float * psum,
+                                 const float * center, const float * vmax,
+                                 float * out, int rows, int q_len, int heads_q,
+                                 int ld1, int ld2, int layout_t_major,
+                                 long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  int dd = (int) (i % kHeadDim);
+  int th = (int) (i / kHeadDim);
+  const long srow = (long) th * kHeadDim + dd; // scratch token-major
+  float denom = psum[th];
+  float scale = stable_value_scale(*vmax);
+  float value = denom > 0.0f ? vacc[srow] / denom * scale + center[dd] : 0.0f;
+  int t = th / heads_q;
+  int h = th % heads_q;
+  long off = layout_t_major ? (long) dd + (long) h * ld1 + (long) t * ld2
+                            : (long) dd + (long) t * ld1 + (long) h * ld2;
+  out[off] = value;
+}
 __global__ void t1c_finalize_kernel(const float * vacc, const float * psum,
                                     const float * center, const float * vmax,
                                     Element * out, int rows, long total) {
@@ -3136,56 +3198,113 @@ __global__ void t1c_finalize_kernel(const float * vacc, const float * psum,
   int d = (int) (i % kHeadDim);
   int row = (int) (i / kHeadDim);
   float denom = psum[row];
-  float scale = fmaxf(*vmax, 1.0f);
-  int exponent;
-  float mantissa = frexpf(scale, &exponent);
-  scale = ldexpf(1.0f, exponent - (mantissa == 0.5f)) * 64.0f;
+  float scale = stable_value_scale(*vmax);
   float value = denom > 0.0f ? vacc[i] / denom * scale + center[d] : 0.0f;
   out[i] = (Element) value;
 }
 
-// T1-C triangular tail mask: scores[row, col] invalid where global col > global row.
+// T1-C reverse transpose: token-major [rows,256] scratch -> llama [d, t*h].
+__global__ void transpose_tt_dh_kernel(const Element * src, Element * dst,
+                                       int t, int h, int d, long total) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % d);
+  const long th = i / d;
+  const int hh = (int) (th % h);
+  const long tt = th / h;
+  const long row = tt * h + hh;
+  dst[i] = src[row * d + dd];
+}
+
+// T1-C non-finite scan: counts Inf/NaN bit patterns. Prints only when dirty, so
+// the log names the first buffer that loses finiteness.
+__global__ void t1c_bad_count_u16(const unsigned short * p, long n, int * out) {
+  for (long j = (long) blockIdx.x * blockDim.x + threadIdx.x; j < n;
+       j += (long) blockDim.x * gridDim.x) {
+    if ((p[j] & 0x7C00u) == 0x7C00u) atomicAdd(out, 1);
+  }
+}
+
+__global__ void t1c_bad_count_u32(const unsigned int * p, long n, int * out) {
+  for (long j = (long) blockIdx.x * blockDim.x + threadIdx.x; j < n;
+       j += (long) blockDim.x * gridDim.x) {
+    if ((p[j] & 0x7F800000u) == 0x7F800000u) atomicAdd(out, 1);
+  }
+}
+
+// T1-C triangular tail mask: scores[row, col] is invalid where the column token
+// exceeds the row's query token. Scores are column-major with stride rows and
+// each query token owns heads_q consecutive rows.
 __global__ void t1c_tail_tri_mask(ScoreElement * scores, int rows, int width,
-                                  int row_base, int col_base) {
+                                  int heads_q) {
   long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
   long total = (long) rows * width;
   if (i >= total) return;
-  int col = (int) (i % width);
-  int row = (int) (i / width);
-  long grow = (long) row_base + row;
-  long gcol = (long) col_base + col;
-  if (gcol > grow) {
-    scores[i] = (ScoreElement) (-INFINITY);
+  long row = i % rows;
+  long col = i / rows;
+  if (col > row / heads_q) {
+    reinterpret_cast<unsigned short *>(scores)[i] = 0xFC00u; // half -inf bits
   }
 }
 
 // T1-C entry: stateful per-ub prefix engine inside the anonymous namespace
 // so the launchers/kernels above are reachable. Folds one query segment into
 // (state_max, state_sum) online - llama chunked prefill semantics.
+#define T1C_CHK(tag) do { \
+    cudaError_t t1c_e_ = cudaGetLastError(); \
+    if (t1c_e_ != cudaSuccess) { \
+      fprintf(stderr, "[T1C] ERR %s: %s\n", (tag), cudaGetErrorString(t1c_e_)); \
+    } \
+  } while (0)
+
 extern "C" cudaError_t onecat_79t_prefill_q2048(
     const void * q, const void * k, const void * v,
     float * state_max, float * state_sum, void * out,
     int query_len, int kv_len, int heads_q, int heads_kv,
     float softmax_scale, cudaStream_t stream) {
+  const void * q0 = q; const void * k0 = k; const void * v0 = v;
+  void * out0 = out;
+  const long dst_ne1 = (long) state_max[0];
+  const long dst_nb1 = (long) (state_max[1] * sizeof(float));
+  const long dst_nb2 = (long) (state_max[2] * sizeof(float));
+  const bool t1c_verbose = getenv("T1C_DUMP") != nullptr;
+  if (t1c_verbose) {
+    fprintf(stderr, "[T1C] ABI recv ptr=%p v0=%g\n", (void *) state_max,
+            (double) state_max[0]);
+  }
+  const auto t1c_t0 = std::chrono::steady_clock::now();
+  int t1c_dev = 0;
+  cudaGetDevice(&t1c_dev);
+  auto t1c_ms = [&t1c_t0]() {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - t1c_t0)
+        .count();
+  };
+  // Segmentation tolerance: llama splits the prompt at batch boundaries, so a
+  // chunk is a multiple of 8 rather than of 256. The engine handles any row
+  // count; the 256K service shape lands on 2048.
   if (q == nullptr || k == nullptr || v == nullptr || out == nullptr ||
-      query_len <= 0 || query_len > 2048 || query_len % 256 != 0 ||
+      query_len <= 0 || query_len > 2048 || query_len % 8 != 0 ||
       kv_len < query_len || kv_len % 32 != 0 ||
       heads_q <= 0 || heads_kv <= 0 || heads_q % heads_kv != 0 ||
       heads_q / heads_kv != 6) {
+    if (t1c_verbose) {
+      fprintf(stderr, "[T1C] admit-miss q=%d kv=%d hq=%d hkv=%d\n", query_len,
+              kv_len, heads_q, heads_kv);
+    }
     return cudaErrorNotSupported;
   }
-  const int rows = query_len * 6;
+  const int rows = query_len * heads_q;
   const int prefix = kv_len - query_len;
-  {
-    const int rows_h = rows;
-    cudaMemcpyToSymbol(g_rows, &rows_h, sizeof(rows_h));
-  }
+  T1C_CHK("s0-entry");
   // Per-device resident workspace.
   struct EntryWS {
     Element * qt; Element * kt; ScoreElement * scores;
     float * num; float * bsum; float * bmax;
     float * psum; float * pmax; float * mpart; float * vacc;
-    Element * vscaled; float * vcenter; float * vmax;
+    Element * vscaled; Element * vhalf; float * vcenter; float * vmax;
+    int * ctr;
+    void * hsym;
     cublasHandle_t cublas;
     size_t cap;
   };
@@ -3197,13 +3316,17 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
     int dev = 0;
     cudaGetDevice(&dev);
     EntryWS & slot = ws_map[dev];
-    const size_t need =
-        sizeof(Element) * kHeadDim * size_t(kRows) * 2 +
-        sizeof(ScoreElement) * size_t(kBlockN) * kRows +
-        sizeof(float) * kRows * (kHeadDim * 2 + 5) +
-        sizeof(float) * 16 * kRows +
-        sizeof(Element) * size_t(kMaxTotalKV) * kHeadDim +
-        sizeof(float) * (kHeadDim + 1);
+    const size_t sz_qt     = sizeof(Element) * kHeadDim * (size_t) kRows;
+    const size_t sz_kt     = sizeof(Element) * kHeadDim * (size_t) kMaxTotalKV;
+    const size_t sz_scores = sizeof(ScoreElement) * (size_t) kBlockN * kRows;
+    const size_t sz_num    = sizeof(float) * (size_t) kRows * kHeadDim;
+    const size_t sz_row    = sizeof(float) * (size_t) kRows;
+    const size_t sz_mpart  = sizeof(float) * 4 * (size_t) kRows;
+    const size_t sz_vacc   = sizeof(float) * (size_t) kRows * kHeadDim;
+    const size_t sz_vhalf  = sizeof(Element) * (size_t) kMaxTotalKV * kHeadDim;
+    const size_t sz_vc     = sizeof(float) * (kHeadDim + 1) + sizeof(int) * 4;
+    const size_t need = sz_qt + sz_kt + sz_scores + sz_num + 4 * sz_row +
+                        sz_mpart + sz_vacc + 2 * sz_vhalf + sz_vc;
     if (slot.cap < need) {
       char * base = nullptr;
       if (cudaMalloc(&base, need) != cudaSuccess) {
@@ -3211,19 +3334,26 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
       }
       char * p = base;
       auto take = [&](size_t b) { void * o = p; p += b; return o; };
-      slot.qt    = (Element *) take(sizeof(Element) * kHeadDim * kRows);
-      slot.kt    = (Element *) take(sizeof(Element) * kHeadDim * kRows);
-      slot.scores= (ScoreElement *) take(sizeof(ScoreElement) * size_t(kBlockN) * kRows);
-      slot.num   = (float *) take(sizeof(float) * kRows * kHeadDim);
-      slot.bsum  = (float *) take(sizeof(float) * kRows);
-      slot.bmax  = (float *) take(sizeof(float) * kRows);
-      slot.psum  = (float *) take(sizeof(float) * kRows);
-      slot.pmax  = (float *) take(sizeof(float) * kRows);
-      slot.mpart = (float *) take(sizeof(float) * 16 * kRows);
-      slot.vacc  = (float *) take(sizeof(float) * kRows * kHeadDim);
-      slot.vscaled = (Element *) take(sizeof(Element) * kMaxTotalKV * kHeadDim);
+      slot.qt    = (Element *) take(sz_qt);
+      slot.kt    = (Element *) take(sz_kt);
+      slot.scores= (ScoreElement *) take(sz_scores);
+      slot.num   = (float *) take(sz_num);
+      slot.bsum  = (float *) take(sz_row);
+      slot.bmax  = (float *) take(sz_row);
+      slot.psum  = (float *) take(sz_row);
+      slot.pmax  = (float *) take(sz_row);
+      slot.mpart = (float *) take(sz_mpart);
+      slot.vacc  = (float *) take(sz_vacc);
+      slot.vscaled = (Element *) take(sz_vhalf);
+      slot.vhalf   = (Element *) take(sz_vhalf);
       slot.vcenter = (float *) take(sizeof(float) * kHeadDim);
       slot.vmax  = (float *) take(sizeof(float));
+      slot.ctr   = (int *) take(sizeof(int) * 4);
+      if (cudaMallocHost(&slot.hsym, 2 * sizeof(float *) + 2 * sizeof(int)) !=
+          cudaSuccess) {
+        slot.hsym = nullptr;
+        return cudaErrorMemoryAllocation;
+      }
       slot.cap   = need;
     }
     if (slot.cublas == nullptr) {
@@ -3231,102 +3361,390 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
     }
     ws = slot;
   }
-  // 1) Transpose Q [d,h,t] (D-inner) into qt [256, rows]; K prefix into kt.
-  //    rows are ordered (t,h): row = t*6 + h for the GQA-packed M dimension.
+  auto t1c_scan16 = [&](char const * tag, void const * p, long n) {
+    if (!t1c_verbose) return;
+    cudaMemsetAsync(ws.ctr, 0, sizeof(int), stream);
+    t1c_bad_count_u16<<<256, 256, 0, stream>>>((unsigned short const *) p, n,
+                                               ws.ctr);
+    int bad = 0;
+    cudaMemcpyAsync(&bad, ws.ctr, sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    if (bad != 0) fprintf(stderr, "[T1C] BAD16 %s n=%ld bad=%d\n", tag, n, bad);
+  };
+  auto t1c_scan32 = [&](char const * tag, void const * p, long n) {
+    if (!t1c_verbose) return;
+    cudaMemsetAsync(ws.ctr, 0, sizeof(int), stream);
+    t1c_bad_count_u32<<<256, 256, 0, stream>>>((unsigned int const *) p, n,
+                                               ws.ctr);
+    int bad = 0;
+    cudaMemcpyAsync(&bad, ws.ctr, sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    if (bad != 0) fprintf(stderr, "[T1C] BAD32 %s n=%ld bad=%d\n", tag, n, bad);
+  };
+  t1c_scan32("q_in", q, (long) rows * kHeadDim);
+  // 1) Sources: Q is F32 [t][h][d]; K/V are Q8_0 [kv][256] (tok stride 272 B).
   {
     const int threads = 256;
     const long total = (long) rows * kHeadDim;
-    transpose_dh_t_kernel<<<(int) ((total + threads - 1) / threads), threads, 0, stream>>>(
-        (const Element *) q, ws.qt, query_len, heads_q, kHeadDim, total);
-    const long ktotal = (long) prefix * kHeadDim;
-    if (prefix > 0) {
-      transpose_dh_t_kernel<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
-          (const Element *) k, ws.kt, prefix, heads_kv, kHeadDim, ktotal);
+    t1c_q_f32_to_half_t<<<(int) ((total + threads - 1) / threads), threads, 0, stream>>>(
+        (const float *) q, ws.qt, query_len, heads_q, kHeadDim, total);
+    if (t1c_verbose) {
+      cudaStreamSynchronize(stream);
+      fprintf(stderr, "[T1C] s1a q-trans t=%.1fms\n", t1c_ms());
+    }
+    const long ktotal = (long) kv_len * kHeadDim;
+    if (ktotal > 0) {
+      t1c_k_q8_0_to_half_t<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+          (const char *) k, ws.kt, kv_len, ktotal);
+      t1c_v_q8_0_to_half<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+          (const char *) v, ws.vhalf, ktotal);
+    }
+    if (t1c_verbose) {
+      cudaStreamSynchronize(stream);
+      fprintf(stderr, "[T1C] s1b kv-deq t=%.1fms\n", t1c_ms());
     }
   }
+  T1C_CHK("s1-qtrans");
+  T1C_CHK("s1-kdeq");
+  T1C_CHK("s1-vdeq");
+  if (t1c_verbose) cudaStreamSynchronize(stream);
+  T1C_CHK("s1-sync");
+  t1c_scan16("qt", ws.qt, (long) rows * kHeadDim);
+  t1c_scan16("kt", ws.kt, (long) kv_len * kHeadDim);
+  t1c_scan16("vhalf", ws.vhalf, (long) kv_len * kHeadDim);
+  if (t1c_verbose) fprintf(stderr, "[T1C] stage1 transpose done t=%.1fms\n", t1c_ms());
+  if (getenv("T1C_STAGE_STOP") != nullptr && atoi(getenv("T1C_STAGE_STOP")) == 1) return cudaSuccess;
+  // 1.5) Kernel-visible symbols and V guards. Both are prerequisites of the
+  // prefix PV: its epilogue reads g_row_max and writes g_row_sum_out, and its B
+  // operand is the scaled V, so the guards must run before the first PV launch.
+  {
+    // Pinned per-device host slots: the async symbol copies outlive this frame
+    // once the per-call stream syncs are gone.
+    float ** h = (float **) ws.hsym;
+    int * hi = (int *) (h + 2);
+    h[0] = ws.bmax;
+    h[1] = ws.bsum;
+    hi[0] = 0;
+    hi[1] = rows;
+    cudaMemcpyToSymbolAsync(g_rows, &hi[1], sizeof(int), 0,
+                            cudaMemcpyHostToDevice, stream);
+    cudaMemcpyToSymbolAsync(g_row_max, &h[0], sizeof(float *), 0,
+                            cudaMemcpyHostToDevice, stream);
+    cudaMemcpyToSymbolAsync(g_row_sum_out, &h[1], sizeof(float *), 0,
+                            cudaMemcpyHostToDevice, stream);
+    cudaMemcpyToSymbolAsync(g_pv_task_base, &hi[0], sizeof(int), 0,
+                            cudaMemcpyHostToDevice, stream);
+    cudaMemsetAsync(ws.bsum, 0, sizeof(float) * rows, stream);
+    cudaMemsetAsync(ws.psum, 0, sizeof(float) * rows, stream);
+    cudaMemsetAsync(ws.vmax, 0, sizeof(float), stream);
+    const long v_elements = (long) kv_len * kHeadDim;
+    stable_value_center<<<1, 256, 0, stream>>>(
+        reinterpret_cast<__half const *>(ws.vhalf), ws.vcenter, kv_len);
+    stable_value_amax<<<256, 256, 0, stream>>>(
+        reinterpret_cast<__half const *>(ws.vhalf), ws.vcenter, ws.vmax,
+        (int) v_elements);
+    stable_scale_values<<<256, 256, 0, stream>>>(
+        reinterpret_cast<__half const *>(ws.vhalf),
+        reinterpret_cast<__half *>(ws.vscaled), ws.vcenter, ws.vmax,
+        (int) v_elements);
+  }
+  T1C_CHK("s15-guards");
+  if (t1c_verbose) cudaStreamSynchronize(stream);
+  T1C_CHK("s15-sync");
+  if (t1c_verbose) fprintf(stderr, "[T1C] stage1b guards done t=%.1fms\n", t1c_ms());
   // 2) 24K prefix blocks: QK -> block max -> FP32 PV -> online merge.
   const int n_blocks = (prefix + kBlockN - 1) / kBlockN;
   for (int b = 0; b < n_blocks; ++b) {
     const int begin = b * kBlockN;
     const int width = std::min(kBlockN, prefix - begin);
-    CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + (size_t) begin * kHeadDim,
-                        ws.scores, rows, width, rows, prefix};
+    CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + begin,
+                        ws.scores, rows, width, rows, kv_len};
     qk.launch(stream);
+    T1C_CHK("s2-qk");
+    if (t1c_verbose) {
+      cudaStreamSynchronize(stream);
+      T1C_CHK("s2-qk-sync");
+      fprintf(stderr, "[T1C] t2qk cst-ok\n");
+      t1c_scan16("scores_blk", ws.scores, (long) rows * width);
+    }
     const int tiles = (width + 8191) / 8192;
     stable_row_max_partials<false>
         <<<dim3((rows + 255) / 256, tiles), 128, 0, stream>>>(
             reinterpret_cast<__half const *>(ws.scores), ws.mpart, rows, width);
     stable_finish_max<<<(rows + 255) / 256, 256, 0, stream>>>(
         ws.mpart, ws.bmax, rows, tiles);
+    T1C_CHK("s2-rowmax");
     PrefixFloatPVLauncher pv(ws.scores,
                              reinterpret_cast<Element *>(ws.vscaled) + (size_t) begin * kHeadDim,
                              ws.num, rows, width, false);
     pv.launch(stream);
+    T1C_CHK("s2-pv");
     stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
         reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
         ws.vacc, ws.psum, ws.pmax, b == 0);
+    T1C_CHK("s2-merge");
   }
-  // 2.5) V guards: per-dim center, residual amax, exact-power-of-two scaling.
-  const long v_elements = (long) kv_len * kHeadDim;
-  {
-    stable_value_center<<<1, 256, 0, stream>>>(
-        reinterpret_cast<__half const *>(v), ws.vcenter, kv_len);
-    cudaMemsetAsync(ws.vmax, 0, sizeof(float), stream);
-    stable_value_amax<<<256, 256, 0, stream>>>(
-        reinterpret_cast<__half const *>(v), ws.vcenter, ws.vmax,
-        (int) v_elements);
-    stable_scale_values<<<256, 256, 0, stream>>>(
-        reinterpret_cast<__half const *>(v),
-        reinterpret_cast<__half *>(ws.vscaled), ws.vcenter, ws.vmax,
-        (int) v_elements);
-  }
-  // 3) Triangular tail = one more masked block over the segment's own kv slice.
+  if (t1c_verbose) cudaStreamSynchronize(stream);
+  T1C_CHK("s2b-sync");
+  t1c_scan32("vacc_pre", ws.vacc, (long) rows * kHeadDim);
+  t1c_scan32("psum_pre", ws.psum, rows);
+  t1c_scan32("bmax_pre", ws.bmax, rows);
+  if (t1c_verbose) fprintf(stderr, "[T1C] stage2b prefix loop done n_blocks=%d t=%.1fms\n", n_blocks, t1c_ms());
+  if (getenv("T1C_STAGE_STOP") != nullptr && atoi(getenv("T1C_STAGE_STOP")) == 2) return cudaSuccess;
+  // 3) Triangular tail = the chunk's own diagonal block. Masked QK -> row max
+  //    -> FP32 PV -> online merge, same stable-rows scheme as the prefix blocks.
   {
     const int begin = prefix;
-    CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + (size_t) begin * kHeadDim,
-                        ws.scores, rows, query_len, rows, prefix};
+    const int width = query_len;
+    CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + begin,
+                        ws.scores, rows, width, rows, kv_len};
     qk.launch(stream);
+    T1C_CHK("s3-qk");
+    t1c_scan16("scores_tail", ws.scores, (long) rows * width);
+    const int threads = 256;
+    const long total = (long) rows * width;
+    t1c_tail_tri_mask<<<(int) ((total + threads - 1) / threads), threads, 0,
+                        stream>>>(ws.scores, rows, width, heads_q);
+    T1C_CHK("s3-mask");
+    const int tiles = (width + 8191) / 8192;
+    stable_row_max_partials<false>
+        <<<dim3((rows + 255) / 256, tiles), 128, 0, stream>>>(
+            reinterpret_cast<__half const *>(ws.scores), ws.mpart, rows, width);
+    stable_finish_max<<<(rows + 255) / 256, 256, 0, stream>>>(
+        ws.mpart, ws.bmax, rows, tiles);
+    T1C_CHK("s3-rowmax");
+    PrefixFloatPVLauncher pv(ws.scores,
+                             reinterpret_cast<Element *>(ws.vscaled) + (size_t) begin * kHeadDim,
+                             ws.num, rows, width, false);
+    pv.launch(stream);
+    T1C_CHK("s3-pv");
+    stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
+        reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
+        ws.vacc, ws.psum, ws.pmax, n_blocks == 0);
+    T1C_CHK("s3-merge");
+    t1c_scan32("vacc_tail", ws.vacc, (long) rows * kHeadDim);
+    t1c_scan32("psum_tail", ws.psum, rows);
+    if (t1c_verbose) {
+      fprintf(stderr, "[T1C] t3 tail done begin=%d w=%d t=%.1fms\n", begin,
+              width, t1c_ms());
+    }
+  }
+#if 0
+  {
+    const int begin = prefix;
+    fprintf(stderr, "[T1C] t3qk-pre begin=%d w=%d ldb=%d\n", begin, query_len, kv_len);
+    cublasSetStream(ws.cublas, stream);
+    __half alpha = __float2half(0.0625f);
+    __half beta = __float2half(0.0f);
+    cublasStatus_t cst = CUBLAS_STATUS_SUCCESS;
+    for (int sub = 0; sub < query_len; sub += 512) {
+      const int sub_n = sub + 512 <= query_len ? 512 : query_len - sub;
+      cst = cublasGemmEx(ws.cublas, CUBLAS_OP_N, CUBLAS_OP_T,
+                          rows, sub_n, kHeadDim, &alpha, ws.qt, CUDA_R_16F, rows,
+                          ws.kt + (size_t) (begin + sub) * kHeadDim, CUDA_R_16F, kv_len, &beta,
+                          ws.scores + (size_t) sub * rows, CUDA_R_16F, rows, CUBLAS_COMPUTE_16F,
+                          CUBLAS_GEMM_ALGO9_TENSOR_OP);
+      if (cst != CUBLAS_STATUS_SUCCESS) break;
+    }
+    fprintf(stderr, "[T1C] t3qk-post cst=%d\n", (int) cst);
     const int threads = 256;
     long total = (long) rows * query_len;
     t1c_tail_tri_mask<<<(int) ((total + threads - 1) / threads), threads, 0,
                         stream>>>(ws.scores, rows, query_len, 0, prefix);
-    stable_row_max_partials<true>
+    cudaDeviceSynchronize();
+    fprintf(stderr, "[T1C] t3a mask done\n");
+    stable_row_max_partials<false>
         <<<dim3((rows + 255) / 256, (query_len + 8191) / 8192), 128, 0,
            stream>>>(
             reinterpret_cast<__half const *>(ws.scores), ws.mpart, rows,
             query_len);
     stable_finish_max<<<(rows + 255) / 256, 256, 0, stream>>>(
         ws.mpart, ws.bmax, rows, (query_len + 8191) / 8192);
+    cudaDeviceSynchronize();
+    fprintf(stderr, "[T1C] t3b qk-max done\n");
     PrefixFloatPVLauncher pv(
         ws.scores,
         reinterpret_cast<Element *>(ws.vscaled) + (size_t) begin * kHeadDim,
         ws.num, rows, query_len, false);
     pv.launch(stream);
+    cudaDeviceSynchronize();
+    fprintf(stderr, "[T1C] t3c pv done\n");
     stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
         reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
         ws.vacc, ws.psum, ws.pmax, n_blocks == 0);
+    cudaDeviceSynchronize();
+    fprintf(stderr, "[T1C] t3d tail-merge done\n");
   }
+#endif
+  if (t1c_verbose) cudaStreamSynchronize(stream);
+  if (t1c_verbose) fprintf(stderr, "[T1C] stage3 tail done\n");
+  if (getenv("T1C_STAGE_STOP") != nullptr && atoi(getenv("T1C_STAGE_STOP")) == 3) return cudaSuccess;
   // 4) Final normalize: out = vacc / psum * value_scale + value_center, then
   //    transpose back to llama layout [d, t*h]; export row stats.
+  if (getenv("T1C_IDENTITY") != nullptr) {
+    const int threads = 256;
+    long total = (long) rows * kHeadDim;
+    transpose_dh_t_kernel<<<(int) ((total + threads - 1) / threads), threads, 0,
+                            stream>>>((const Element *) q, (Element *) out,
+                                      query_len, heads_q, kHeadDim, total);
+    cudaDeviceSynchronize();
+    fprintf(stderr, "[T1C] IDENTITY passthrough\n");
+    return cudaSuccess;
+  }
+  if (getenv("T1C_DUMP") != nullptr) {
+    cudaStreamSynchronize(stream);
+    float buf[8];
+    fprintf(stderr, "[T1C] rows=%d prefix=%d kv=%d\n", rows, prefix, kv_len);
+    cudaMemcpy(buf, ws.qt, sizeof(buf), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "[T1C] qt:");
+    for (int i = 0; i < 8; ++i) fprintf(stderr, " %+.4f", (float) buf[i]);
+    cudaMemcpy(buf, ws.scores, sizeof(buf), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "\n[T1C] sc:");
+    for (int i = 0; i < 8; ++i) fprintf(stderr, " %+.4f", (float) buf[i]);
+    cudaMemcpy(buf, ws.psum, sizeof(buf), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "\n[T1C] psum:");
+    for (int i = 0; i < 4; ++i) fprintf(stderr, " %+.6f", buf[i]);
+    cudaMemcpy(buf, ws.pmax, sizeof(buf), cudaMemcpyDeviceToHost);
+    fprintf(stderr, " pmax:");
+    for (int i = 0; i < 4; ++i) fprintf(stderr, " %+.4f", buf[i]);
+    cudaMemcpy(buf, ws.vacc, sizeof(buf), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "\n[T1C] vacc:");
+    for (int i = 0; i < 8; ++i) fprintf(stderr, " %+.6f", buf[i]);
+    cudaMemcpy(buf, ws.vcenter, sizeof(float) * 4, cudaMemcpyDeviceToHost);
+    fprintf(stderr, "\n[T1C] vcenter:");
+    for (int i = 0; i < 4; ++i) fprintf(stderr, " %+.4f", buf[i]);
+    float vm = 0;
+    cudaMemcpy(&vm, ws.vmax, sizeof(float), cudaMemcpyDeviceToHost);
+    fprintf(stderr, " vmax=%+.4f\n", vm);
+  }
   {
     const int threads = 256;
     long total = (long) rows * kHeadDim;
-    t1c_finalize_kernel<<<(int) ((total + threads - 1) / threads), threads, 0,
-                          stream>>>(ws.vacc, ws.psum, ws.vcenter, ws.vmax,
-                                    ws.qt, rows, total);
-    transpose_dh_t_kernel<<<(int) ((total + threads - 1) / threads), threads, 0,
-                            stream>>>(ws.qt, (Element *) out, query_len, heads_q,
-                                      kHeadDim, total);
+    // Tight llama dst layout [d,h,t]: (d,h,t) at d + h*256 + t*256*heads_q.
+    // Strides are pure geometry - the meta channel is not needed at all.
+    const int ld1 = kHeadDim;
+    const int ld2 = kHeadDim * heads_q;
+    t1c_store_kernel<<<(int) ((total + threads - 1) / threads), threads, 0,
+                       stream>>>(ws.vacc, ws.psum, ws.vcenter, ws.vmax,
+                                 (float *) out, rows, query_len, heads_q,
+                                 ld1, ld2, 1, total);
+  T1C_CHK("s4-store");
+  if (t1c_verbose) cudaStreamSynchronize(stream);
+  T1C_CHK("s4-store-sync");
+  t1c_scan32("out", out, (long) rows * kHeadDim);
+  if (t1c_verbose) {
+    fprintf(stderr, "[T1C] store done ld1=%d ld2=%d g-loop t=%.1fms\n", ld1, ld2, t1c_ms());
   }
-  if (state_max != nullptr) {
-    cudaMemcpyAsync(state_max, ws.pmax, sizeof(float) * rows,
-                    cudaMemcpyDeviceToDevice, stream);
+  if (t1c_verbose) {
+    float obuf[8] = {0};
+    cudaMemcpy(obuf, out, sizeof(obuf), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "[T1C] out:");
+    for (int i = 0; i < 8; ++i) fprintf(stderr, " %+.5f", obuf[i]);
+    fprintf(stderr, "\n");
   }
-  if (state_sum != nullptr) {
-    cudaMemcpyAsync(state_sum, ws.psum, sizeof(float) * rows,
-                    cudaMemcpyDeviceToDevice, stream);
-  }
+  } // end group loop
+  // The state export of the torch endpoint is not used here: llama's dispatch
+  // owns the destination tensor and the caller-side state arrays are 24 floats,
+  // not rows-sized scratch.
   (void) softmax_scale;
+  T1C_CHK("s5-exit");
+  // Host-side reference for one (token, head) row: dequant q8_0 K/V, plain causal
+  // softmax, weighted V. The center/value_scale of the stable-rows scheme cancel,
+  // so the engine's out row must equal this weighted mean.
+  if (getenv("T1C_REF") != nullptr) {
+    static int t1c_ref_calls = 0;
+    const int ref_max = getenv("T1C_REF_MAX") ? atoi(getenv("T1C_REF_MAX")) : 8;
+    static const int kRefT[6] = {0, 0, 1, 1000, 2047, 2047};
+    static const int kRefH[6] = {0, 5, 0, 0, 0, 5};
+    if (t1c_ref_calls++ < ref_max) {
+      cudaStreamSynchronize(stream);
+      auto h2f = [](unsigned short h) {
+        const unsigned int sign = (h >> 15) & 1u;
+        const unsigned int expo = (h >> 10) & 0x1Fu;
+        const unsigned int man  = h & 0x3FFu;
+        unsigned int bits;
+        if (expo == 0) {
+          if (man == 0) return sign ? -0.0f : 0.0f;
+          const float v = man * 5.9604644775390625e-08f;
+          return sign ? -v : v;
+        }
+        if (expo == 31) {
+          bits = (sign << 31) | 0x7F800000u | (man << 13);
+        } else {
+          bits = (sign << 31) | ((expo + 112) << 23) | (man << 13);
+        }
+        float out_v;
+        memcpy(&out_v, &bits, 4);
+        return out_v;
+      };
+      std::vector<unsigned char> kvraw((size_t) kv_len * 272 * 2);
+      unsigned char * kb = kvraw.data();
+      unsigned char * vb = kvraw.data() + (size_t) kv_len * 272;
+      cudaMemcpy(kb, k, (size_t) kv_len * 272, cudaMemcpyDeviceToHost);
+      cudaMemcpy(vb, v, (size_t) kv_len * 272, cudaMemcpyDeviceToHost);
+      fprintf(stderr, "[T1C] REF call=%d q=%d kv=%d prefix=%d\n",
+              t1c_ref_calls - 1, query_len, kv_len, prefix);
+      for (int r = 0; r < 6; ++r) {
+        const int t0 = kRefT[r], h0 = kRefH[r];
+        if (t0 >= query_len || h0 >= heads_q) continue;
+        std::vector<float> qrow(kHeadDim);
+        cudaMemcpy(qrow.data(),
+                   (const float *) q + (size_t) h0 * kHeadDim +
+                       (size_t) t0 * 1536,
+                   sizeof(float) * kHeadDim, cudaMemcpyDeviceToHost);
+        const int nvalid = prefix + t0 + 1;
+        std::vector<float> sc(nvalid);
+        float m = -1e30f;
+        for (int j = 0; j < nvalid; ++j) {
+          const unsigned char * blk = kb + (size_t) j * 272;
+          float s = 0.0f;
+          for (int d = 0; d < kHeadDim; ++d) {
+            const unsigned char * b = blk + (d / 32) * 34;
+            s += qrow[d] * (h2f(*(const unsigned short *) b) *
+                            (float) (signed char) b[2 + (d % 32)]);
+          }
+          sc[j] = s * 0.0625f;
+          m = fmaxf(m, sc[j]);
+        }
+        std::vector<double> acc(kHeadDim, 0.0);
+        double Z = 0.0;
+        for (int j = 0; j < nvalid; ++j) {
+          const float w = expf(sc[j] - m);
+          Z += w;
+          const unsigned char * blk = vb + (size_t) j * 272;
+          for (int d = 0; d < kHeadDim; ++d) {
+            const unsigned char * b = blk + (d / 32) * 34;
+            acc[d] += (double) w * (h2f(*(const unsigned short *) b) *
+                                    (float) (signed char) b[2 + (d % 32)]);
+          }
+        }
+        std::vector<float> got(kHeadDim);
+        cudaMemcpy(got.data(),
+                   (const float *) out + (size_t) h0 * 256 +
+                       (size_t) t0 * kHeadDim * heads_q,
+                   sizeof(float) * kHeadDim, cudaMemcpyDeviceToHost);
+        float maxdiff = 0.0f;
+        for (int d = 0; d < kHeadDim; ++d) {
+          maxdiff = fmaxf(maxdiff, fabsf((float) (acc[d] / Z) - got[d]));
+        }
+        fprintf(stderr,
+                "[T1C] REF t=%d h=%d nvalid=%d maxdiff=%.6g | ref0..2 %+.5f %+.5f %+.5f | got0..2 %+.5f %+.5f %+.5f\n",
+                t0, h0, nvalid, maxdiff, (float) (acc[0] / Z),
+                (float) (acc[1] / Z), (float) (acc[2] / Z), got[0], got[1],
+                got[2]);
+      }
+    }
+  }
+  {
+    static double t1c_total_ms = 0.0;
+    static long t1c_calls = 0;
+    t1c_total_ms += t1c_ms();
+    ++t1c_calls;
+    fprintf(stderr,
+            "[T1C] run dev=%d q=%p k=%p v=%p q=%d kv=%d rows=%d prefix=%d t=%.2fms total=%.3fs calls=%ld\n",
+            t1c_dev, q, k, v, query_len, kv_len, rows, prefix, t1c_ms(),
+            t1c_total_ms / 1000.0, t1c_calls);
+  }
   return cudaSuccess;
 }
 

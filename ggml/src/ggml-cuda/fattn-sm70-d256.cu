@@ -600,6 +600,7 @@ size_t ggml_cuda_sm70_d256_alloc_size(const ggml_tensor * dst) {
                     + 2 * (size_t) 3 * rows3 * sizeof(float), 128);
 }
 
+extern "C" long g_t1c_meta_unused[1];
 extern "C" cudaError_t onecat_79t_prefill_q2048(
     const void * q, const void * k, const void * v,
     float * state_max, float * state_sum, void * out,
@@ -611,6 +612,14 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
     // Any admission miss or engine error falls through to the fused kernel.
     static const bool t1c_on = getenv("LLAMA_SM70_79T") != nullptr &&
         std::atof(getenv("LLAMA_SM70_79T")) != 0.0;
+    {
+        static int t1c_probe = 0;
+        if (t1c_probe++ < 3) {
+            const char * e = getenv("LLAMA_SM70_79T");
+            fprintf(stderr, "[T1C] gate=%d env=%s\n", (int) t1c_on,
+                    e != nullptr ? e : "(null)");
+        }
+    }
     if (t1c_on) {
         const ggml_tensor * Q = dst->src[0];
         const ggml_tensor * K = dst->src[1];
@@ -620,11 +629,57 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
         const int hq     = (int) Q->ne[2];
         const int hkv    = (int) K->ne[2];
         const float scale = *(const float *) dst->op_params;
-        float scratch_max[1] = {0};
-        float scratch_sum[1] = {0};
-        const cudaError_t st = onecat_79t_prefill_q2048(
-            Q->data, K->data, V->data, scratch_max, scratch_sum, dst->data,
-            q_len, kv_len, hq, hkv, scale, ctx.stream());
+        const ggml_tensor * M = dst->src[3];
+        if (getenv("T1C_SHAPES") != nullptr) {
+            static int nrep = 0;
+            if (nrep++ < 4) {
+                fprintf(stderr, "[T1C] shapes dst ne=%lld,%lld,%lld,%lld nb=%zu,%zu,%zu,%zu\n",
+                        (long long) dst->ne[0], (long long) dst->ne[1], (long long) dst->ne[2], (long long) dst->ne[3],
+                        dst->nb[0], dst->nb[1], dst->nb[2], dst->nb[3]);
+                fprintf(stderr, "[T1C] shapes Q   ne=%lld,%lld,%lld,%lld nb=%zu,%zu,%zu,%zu\n",
+                        (long long) Q->ne[0], (long long) Q->ne[1], (long long) Q->ne[2], (long long) Q->ne[3],
+                        Q->nb[0], Q->nb[1], Q->nb[2], Q->nb[3]);
+                fprintf(stderr, "[T1C] shapes K   ne=%lld,%lld,%lld,%lld nb=%zu,%zu,%zu,%zu\n",
+                        (long long) K->ne[0], (long long) K->ne[1], (long long) K->ne[2], (long long) K->ne[3],
+                        K->nb[0], K->nb[1], K->nb[2], K->nb[3]);
+                fprintf(stderr, "[T1C] shapes V   ne=%lld,%lld,%lld,%lld nb=%zu,%zu,%zu,%zu\n",
+                        (long long) V->ne[0], (long long) V->ne[1], (long long) V->ne[2], (long long) V->ne[3],
+                        V->nb[0], V->nb[1], V->nb[2], V->nb[3]);
+                if (M != nullptr) {
+                    fprintf(stderr, "[T1C] shapes M   ne=%lld,%lld,%lld,%lld type=%d\n",
+                            (long long) M->ne[0], (long long) M->ne[1], (long long) M->ne[2], (long long) M->ne[3],
+                            (int) M->type);
+                }
+                fprintf(stderr, "[T1C] shapes Qtype=%d Ktype=%d Vtype=%d dsttype=%d hq=%d hkv=%d\n",
+                        (int) Q->type, (int) K->type, (int) V->type, (int) dst->type, hq, hkv);
+            }
+        }
+        float scratch_max[24] = {0};
+        float scratch_sum[24] = {0};
+        scratch_max[0] = (float) dst->ne[1];
+        scratch_max[1] = (float) (dst->nb[1] / sizeof(float));
+        scratch_max[2] = (float) (dst->nb[2] / sizeof(float));
+        static int t1c_shape_rep = 0;
+        if (getenv("T1C_DUMP") != nullptr) {
+            fprintf(stderr, "[T1C] try q=%d kv=%d hq=%d hkv=%d mask=%lld\n", q_len, kv_len, hq, hkv,
+                    M != nullptr ? (long long) M->ne[0] : -1LL);
+        }
+        if (t1c_shape_rep++ < 4) {
+            fprintf(stderr,
+                    "[T1C] nb Q=%zu,%zu,%zu K=%zu,%zu,%zu V=%zu,%zu,%zu dst=%zu,%zu,%zu\n",
+                    Q->nb[1], Q->nb[2], Q->nb[3], K->nb[1], K->nb[2], K->nb[3],
+                    V->nb[1], V->nb[2], V->nb[3], dst->nb[1], dst->nb[2],
+                    dst->nb[3]);
+        }
+        const cudaError_t st = getenv("T1C_SHAPES") != nullptr
+            ? cudaErrorNotSupported
+            : onecat_79t_prefill_q2048(
+                Q->data, K->data, V->data, scratch_max, scratch_sum, dst->data,
+                q_len, M != nullptr ? (int) M->ne[0] : kv_len, hq, hkv, scale,
+                ctx.stream());
+        if (getenv("T1C_DUMP") != nullptr) {
+            fprintf(stderr, "[T1C] st=%d\n", (int) st);
+        }
         if (st == cudaSuccess) {
             return;
         }
