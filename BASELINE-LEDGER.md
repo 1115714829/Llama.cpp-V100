@@ -254,6 +254,13 @@
 - **并行拷贝候选**（按 ROI）：`csrc/attention/sm70_grouped_long/kernel/grouped-attention.cu`（228 KB prefill 核）、`csrc/moe/marlin_moe_wna16/sm70_marlin_*`（MoE GEMM）、`csrc/libtorch_stable/sampler.cu`（GPU 采样）、`fused_sigmoid_gating.py` 对应的 GDN 融合核。
 - **既有 P-D3' 修复在途**：`cudaMemcpyDefault` 一行修（H2D→自动推断）build 绿 ✓ 待 stress 验证。
 
+- **R353 ★★★ 认账改判（用户指正）：llama.cpp 的 TP 支持 6 卡（PR #24554 "TP: allows the usage of 4-10 gpus"，issue #24486 的非整除修复，已合并）⇒ 我此前"4 KV 头无法 6 分"是 vLLM 记述误用 ✗ 作废**（2026-09-25）
+
+- **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
+- **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
+- **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
+- **kernel 拷贝与 TP 的关系（复核）**：vendored 核为每卡本地 ✓ 不影响任何卡数的 TP ✓（heads 参数随配置走）。
+
 - **R352 ★★ P-D3' stress 仍崩 ⇒ 第二处 H2D 假设定位 = `llama_batch_allocr::init` 的 embd 拷贝（不止 `set_inputs`）；TP 咨询答复（用户问）= 拷贝 kernel 为每卡本地、不影响张量并行**（2026-09-25）
 
 - **崩溃链（两处 H2D 假设）**：① `llm_graph_result::set_inputs` 的 `ggml_backend_tensor_set`（已改 `cudaMemcpyDefault` ✓ R350）② **`llama_batch_allocr::init`（`llama-batch.cpp:25`）对 `batch_inp.embd` 的 host 假设拷贝** ⇒ 首轮注入即崩（stress 于 `n_tokens=42` 后死，门值不触发 ✗）。
