@@ -133,7 +133,7 @@ static void ggml_backend_meta_device_get_props(ggml_backend_dev_t dev, ggml_back
         /* .async                 = */ true,
         /* .host_buffer           = */ false, // Not implemented.
         /* .buffer_from_host_ptr  = */ false, // Not implemented.
-        /* .events                = */ false, // Not implemented.
+        /* .events                = */ true,
         /* .mmap_support          = */ true,
     };
     for (ggml_backend_dev_t simple_dev : meta_dev_ctx->simple_devs) {
@@ -179,6 +179,41 @@ static bool ggml_backend_meta_device_supports_buft(ggml_backend_dev_t dev, ggml_
     return true;
 }
 
+// R310: sched-level events - delegate to the simple devices' native events so
+// split-input copies can event_wait (GPU-side) instead of a full-backend
+// synchronize on the host (the 76% copy-section stall, R309).
+struct ggml_backend_meta_event_ctx {
+    std::vector<ggml_backend_event_t> evs; // [n simple devs]
+};
+
+static ggml_backend_event_t ggml_backend_meta_device_event_new(ggml_backend_dev_t dev) {
+    const ggml_backend_meta_device_context * meta_dev_ctx = (const ggml_backend_meta_device_context *) dev->context;
+    auto * ev_ctx = new ggml_backend_meta_event_ctx();
+    ev_ctx->evs.reserve(meta_dev_ctx->simple_devs.size());
+    for (ggml_backend_dev_t simple_dev : meta_dev_ctx->simple_devs) {
+        ev_ctx->evs.push_back(ggml_backend_event_new(simple_dev));
+    }
+    return new ggml_backend_event { dev, ev_ctx };
+}
+
+static void ggml_backend_meta_device_event_free(ggml_backend_dev_t dev, ggml_backend_event_t event) {
+    auto * ev_ctx = (ggml_backend_meta_event_ctx *) event->context;
+    for (ggml_backend_event_t ev : ev_ctx->evs) {
+        ggml_backend_event_free(ev);
+    }
+    delete ev_ctx;
+    delete event;
+    GGML_UNUSED(dev);
+}
+
+static void ggml_backend_meta_device_event_synchronize(ggml_backend_dev_t dev, ggml_backend_event_t event) {
+    auto * ev_ctx = (ggml_backend_meta_event_ctx *) event->context;
+    for (ggml_backend_event_t ev : ev_ctx->evs) {
+        ggml_backend_event_synchronize(ev);
+    }
+    GGML_UNUSED(dev);
+}
+
 static const ggml_backend_device_i ggml_backend_meta_device_iface = {
     /* .get_name             = */ ggml_backend_meta_device_get_name,
     /* .get_description      = */ ggml_backend_meta_device_get_description,
@@ -192,9 +227,9 @@ static const ggml_backend_device_i ggml_backend_meta_device_iface = {
     /* .supports_op          = */ ggml_backend_meta_device_supports_op,
     /* .supports_buft        = */ ggml_backend_meta_device_supports_buft,
     /* .offload_op           = */ nullptr,
-    /* .event_new            = */ nullptr,
-    /* .event_free           = */ nullptr,
-    /* .event_synchronize    = */ nullptr,
+    /* .event_new            = */ ggml_backend_meta_device_event_new,
+    /* .event_free           = */ ggml_backend_meta_device_event_free,
+    /* .event_synchronize    = */ ggml_backend_meta_device_event_synchronize,
 };
 
 static bool ggml_backend_dev_is_meta(ggml_backend_dev_t dev) {
@@ -3170,6 +3205,35 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     return fg_status;
 }
 
+// R312: async shard-wise copy - delegate each simple slice to the simple
+// backend's own async copy. The sched's fallback (full source synchronize +
+// blocking copy, the 76% copy-section stall at R309/311) never runs when this
+// succeeds. Requires a meta-owned source (same shard layout as dst).
+static bool ggml_backend_meta_cpy_tensor_async(
+        ggml_backend_t backend_src, ggml_backend_t backend_dst,
+        const struct ggml_tensor * src, struct ggml_tensor * dst) {
+    if (!ggml_backend_buffer_is_meta(src->buffer) ||
+        !ggml_backend_buffer_is_meta(dst->buffer)) {
+        return false;
+    }
+    auto * dst_ctx    = (ggml_backend_meta_context *) backend_dst->context;
+    auto * dst_buf_ctx = (ggml_backend_meta_buffer_context *) dst->buffer->context;
+    const size_t n_bufs = dst_buf_ctx->bufs.size();
+    for (size_t j = 0; j < n_bufs; j++) {
+        ggml_tensor * d_j = ggml_backend_meta_buffer_simple_tensor(dst, j);
+        ggml_tensor * s_j = ggml_backend_meta_buffer_simple_tensor(const_cast<ggml_tensor *>(src), j);
+        if (d_j == nullptr || s_j == nullptr) {
+            continue;
+        }
+        ggml_backend_t simple_be = dst_ctx->backend_configs[j].backend;
+        if (simple_be->iface.cpy_tensor_async == nullptr ||
+            !simple_be->iface.cpy_tensor_async(simple_be, simple_be, s_j, d_j)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static const ggml_backend_i ggml_backend_meta_i = {
     /* .get_name                = */ ggml_backend_meta_get_name,
     /* .free                    = */ ggml_backend_meta_free,
@@ -3177,15 +3241,29 @@ static const ggml_backend_i ggml_backend_meta_i = {
     /* .get_tensor_async        = */ ggml_backend_meta_get_tensor_async,
     /* .set_tensor_2d_async     = */ nullptr,
     /* .get_tensor_2d_async     = */ nullptr,
-    /* .cpy_tensor_async        = */ nullptr,
+    /* .cpy_tensor_async        = */ ggml_backend_meta_cpy_tensor_async,
     /* .synchronize             = */ ggml_backend_meta_synchronize,
     /* .graph_plan_create       = */ nullptr,
     /* .graph_plan_free         = */ nullptr,
     /* .graph_plan_update       = */ nullptr,
     /* .graph_plan_compute      = */ nullptr,
     /* .graph_compute           = */ ggml_backend_meta_graph_compute,
-    /* .event_record            = */ nullptr,
-    /* .event_wait              = */ nullptr,
+    /* .event_record            = */ [](ggml_backend_t backend, ggml_backend_event_t event) {
+        auto * ctx    = (ggml_backend_meta_context *) backend->context;
+        auto * ev_ctx = (ggml_backend_meta_event_ctx *) event->context;
+        const size_t n = std::min(ctx->backend_configs.size(), ev_ctx->evs.size());
+        for (size_t i = 0; i < n; i++) {
+            ggml_backend_event_record(ev_ctx->evs[i], ctx->backend_configs[i].backend);
+        }
+    },
+    /* .event_wait              = */ [](ggml_backend_t backend, ggml_backend_event_t event) {
+        auto * ctx    = (ggml_backend_meta_context *) backend->context;
+        auto * ev_ctx = (ggml_backend_meta_event_ctx *) event->context;
+        const size_t n = std::min(ctx->backend_configs.size(), ev_ctx->evs.size());
+        for (size_t i = 0; i < n; i++) {
+            ggml_backend_event_wait(ctx->backend_configs[i].backend, ev_ctx->evs[i]);
+        }
+    },
     /* .graph_optimize          = */ nullptr,
 };
 
