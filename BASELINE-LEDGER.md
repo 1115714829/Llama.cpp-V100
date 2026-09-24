@@ -22,6 +22,8 @@
 - **P=2 预算数学**：O 累加器 64 regs/头 ×2 = 128 + Q/K 碎片 + 寻址 ≈ 200 < 256（`__launch_bounds__(256,1)` 无占用率损失）；P=3 超预算 ✗。q_smem ×2 = +32 KB（96 KB/SM 预算内待核 kSmemBytes）。
 - **★ 位级等价潜力**：每行 kv 块累加序列完全不变 ⇒ **输出可逐位同 ⇒ 门值免重立**（比 T2 分解形态的根本优势）。
 - **预登记（[S4] 沿用 + 本条）**：FA 算子 ≥+20% 或 256K TTFT ≥+7%（175.8 → ≤164 s）；**门值必须原样**（`c4e11b2d`/`f3edac19` 双谱系）；纯步不回退 >2%；显存不升。及格 = 全过；失败入灰。
+- **T1 实现蓝图（R303 接缝全图 + 资源实证，前缀锚）**：smem 50→82 KB ✓ 免缩 kBlockM；寄存器 ≈150→222 ✓ <256（minBlocks=1）；**配对陷阱已识别**：必须组内配对 `head_q = j·gqa + 2c' + pass`（跨界对 (5,6) 跨 kv-head 禁忌），grid.z' = hkv·gqa/2；**mask = 解析式因果**（:1016 `Mask<true,false,false>(kv_len, kv_len-kv_offset)`——sm70 内核不读 kq_mask 张量！T2 学到的张量 mask 语义不适用于此内核，重要辨析）；三接缝 = ① Q 暂存双 tile（sQ×2）② QK-softmax-PV 双 pass（acc_s 复用、row 状态/o_storage/P-smem 逐 pass）③ K/V 预取提至 n_block 顶（tKrKNext/tVrV0-1 加载一次、双 pass 共读 smem）；epilogue 逐 pass（row_sum allreduce + out 写带 `head_q = z'·2+kPass`）。
+- **R303 预登记（[S4] 沿用 + 本条）**：FA 算子 ≥+20% 或 256K TTFT ≥+7%（175.8 → ≤164 s）；**门值必须原样**（`c4e11b2d`/`f3edac19` 双谱系）；纯步不回退 >2%；显存不升。及格 = 全过；失败入灰。
 - **实现路径（T1 阶段）**：现有 dense 内核模板化 `kHeads=1|2`（头循环包住 QK/softmax/PV，K/V 块暂存提至循环外）+ launcher 分派（`LLAMA_SM70_GQA2` 判值门控，默认 =0 走现路径）。
 
 ### R302c ★★ **收养设计尝试：概念成立（结构键 + 逐张量验证 = 断言教训闭环），整合面两坑 ⇒ 止损回退 V2；两关键账本修正**（2026-09-24）
