@@ -3330,7 +3330,11 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
     }
     return cudaErrorNotSupported;
   }
-  const int rows = query_len * heads_q;
+  // R337: cuBLAS rejects fp16 GEMMs whose leading dims are not multiples of 8
+  // (decode rows = q*heads_q = 6..48). Pad the row count; the store keeps the
+  // real count in g_rows so the padded rows are computed but never written.
+  const int rows = (query_len * heads_q + 7) & ~7;
+  const int rows_valid = query_len * heads_q;
   const int prefix = kv_len - query_len;
   T1C_CHK("s0-entry");
   // Per-device resident workspace.
@@ -3461,7 +3465,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
     h[0] = ws.bmax;
     h[1] = ws.bsum;
     hi[0] = 0;
-    hi[1] = rows;
+    hi[1] = rows_valid;
     cudaMemcpyToSymbolAsync(g_rows, &hi[1], sizeof(int), 0,
                             cudaMemcpyHostToDevice, stream);
     cudaMemcpyToSymbolAsync(g_row_max, &h[0], sizeof(float *), 0,
