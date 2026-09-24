@@ -1697,6 +1697,7 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
     const bool cprof = getenv("GGML_SCHED_TIMES") != nullptr;
     const int64_t tp0 = cprof ? ggml_time_us() : 0;
     int64_t cp_copy_us = 0, cp_compute_us = 0;
+    int64_t cp_copy_bytes = 0, cp_copy_n = 0;
 
     for (int split_id = 0; split_id < sched->n_splits; split_id++) {
         struct ggml_backend_sched_split * split = &splits[split_id];
@@ -1719,6 +1720,10 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
             ggml_backend_t input_backend = ggml_backend_sched_get_tensor_backend(sched, split->inputs[input_id]);
             struct ggml_tensor * input = split->inputs[input_id];
             struct ggml_tensor * input_cpy = tensor_copy(input, split_backend_id, sched->cur_copy);
+            if (cprof) {
+                cp_copy_bytes += (int64_t) ggml_nbytes(input);
+                cp_copy_n++;
+            }
 
             if (input->flags & GGML_TENSOR_FLAG_INPUT) {
                 // inputs from the user must be copied immediately to prevent the user overwriting the data before the copy is done
@@ -1902,10 +1907,14 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         acc_total += ggml_time_us() - tp0;
         acc_n += sched->n_splits;
         static int acc_calls = 0;
+        static int64_t acc_bytes = 0, acc_cn = 0;
+        acc_bytes += cp_copy_bytes;
+        acc_cn += cp_copy_n;
         if (++acc_calls % 256 == 0) {
-            fprintf(stderr, "[CPROF] splits/call=%.1f copy=%.2f compute=%.2f other=%.2f ms/call (calls=%d)\n",
+            fprintf(stderr, "[CPROF] splits/call=%.1f copy=%.2f compute=%.2f other=%.2f ms/call | copy_bytes/call=%.2f MB copies/call=%.1f (calls=%d)\n",
                 acc_n / (double) acc_calls, acc_copy / 1e3 / acc_calls,
                 acc_compute / 1e3 / acc_calls, (acc_total - acc_copy - acc_compute) / 1e3 / acc_calls,
+                acc_bytes / 1e6 / acc_calls, (double) acc_cn / acc_calls,
                 acc_calls);
         }
     }
