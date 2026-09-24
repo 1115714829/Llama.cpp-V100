@@ -181,6 +181,14 @@
 - **次刀**：注入特征 sync 10.4 ms/轮（设备侧特征路径，P-D3'）；draft block 15.1（含 GPU ~5.9 = 16 GB 权重）。
 - **GPU 侧现状**：25K GPU 等待 13.8 ms/轮（256K 约 33 ✓ KV 差）⇒ GPU 刀（P5/P4/专用 decode 核）在 host 刀之后。
 
+- **R341 ★★ SC+REBUILD_CACHE 组合无叠加收益（68.2 vs SC 单开 68.1，噪声内，不采用）；meta 逐节点开销机制定位 = split-state 缓存查表/比对 + 拷贝分发（2000 节点 × ~11 µs ≈ 23 ms/轮）**（2026-09-25）
+
+- **组合探针（25K/gen96，2 臂 ×2 rep，判据每轮）**：X（SC+REBUILD_CACHE）68.9/67.4 = **68.2** vs Y（SC）79.2/64.9 = **72.0**；对照 R332 的 SC 单开 68.1 ⇒ **REBUILD_CACHE 在 SC 之上零叠加**（R332 判读复证 ✓）⇒ 不采用。
+- **机制定位（代码实读）**：meta 的逐节点工作 = `ggml_backend_meta_get_split_state`（`split_state_cache` std::map 查表 + memcmp + miss 时 `calculate_split_state()`）+ 拷贝分发 + 子图循环（`run_subgraphs`）；`GGML_META_DEBUG` 只打 split-state 缓存事件（`ggml-backend-meta.cpp:1256`）**无逐段计时**。
+- **#1 刀实施方向（更新）**：① **逐节点工作减少** = split-state 缓存改扁平哈希/免 memcmp ② **融合减少节点数**（P5 GDN 投影 / P6 fused W13 = 同时减 host 与 GPU ✓✓ 最干净的杠杆）③ 拷贝段批量化（R311 族手法）。
+- **判据警示**：两臂离散大（Y 79.2/64.9 = 14.3 ms）⇒ 25K/gen96 的 AL 内容波动让 ms/轮 带 ±7 ms 噪声 ⇒ 后续 A/B 用 **≥2 rep + 对照臂差 <1%** 的 ABBA 或加 rep 数。
+- **注入 sync 观测（顺带）**：6.2-14.9 ms/波动（随 GPU 负载）⇒ 真实依赖确证（P-D3' 设备侧路径仍是次刀）。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
