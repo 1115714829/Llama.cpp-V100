@@ -1694,8 +1694,13 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
 
     int prev_backend_id = -1;
 
+    const bool cprof = getenv("GGML_SCHED_TIMES") != nullptr;
+    const int64_t tp0 = cprof ? ggml_time_us() : 0;
+    int64_t cp_copy_us = 0, cp_compute_us = 0;
+
     for (int split_id = 0; split_id < sched->n_splits; split_id++) {
         struct ggml_backend_sched_split * split = &splits[split_id];
+        const int64_t tp0_local = cprof ? ggml_time_us() : 0;
         int split_backend_id = split->backend_id;
         ggml_backend_t split_backend = sched->backends[split_backend_id];
 
@@ -1836,6 +1841,8 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
             }
         }
 
+        const int64_t tp1 = cprof ? ggml_time_us() : 0;
+
         if (!sched->callback_eval) {
             enum ggml_status ec = ggml_backend_graph_compute_async(split_backend, &split->graph);
             if (ec != GGML_STATUS_SUCCESS) {
@@ -1879,8 +1886,28 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
             ggml_backend_event_record(sched->events[split_backend_id][sched->cur_copy], split_backend);
         }
-
+        if (cprof) {
+            const int64_t tp2 = ggml_time_us();
+            cp_copy_us   += tp1 - tp0_local;
+            cp_compute_us += tp2 - tp1;
+        }
         prev_backend_id = split_backend_id;
+    }
+
+    if (cprof) {
+        static int64_t acc_copy = 0, acc_compute = 0, acc_total = 0;
+        static int acc_n = 0;
+        acc_copy += cp_copy_us;
+        acc_compute += cp_compute_us;
+        acc_total += ggml_time_us() - tp0;
+        acc_n += sched->n_splits;
+        static int acc_calls = 0;
+        if (++acc_calls % 256 == 0) {
+            fprintf(stderr, "[CPROF] splits/call=%.1f copy=%.2f compute=%.2f other=%.2f ms/call (calls=%d)\n",
+                acc_n / (double) acc_calls, acc_copy / 1e3 / acc_calls,
+                acc_compute / 1e3 / acc_calls, (acc_total - acc_copy - acc_compute) / 1e3 / acc_calls,
+                acc_calls);
+        }
     }
 
     return GGML_STATUS_SUCCESS;
