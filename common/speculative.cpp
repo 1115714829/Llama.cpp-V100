@@ -22,6 +22,12 @@
 #include <thread>
 #include <random>
 
+// R350: device-side feature path (LLAMA_SPEC_DEVFEAT=1): 2D D2D interleave into the
+// injection buffer, no host memcpy, no llama_synchronize.
+extern "C" int  ggml_cuda_copy2d(void * dst, size_t dst_pitch, const void * src, size_t src_pitch, size_t width_bytes, size_t rows);
+extern "C" void * ggml_cuda_alloc_bytes(size_t bytes);
+extern "C" void ggml_cuda_free_bytes(void * p);
+
 #define SPC_DBG(fmt, ...) LOG_DBG("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
 #define SPC_TRC(fmt, ...) LOG_TRC("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
 #define SPC_INF(fmt, ...) LOG_INF("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
@@ -1504,10 +1510,18 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 // injects them into the K/V cache at the target positions
                 batch_inject.n_tokens = n_chunk;
                 ph_tok += n_chunk;
-                // One context sync per injection instead of one per extract layer:
-                // llama_get_embeddings_layer_inp() synchronizes internally, so hoist it.
+                // R350: device-side injection path (LLAMA_SPEC_DEVFEAT=1): the extract
+                // tensors stay on the device and are interleaved straight into a device
+                // batch buffer with 2D D2D copies; no host sync, no memcpy.
+                static const bool devfeat = getenv("LLAMA_SPEC_DEVFEAT") != nullptr && atoi(getenv("LLAMA_SPEC_DEVFEAT")) != 0;
+                static void * dev_inj_buf = nullptr;
+                if (devfeat && dev_inj_buf == nullptr) {
+                    dev_inj_buf = ggml_cuda_alloc_bytes((size_t) llama_n_ubatch(ctx_dft) * (size_t) n_embd_enc * sizeof(float));
+                }
                 const int64_t ph_sync_t0 = inj_enabled ? ggml_time_us() : 0;
-                llama_synchronize(ctx_tgt);
+                if (!devfeat) {
+                    llama_synchronize(ctx_tgt);
+                }
                 const int64_t ph_sync_t1 = inj_enabled ? ggml_time_us() : 0;
                 if (inj_enabled) {
                     ph_sync_us += ph_sync_t1 - ph_sync_t0;
@@ -1518,6 +1532,17 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                     const int64_t ph_t1 = inj_enabled ? ggml_time_us() : 0;
                     if (!layer) {
                         GGML_ABORT("DFlash: target layer %d input not extracted.", target_layer_ids[k]);
+                    }
+                    if (devfeat) {
+                        const float * layer_dev = llama_get_embeddings_layer_inp_dev(ctx_tgt, (uint32_t) target_layer_ids[k]);
+                        if (layer_dev != nullptr) {
+                            ggml_cuda_copy2d((char *) dev_inj_buf + (size_t) k * n_embd_tgt * sizeof(float),
+                                             (size_t) n_embd_enc * sizeof(float),
+                                             layer_dev + (size_t) (i_batch_beg[seq_id] + offset) * n_embd_tgt,
+                                             (size_t) n_embd_tgt * sizeof(float),
+                                             (size_t) n_embd_tgt * sizeof(float), (size_t) n_chunk);
+                        }
+                        continue;
                     }
                     for (int32_t i = 0; i < n_chunk; ++i) {
                         float       * dst = batch_inject.embd + (size_t) i * n_embd_enc + k * (size_t) n_embd_tgt;
@@ -1541,6 +1566,9 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                     batch_inject.n_seq_id[i]  = 1;
                     batch_inject.seq_id[i][0] = seq_id;
                     batch_inject.logits[i]    = false;
+                }
+                if (devfeat && dev_inj_buf != nullptr) {
+                    batch_inject.embd = (float *) dev_inj_buf;
                 }
                 const int64_t inj_t0 = inj_enabled ? ggml_time_us() : 0;
                 const int32_t rc = llama_decode(ctx_dft, batch_inject);
