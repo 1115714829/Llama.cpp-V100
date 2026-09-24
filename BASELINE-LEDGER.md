@@ -203,6 +203,13 @@
 - **方法论沉淀**：**动手前先 scoping**（P6 若直接开工会白做 ✓ 本轮用代码实读 + 逐算子名实证避免）✓。
 - **当前吐字线账（25K，68 ms/轮）**：target compute 36.9（提交阻塞 ~23 + GPU 13.8）+ 注入 13 + draft block 15.1 + selector 2.3 ✓；256K 86.8（GPU +13 KV）。
 
+- **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
+
+- **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
+- **收益机制**：host `llama_synchronize(ctx_tgt)`（10.4 ms/轮，R331 定位 = 等 target GPU 尾巴）整条消失；且 D2D 天然带流序（免 event）⇒ 注入可与 target 的 GPU 尾巴**重叠**（串行链"verify→sync→注入→draft block"破链）。
+- **实施序**：① extract 的 `embd_layer_inp` 改设备缓冲（含 `output_reorder` 的设备版或 reorder 后再 D2D）② speculative 注入段改指针直通 ③ 门值（greedy sha）+ `LLAMA_SPEC_TIMING` 分账（sync 应 → ~0）+ 每轮 A/B（预期 **-8~11 ms/轮**）。
+- **风险**：`output_reorder`（`:2343`）在 host 上交换行 ⇒ 设备版需另写或 reorder 后一次 D2D；M-RoPE/多 seq 语义保持。门值 = 第一判据。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
