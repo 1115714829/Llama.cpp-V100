@@ -97,6 +97,14 @@
 - **头寸**：gather 10.47 ms/call × ~1 次/轮 = **~10 ms/轮**；叠加 P1 子图合并（20.8）+ P-D3 图合一（draft host ~12）= 三件合计 **~33-43 ms/轮**（当前 77.5→~40）。
 - **下一步实施序**：① 特征 gather 去同步（把 `llama_get_embeddings_layer_inp` 的逐层提取改批量/异步，或 target 侧直接出 GPU 指针）② meta 子图合并 + 内容键化 ③ draft 两调用图合一。
 
+- **R331 ★★ 吐字线：gather 10.44 ms = 一次全上下文同步（等 target GPU 尾巴）；同步上提为诊断零收益，真刀 = 设备侧特征路径**（2026-09-25）
+
+- **实测（同步上提 + 计时分离）**：`inject timing: sync=10.44 + gather=0.07 + copy=0.49 + submit=2.59 ms/call` ⇒ 5 层 getter 内部同步在上提后变 no-op（gather 10.47→0.07 ✓），**10.44 ms 全在 `llama_synchronize(ctx_tgt)`**（`llama-context.cpp:4052` 的 `ctx->synchronize()` = 全上下文等 GPU）。
+- **机制判定**：`extract_layer_inputs`（`llama-context.cpp:2288`）用 `ggml_backend_tensor_get_async` 把 5 层特征 D2H，但排在 ubatch 计算**之后** ⇒ 等拷贝 = 等整条流 ⇒ **同步在当前结构下不可省**（上提本身零收益 = 已实证）。
+- **P-D3' 真刀定案 = 设备侧特征路径**：特征随 verify 图产出并留在 device，注入侧（draft）直接消费 device 指针（1cat `DFLASH2_FUSED_GDN_METADATA/VERIFY` 同构）；或增量注入（每轮只注新增 8 token 而非整窗 60）。
+- **头寸**：sync 10.44 ms/轮；叠加 P1 子图合并 20.8 + draft 两调用 host ~12 ⇒ 合计 ~43 ms/轮（77.5 → ~35 理想值）。
+- **改动记录**：`common/speculative.cpp` 加同步上提 + `sync=` 计时（诊断基线保留）；`p3-build.sh` 新增 `/tmp/p3-speculative.cpp` payload 位（可复现构建）。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 

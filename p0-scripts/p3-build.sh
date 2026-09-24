@@ -31,6 +31,9 @@ fi
 if [ -f /tmp/p3-ggml-backend-meta.cpp ]; then
   sed 's/\r$//' /tmp/p3-ggml-backend-meta.cpp > ggml/src/ggml-backend-meta.cpp
 fi
+if [ -f /tmp/p3-speculative.cpp ]; then
+  sed 's/\r$//' /tmp/p3-speculative.cpp > common/speculative.cpp
+fi
 if [ -f /tmp/p3-ggml-cuda-cmakelists.txt ]; then
   sed 's/\r$//' /tmp/p3-ggml-cuda-cmakelists.txt > ggml/src/ggml-cuda/CMakeLists.txt
 fi
