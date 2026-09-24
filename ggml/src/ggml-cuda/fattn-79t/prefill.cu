@@ -1978,7 +1978,9 @@ struct CublasQKLauncher {
 
   void launch(cudaStream_t stream) const {
     check(cublasSetStream(handle, stream), "set cuBLAS QK stream");
-    cublasGemmAlgo_t qk_algorithm = CUBLAS_GEMM_ALGO9_TENSOR_OP;
+    // R335: Tensor Core algorithms reject small M (decode rows = q*heads_q = 6..48 ->
+    // cuBLAS status 13 EXECUTION_FAILED). Pick the default path when rows % 8 != 0.
+    cublasGemmAlgo_t qk_algorithm = (rows % 8 == 0) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT;
     if (char const* runtime_algorithm =
             std::getenv("PREFIX_QK_CUBLAS_ALGO_RUNTIME")) {
       qk_algorithm =
@@ -3577,7 +3579,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                           rows, sub_n, kHeadDim, &alpha, ws.qt, CUDA_R_16F, rows,
                           ws.kt + (size_t) (begin + sub) * kHeadDim, CUDA_R_16F, kv_len, &beta,
                           ws.scores + (size_t) sub * rows, CUDA_R_16F, rows, CUBLAS_COMPUTE_16F,
-                          CUBLAS_GEMM_ALGO9_TENSOR_OP);
+                          (rows % 8 == 0) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT);
       if (cst != CUBLAS_STATUS_SUCCESS) break;
     }
     fprintf(stderr, "[T1C] t3qk-post cst=%d\n", (int) cst);
