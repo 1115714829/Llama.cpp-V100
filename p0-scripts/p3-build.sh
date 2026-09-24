@@ -31,11 +31,17 @@ fi
 if [ -f /tmp/p3-ggml-backend-meta.cpp ]; then
   sed 's/\r$//' /tmp/p3-ggml-backend-meta.cpp > ggml/src/ggml-backend-meta.cpp
 fi
+if [ -f /tmp/p3-ggml-cuda.cu ]; then
+  sed 's/\r$//' /tmp/p3-ggml-cuda.cu > ggml/src/ggml-cuda/ggml-cuda.cu
+fi
 if [ -f /tmp/p3-ggml-cuda-d2d.cu ]; then
   sed 's/\r$//' /tmp/p3-ggml-cuda-d2d.cu > ggml/src/ggml-cuda/ggml-cuda-d2d.cu
 fi
 if [ -f /tmp/p3-speculative.cpp ]; then
   sed 's/\r$//' /tmp/p3-speculative.cpp > common/speculative.cpp
+fi
+if [ -f /tmp/p3-llama-batch.cpp ]; then
+  sed 's/\r$//' /tmp/p3-llama-batch.cpp > src/llama-batch.cpp
 fi
 if [ -f /tmp/p3-llama-context.cpp ]; then
   sed 's/\r$//' /tmp/p3-llama-context.cpp > src/llama-context.cpp

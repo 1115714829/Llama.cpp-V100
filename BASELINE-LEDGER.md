@@ -256,6 +256,12 @@
 
 - **R353 ★★★ 认账改判（用户指正）：llama.cpp 的 TP 支持 6 卡（PR #24554 "TP: allows the usage of 4-10 gpus"，issue #24486 的非整除修复，已合并）⇒ 我此前"4 KV 头无法 6 分"是 vLLM 记述误用 ✗ 作废**（2026-09-25）
 
+- **R354 ★★ P-D3' 三攻：batch gather 的 memcpy 已跳过（devfeat）但新崩因 = 设备不匹配（`ggml_backend_cuda_host_buffer_free_buffer` @ device 3）⇒ `ggml_cuda_alloc_bytes` 的 cudaMalloc 未固定设备（多卡 alloc/free 落不同 device）；修法 = 帮手函数带 device 参数（cudaSetDevice）**（2026-09-25）
+
+- **进度**：① `set_inputs` 的 `cudaMemcpyDefault`（R350 ✓）② batch gather memcpy 跳过 + `ubatch.embd` 直通（R354 ✓ build 绿）③ **崩因转到设备管理**（多卡下 cudaMalloc/cudaFree 的 device 一致性）。
+- **修法（下一轮）**：`ggml_cuda_alloc_bytes(bytes, device)`/`free_bytes(p, device)` 加 `cudaSetDevice`；或用 backend buffer API（`ggml_backend_buft_alloc_buffer`）避开裸 cudaMalloc；或回退 host 路径（净收益 0）。
+- **⚠️ 多卡教训**：任何裸 CUDA API（cudaMalloc/cudaFree/cudaMemcpy2DAsync）在 TP 多卡下**必须显式 `cudaSetDevice`**，否则 alloc/free/copy 落到不同 device ⇒ 崩（本次 device 3 vs 其他）。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
