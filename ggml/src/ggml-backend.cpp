@@ -1911,6 +1911,16 @@ ggml_backend_sched_t ggml_backend_sched_new(
 
     sched->n_backends = n_backends;
     sched->n_copies = parallel ? GGML_SCHED_MAX_COPIES : 1;
+    {
+        // R308: force the split-input copy ring (n_copies >= 2 ping-pongs the
+        // copies so a call does not stall on the previous call's GPU reads).
+        // GGML_SCHED_COPIES=1 restores the parallel-only default.
+        const char * e = getenv("GGML_SCHED_COPIES");
+        if (e != nullptr && atoi(e) >= 1) {
+            int n = atoi(e);
+            sched->n_copies = n > GGML_SCHED_MAX_COPIES ? GGML_SCHED_MAX_COPIES : n;
+        }
+    }
 
     // initialize hash table
     // FIXME: needs to be size*2 to account for leafs (do it in graph_split instead)
