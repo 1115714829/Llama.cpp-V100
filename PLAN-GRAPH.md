@@ -463,6 +463,22 @@ flowchart TD
   HOSTTAX["★★★ R294 256K 轮内分账: **host 图管理税 = 两大差距同一根病**<br/>target 489 调用 rebuild 468 (95.7%): alloc 198 + setin 73 + enqueue 322 = 593 ms/调用 ≈ ubatch 墙钟 615 的全额<br/>decode 轮 target 段 73ms = 每调用 rebuild (R246 23ms+) 同族; draft 13.2 + selector 2.5 小头<br/>=> **主刀二次重排 = host 图管理税根治 (mask 定尺/统一分块/多形状 build 缓存)**, P-P3 内核降二刀 (Amdahl)<br/>AL 随内容 2.9-6.4 波动 (口径注记)"]:::hot
   DECMP ==>|轮放大 2.65x 真身| HOSTTAX
   HOSTTAX ==>|根治方向 = R246 修法③ + 复活老线| REBUILD
+  subgraph T1C["★ T1-C 79T 引擎实战线 (R319→R324, 2026-09-24; 账本 R323/R324)"]
+    T1CP["★★★ R323 引擎落地: 1cat `sm70_79t/prefill.cu` 移植 (6893 行 + CUTLASS 2.11 OBJECT 隔离 + example-35 GemmSoftmax)<br/>dispatch 挂 `fattn-sm70-d256.cu` (LLAMA_SM70_79T=1; 准入 miss/错误一律回落融合核)<br/>入口 = onecat_79t_prefill_q2048: Q f32->half 转置 + KV q8_0 反量化 -> 24K 前缀块 (cuBLAS-RAW QK + CUTLASS FP32 PV + stable 在线合并) -> 对角 tail (同构掩码块) -> store"]:::hot
+    T1CSYNC["★★★ R324 真凶 = **自伤**: 入口每调用末尾无条件 `cudaStreamSynchronize` ⇒ 4 个 head-group 调用 (分居 4 卡) 全串行<br/>引擎自身累计 **276.8 s -> 25.9 s (10.7x)**; 每调用白等 ~13-14 ms x 7296 = ~100 s 空转<br/>修 = 热路径零同步 (仅留 cudaGetLastError 探针) + 符号拷贝改**每设备 pinned host 槽** (删同步后栈悬垂必修)"]:::hot
+    T1CGATE["★★★ R324 **预填充硬指标达标 (时序口径)**: 256K 同源双臂各 2 rep, ub2048, 4 卡<br/>引擎 ON **149.243/149.256 s** (pp 1583, 离散 0.009%) vs 融合核 167.648/168.905 s (pp 1409) vs **BL1 152.5 s**<br/>=> 1.022x 反超 (从 1.11x 落后); 显存 12.96 GB/卡 (k0 11.96) 合 4xV16 包络; 引擎边际 = **61 TFLOPS/卡** (前缀扫描拟合: t ≈ 14.4 ms + 0.2064 us x prefix)"]:::ok
+    T1CNUM["★★★ R324 数值门 (进行中): **宿主参考对拍法** (无需 numpy; T1C_REF=1) 逐维比 score/num/psum/out<br/>已定罪并修 6 项: ① g_row_sum_out/g_row_max 未接 (空指针 = 非法访存+全 0) ② kt 尺寸 (6.3MB vs 256K 需 134MB) ③ 前缀 K 偏移 (dim-major 应 +begin) ④ V guard 顺序必须在 PV 前 ⑤ 每调用 state 回写打爆 24-float 栈 (假死真凶)<br/>⑥ **PV 融合行和行映射错位** (psum 放大 12.9x; 反解 eff_shift 命中别行 pmax) => 自建行和核覆盖后 **首 128 行 maxdiff 0.356 -> 6e-4 (half 精度)**"]:::hot
+    T1CPVB["★★★ R324 残留真 bug (当前前线): PV (CUTLASS) A 操作数**行映射被 pitch-linear 线程图置换**<br/>REFPERM 探针: row100->242 / row127->86 / row200->242 / row6000->6025 / row12282->12124<br/>**非单射 (100 与 200 同指 242) ⇒ 不是纯置换 = 行间混合**; row0/16/60/128/129 = 恒等 (对)<br/>候选修法: ① warp-specialized PV 路径 (行索引显式线性, 含行和) ② 补 A/C 行映射 ③ 换 cuBLAS PV (但 P~ 物化流量 1.2GB/块 = 不可行)"]:::warn
+    T1CPROBE["方法学落地 (可复用): T1C_REF 宿主参考 + `T1C_REF_PREFIX_ONLY` / `T1C_SKIP_TAIL` 分段开关<br/>= 单调用级四层二分 (score / num / sum / out); 参照物 = q8_0 反量化 + 因果 softmax + PV 全在宿主复算<br/>踩坑: 宿主解引用设备指针 (psum[row]) = 段错误; 扫描计数读回必须 cudaMemcpyAsync + 流同步 (否则 bad > n 的假计数)"]:::fact
+  end
+  BLINE -.->|预填充侧被反超| T1CGATE
+  PP3FIX ==>|79T 形态红利兑现| T1CP
+  T1CP ==> T1CSYNC
+  T1CSYNC ==> T1CGATE
+  T1CP --> T1CNUM
+  T1CNUM ==> T1CPVB
+  T1CPROBE -.-> T1CNUM
+  T1CPVB ==>|必须清掉才能采纳| G
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
   classDef fact fill:#e8e8e8,stroke:#666
   classDef hot  fill:#ffcccc,stroke:#cc0000,stroke-width:2px
