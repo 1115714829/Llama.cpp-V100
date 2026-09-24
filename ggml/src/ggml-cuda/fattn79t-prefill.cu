@@ -1980,7 +1980,7 @@ struct CublasQKLauncher {
     check(cublasSetStream(handle, stream), "set cuBLAS QK stream");
     // R337: cuBLAS heuristics pick Tensor Core paths that reject small m/n (status 13;
     // decode tail blocks have width as small as 2). Force the SIMT algorithm there.
-    cublasGemmAlgo_t qk_algorithm = (rows >= 128 && width >= 8)
+    cublasGemmAlgo_t qk_algorithm = (rows % 8 == 0 && width % 8 == 0)
         ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_ALGO0;
     if (char const* runtime_algorithm =
             std::getenv("PREFIX_QK_CUBLAS_ALGO_RUNTIME")) {
@@ -3497,8 +3497,9 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
   for (int b = 0; b < n_blocks; ++b) {
     const int begin = b * kBlockN;
     const int width = std::min(kBlockN, prefix - begin);
+    const int width_pad = (width + 7) & ~7;
     CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + begin,
-                        ws.scores, rows, width, rows, kv_len};
+                        ws.scores, rows, width_pad, rows, kv_len};
     qk.launch(stream);
     T1C_CHK("s2-qk");
     if (t1c_verbose) {
@@ -3541,8 +3542,9 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
   if (getenv("T1C_SKIP_TAIL") == nullptr) {
     const int begin = prefix;
     const int width = query_len;
+    const int width_pad = (width + 7) & ~7;
     CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + begin,
-                        ws.scores, rows, width, rows, kv_len};
+                        ws.scores, rows, width_pad, rows, kv_len};
     qk.launch(stream);
     T1C_CHK("s3-qk");
     t1c_scan16("scores_tail", ws.scores, (long) rows * width);
@@ -3593,7 +3595,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                           rows, sub_n, kHeadDim, &alpha, ws.qt, CUDA_R_16F, rows,
                           ws.kt + (size_t) (begin + sub) * kHeadDim, CUDA_R_16F, kv_len, &beta,
                           ws.scores + (size_t) sub * rows, CUDA_R_16F, rows, CUBLAS_COMPUTE_16F,
-                          (rows >= 128 && width >= 8) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_ALGO0);
+                          (rows % 8 == 0 && width % 8 == 0) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_ALGO0);
       if (cst != CUBLAS_STATUS_SUCCESS) break;
     }
     fprintf(stderr, "[T1C] t3qk-post cst=%d\n", (int) cst);
