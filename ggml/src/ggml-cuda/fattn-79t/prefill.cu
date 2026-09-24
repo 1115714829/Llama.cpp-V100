@@ -3076,6 +3076,7 @@ struct CublasTailSliceOperators {
 extern "C" cudaError_t onecat_sm70_d256_dense_state_raw(
     const void*, const void*, const void*, float*, float*, void*, int, int, int,
     int, float, cudaStream_t);
+#if defined(PREFIX_79T_STANDALONE)
 int main(int argc, char** argv) {
   #if defined(PREFIX_DEBUG_THREADMAP)
   using QKOutputIterator =
@@ -5791,6 +5792,7 @@ int main(int argc, char** argv) {
   #endif
   return 0;
 }
+#endif
 #else
 
 extern "C" cudaError_t onecat_sm70_d256_dense_state_raw(
