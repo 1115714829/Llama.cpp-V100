@@ -1700,6 +1700,10 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
     int64_t cp_copy_bytes = 0, cp_copy_n = 0;
     int64_t cp_async_ok = 0, cp_fb = 0, cp_user = 0, cp_moe = 0;
     int64_t cp_sync_us = 0, cp_cpy_us = 0;
+    // R314: copy-once registry for static host weights (inference only).
+    const bool w_once = getenv("GGML_SCHED_WEIGHTS_ONCE") != nullptr;
+    static void * s_wdone[4096];
+    static int    s_wdone_n = 0;
 
     for (int split_id = 0; split_id < sched->n_splits; split_id++) {
         struct ggml_backend_sched_split * split = &splits[split_id];
@@ -1741,6 +1745,32 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                 if (cprof) {
                     cp_sync_us += tm_ - ts_;
                     cp_cpy_us  += ggml_time_us() - tm_;
+                }
+            } else if (w_once && ggml_backend_buffer_get_usage(input->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS) {
+                // R314: inference static-weights copy-once. The MoE path below
+                // re-copies experts every call (full source sync + per-expert
+                // memcpy = the 76% copy-section stall); weights are immutable
+                // during inference so a single full copy at first touch is
+                // equivalent and ends the per-call waste. GGML_SCHED_WEIGHTS_ONCE=0
+                // restores the per-call path (required if host weights change).
+                bool seen = false;
+                for (int i = 0; i < s_wdone_n; i++) {
+                    if (s_wdone[i] == input_cpy) {
+                        seen = true;
+                        break;
+                    }
+                }
+                if (seen) {
+                    continue;
+                }
+                const int64_t ts_ = cprof ? ggml_time_us() : 0;
+                ggml_backend_synchronize(input_backend);
+                ggml_backend_tensor_copy(input, input_cpy);
+                if (cprof) {
+                    cp_sync_us += ggml_time_us() - ts_;
+                }
+                if (s_wdone_n < 4096) {
+                    s_wdone[s_wdone_n++] = input_cpy;
                 }
             } else {
                 // wait for the split backend to finish using the input before overwriting it
