@@ -37,7 +37,8 @@
 - **★ 重估（第三次刀序翻转，史存 + R309 修正注）**：compute 段 315 s/2rep = 墙钟 ~45%；当时判"host 实打实耗时"——**R309 修正：76% 是 host 被 GPU 同步阻塞（copy 段兜底全同步），非纯 host 计算**（见下条）。
 - **R310 meta events 补建 = 无效（灰，史存 + R311 补注）**：委托式事件三件套落库后 copy=489.0 ms 原封——当时判"真拷贝非等待"，**R311 修正：是逐拷贝同步等待，只是 events 只换了 fallback 分支的一半（:1827 未动）**。events 实现已无害留树（caps.events=true 修正同步入）。
 - **R318 T2 判决（q8_0 KV 直读 = 显存使能件非性能刀；流量模型臆想被历史数据重锤）**：源码注记（8/23-24 实测）：q4-direct 预填充 -3.6%（窄 u16 块读 > dequant 转换成本）、镜像转换全成本仅 ~0.1s/770s（0.013%）⇒ "KV 流量减半 ⇒ FA +30-60%" = 流量模型错误。q8-direct 模式已实现（`LLAMA_SM70_Q8_DIRECT=1`）⟹ 降级为 T1 显存使能件。
-### R320 ★★★ **T1 路径大简化（adapter 合同 + cmake 圣经读出）：79T 前沿 = `onecat_v37_dense_state_float_raw`（v37 float-state 引擎，tail.cu:814 已在树）——非 300KB torch 体；状态式分块接口与 llama chunked prefill（ub 2048 + 前缀状态续算）天然咬合。T1 工作量 -60%**（2026-09-24）
+- **R320b 诚实修正（撤回"-60%"）**：float_raw 合同（tail.cu:814-852）读出 = **Split-D 逐头内核**（Sm70D256SplitDTraits = 我方 fattn-sm70-d256.cu 祖先同族 ≈45.9 级）= adapter 兜底引擎**非 75 TFLOPS 前沿**；前沿 = **prefill.cu Q8000 核心**（GQA 打包 + cuBLAS QK + 24K FP32 块 + 双流 + `_79t_defs` 拓扑）⟹ **T1 回归原案工作量**（300 KB 引擎+编排段移植）。新收获真实：float_raw ABI 合同全落袋（D-inner 跨距 :843-848、state 在线语义、q%kBlockM==0/kv%kBlockN==0 对齐边界、scale×log2e 预乘）= Q8000 编排的尾段接口现成。
+- **R320 ★★★ **T1 路径大简化（adapter 合同 + cmake 圣经读出）：79T 前沿 = `onecat_v37_dense_state_float_raw`（v37 float-state 引擎，tail.cu:814 已在树）——非 300KB torch 体；状态式分块接口与 llama chunked prefill（ub 2048 + 前缀状态续算）天然咬合。T1 工作量 -60%**（2026-09-24）
 
 - **三件真相**：① cmake:58-60 重命名 = Split-D 源（我方 fattn-sm70-d256.cu 祖先）→ `legacy_raw` 兜底；② adapter 全文 = 固定尾壳（kTail=8000/Hq6/Hkv1）转调 **float_raw** + fp32→fp16；③ 形态优势本体 = **v37 float 引擎**（gemm_with_softmax 融合 GEMM + 24K FP32 块在线合并 + stable_rows 四守卫），全部源在树 ✓。
 - **T1 终案**：编译 `v37/tail.cu` 引擎 + ggml 直调 `onecat_v37_dense_state_float_raw(q,k,v,state_max,state_sum,out,q_len,kv_len,hq,hkv,scale,unnormalized,stream)`；`LLAMA_SM70_V37F=1` 门控 + 准入检查（D256/causal/GQA 组/KV 32 对齐）；逐 ub 段状态续算 = chunked prefill 天然形态。**_79t_defs 圣经**（tile 形状 + 旋钮）照抄编译。
