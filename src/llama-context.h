@@ -90,6 +90,7 @@ struct llama_context {
     float * get_embeddings_nextn_ith(int32_t i);
 
     float * get_embeddings_layer_inp(uint32_t lid);
+    const float * get_embeddings_layer_inp_dev(uint32_t lid);
 
     llama_token * get_sampled_tokens() const;
     llama_token   get_sampled_token_ith(int32_t idx);
@@ -306,6 +307,9 @@ private:
     // host buffers for output layer input embeddings, per layer
     // populated when cparams.output_layer_inp[il] is true
     std::vector<buffer_view<float>> embd_layer_inp;
+    // device pointers to the same features (LLAMA_SPEC_DEVFEAT=1): the DFlash
+    // injection consumes them directly, no D2H round trip
+    std::vector<const float *>      embd_layer_inp_dev;
 
     struct sampling_info {
         // !samplers.empty() to check if any samplers are active

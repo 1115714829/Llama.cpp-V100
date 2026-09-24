@@ -113,6 +113,7 @@ LLAMA_API void llama_set_embeddings_layer_inp(struct llama_context * ctx, uint32
 // mirrors:
 // LLAMA_API float * llama_get_embeddings(struct llama_context * ctx);
 LLAMA_API float * llama_get_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid);
+LLAMA_API const float * llama_get_embeddings_layer_inp_dev(struct llama_context * ctx, uint32_t lid);
 
 LLAMA_API llama_context * llama_get_ctx_other(struct llama_context * ctx);
 

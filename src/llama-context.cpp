@@ -126,6 +126,7 @@ llama_context::llama_context(
     // +1: id n_layer() taps the output of the last layer ("input" of the head)
     cparams.embeddings_layer_inp.resize(hparams.n_layer() + 1, false);
     embd_layer_inp.resize(hparams.n_layer() + 1);
+    embd_layer_inp_dev.resize(hparams.n_layer() + 1, nullptr);
 
     cparams.ctx_type          = params.ctx_type;
     cparams.rope_scaling_type = params.rope_scaling_type;
@@ -997,6 +998,12 @@ float * llama_context::get_embeddings_layer_inp(uint32_t lid) {
     GGML_ASSERT(lid < embd_layer_inp.size() && embd_layer_inp[lid].has_data());
 
     return embd_layer_inp[lid].data;
+}
+
+const float * llama_context::get_embeddings_layer_inp_dev(uint32_t lid) {
+    GGML_ASSERT(lid < embd_layer_inp_dev.size());
+
+    return embd_layer_inp_dev[lid];
 }
 
 llama_token llama_context::get_sampled_token_ith(int32_t idx) {
@@ -2286,16 +2293,23 @@ uint32_t llama_context::output_reserve(int32_t n_outputs) {
 }
 
 void llama_context::extract_layer_inputs(const llm_graph_result * res, size_t token_offset, size_t n_tokens) {
+    // R345: LLAMA_SPEC_DEVFEAT=1 keeps the extract-layer features on the device and
+    // records the graph tensor's data pointer for the DFlash injection (no D2H).
+    static const bool devfeat = getenv("LLAMA_SPEC_DEVFEAT") != nullptr && atoi(getenv("LLAMA_SPEC_DEVFEAT")) != 0;
     for (uint32_t il = 0; il < cparams.embeddings_layer_inp.size(); ++il) {
         if (!cparams.embeddings_layer_inp[il]) {
             continue;
         }
-        if (!embd_layer_inp[il].has_data()) {
+        if (!embd_layer_inp[il].has_data() && !devfeat) {
             GGML_ABORT("output layer input buffer not allocated");
         }
         ggml_tensor * t = res->get_layer_inp((int) il);
         if (!t) {
             GGML_ABORT("layer input tensor not found");
+        }
+        if (devfeat) {
+            embd_layer_inp_dev[il] = (const float *) t->data;
+            continue;
         }
 
         const size_t nbytes = ggml_nbytes(t);
@@ -4053,6 +4067,10 @@ float * llama_get_embeddings_layer_inp(llama_context * ctx, uint32_t lid) {
     ctx->synchronize();
 
     return ctx->get_embeddings_layer_inp(lid);
+}
+
+const float * llama_get_embeddings_layer_inp_dev(llama_context * ctx, uint32_t lid) {
+    return ctx->get_embeddings_layer_inp_dev(lid);
 }
 
 bool llama_set_sampler(llama_context * ctx, llama_seq_id seq_id, llama_sampler * smpl) {
