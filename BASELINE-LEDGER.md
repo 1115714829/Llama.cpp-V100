@@ -131,7 +131,15 @@
 - **判据修正（不删史）**：P5"状态融合"（GDN 状态算子）头寸可忽略（6.9 µs/层级）；P6"权重 GEMV 形态"头寸小（已 680-765 GB/s）；两者改为"小投影/融合"与"形状调优"口径。
 - **红线提醒**：Q8_0 全量 = 验收硬纪律 ⇒ 字节刀（NVFP4 30 GB）不可用；上述四刀全在"效率/结构"面。
 
-- **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
+- **R335 ★★ P7 首攻（decode 注意力入引擎）判负并安全回退：cuBLAS QK 对小 rows 报 status 13（EXECUTION_FAILED）且波及 load_model warmup ⇒ 门值 g1 臂崩；回退后 g0=g1=bcda0092 ✓ 零回归**（2026-09-25）
+
+- **动刀**：① `fattn-sm70-d256.cu::supported()` 放宽 `min_q`（decode 形状准入）② `prefill.cu` 入口放宽 `query_len % 8`（q 1..8 准入）③ cuBLAS 算法选择改 rows-aware（`rows%8==0 ? ALGO9_TENSOR_OP : DEFAULT`，**保留**（prefill 无影响））。
+- **判据（门值）**：g1（引擎臂）`launch cuBLAS raw QK: cuBLAS status 13`，随后 `ggml_abort`（`ggml_cuda_error`）于 `server_context::load_model`（warmup 前向）⇒ **门破 = 不采用**（staged-baseline 铁律 3）✓ 当场撤刀。
+- **二分结论**：放松本身即根因（含 warmup 形状被误准入）；`rows%8` 算法选择非根因（prefill rows=12288 走 TC 不变）。**回退后 g0=g1=bcda0092**（131 字符）✓ **已知好态恢复、生产路径零回归**。
+- **P7 下一步（改图不弃图）**：decode 形状需要**专用小-M QK 路径**（M=6..48 的 GEMV 形态，1cat `sm70_grouped_long/scalar-attention.cu` 同构），或 cuBLAS 小-M 配置 + 入口加 `rows >= kMin`/`kv >= kMin` 下界（防 warmup 误入）；另注意 `kv_len % kBlockN != 0` 的尾块覆盖。
+- **工装新增**：门值 = P7 类改动的**第一判据**（引擎臂崩 = 当场撤），`t1c-gate.sh` 一次 ~2 min ✓ 已是标准流程。
+
+- **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
