@@ -232,6 +232,14 @@
 - **风险**：分布漂移须以 PPL/质量门复核（1cat 文档有 "probabilistic quality pair" 门）；TP 同步（`llm_base_proposer.py:192` "same token on all TP ranks"）。
 - **刀序（终版）**：① P-D3'（host -8~11）② **P8 二攻 = 拒绝采样**（AL↑）③ 专用 decode 核。
 
+- **R349 ★★★ 起跑线对齐（用户指出）：draft 从 Q4_K_M 换 BF16 同级 F16 GGUF（HF `incoai/Qwen3.8-27B-DFlash2` @ `dedf8df…`，魔搭 aria2c 16 线程 98 MiB/s 下载）⇒ AL 2.96→3.74（+26%）、合成 tg 44.4→52.5（+18%）⇒ 采用；字节刀"封顶"推论作废**（2026-09-25）
+
+- **起跑线纠正（用户 2026-09-25 指出，认账）**：我方 draft 原为 `…-DFlash2-Q4_K_M.gguf`（Q4_K_M，2 GB）vs BL1 的 `Qwen3.8-27B-DFlash2`（**BF16，3.6 GB，1.92B 参数/5 层**）✗ **不等价**；`DFlash2` 是 5 层小 draft（非 27B），我此前"16 GB draft"的字节账**有误**。
+- **对齐动作**：HF 官方仓无 GGUF ⇒ 下载官方 BF16（revision `dedf8df…` = BL1 同 revision；魔搭镜像 + aria2c -x16，98 MiB/s）→ `convert_hf_to_gguf.py --outtype f16`（**容器封装非量化**）→ `Qwen3.8-27B-DFlash2-F16.gguf`（4 GB）；`t1c-run.sh` 默认切换 + 新增 `DRAFT=` 旋钮。
+- **同源 A/B（25K/gen96，2 臂 ×2 rep）**：F16 AL 4.57/2.91 = **3.74**、每轮 81.3/61.1 = **71.2**、合成 tg **52.5**；Q4_K_M AL 3.10/2.82 = 2.96、每轮 65.7/67.6 = 66.6、tg 44.4 ⇒ **AL +26% 抵过每轮 +7% ⇒ 合成 +18% ⇒ 采用 F16** ✓。
+- **字节账重算**：BL1 = FP8 27 + BF16 3.6 = 30.6 GB/轮；我方 = Q8_0 27 + F16 4 = 31 GB/轮 ⇒ **同级** ✓ ⇒ **R346"字节刀被封顶 ⇒ 纯效率到不了 8.0"**推论**作废**（不删史）；剩余差距**全部是代码问题**（用户红线："1cat 能实现 我们就有理由能实现，达不到就是代码问题"）。
+- **显存包络**：27+4 = 31 GB + KV/workspace ✓ 仍在 4×V16GB 内 ✓。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。

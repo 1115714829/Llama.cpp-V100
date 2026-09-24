@@ -19,7 +19,7 @@ if [ "${NO79T:-}" != "1" ]; then export LLAMA_SM70_79T=1; fi
 export GGML_META_SUBGRAPH_CAPTURE=1
 SPEC_ARGS=""
 if [ "${SPEC:-}" = "1" ]; then
-  SPEC_ARGS="--model-draft /mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max ${NMAX:-7}"
+  SPEC_ARGS="--model-draft ${DRAFT:-/mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-F16.gguf} --spec-type draft-dflash --spec-draft-n-max ${NMAX:-7}"
 else
   export NO_SPEC=1
 fi
