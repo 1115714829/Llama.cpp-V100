@@ -26,7 +26,12 @@
 
 - **三臂（同栈、双 rep、离散 ≤0.5%、纯步零回归）**：Path A **175.8 s** ｜ Wide（`LLAMA_SM70_FA_GEMM=1`）**176.9 s**（+0.6% 平）｜ Wide+RegP（`+REGP=1`，预登记"被否项组合重测"）**179.2 s**（+1.9% 略负）⇒ [S4] 口径（FA +0~10%）**三臂未达** → 全灰。RegP 单开历史"无增益"与 R272-V2"+1-2ms/轮"（decode 小账）在 256K 预填充口径归零 = 互相印证。
 - **整线收边理由**：T2"通用 PV 显式 mma 地基"的下游客户已尽失（GQA 摊销 R303-R 证伪、P-P3 分解 R300 证伪）——地基孤立无 ROI，**P-P3 全家桶（P-P3/P-P3-T/Wide/RegP）就此闭环入灰**。
-- **R302c-2 实测（SLOTS=2、双 rep）**：rep1 183.5 s（预热行军如预期）｜ **rep2 177.2 s = 仅 -3.5%**——距破线预期（~150 s）差 27 s ⇒ **收养未全命中，残余 miss 源未明**（嫌疑：KV-cache 小图 copy-graph 流 / 尾批形态轮转 / 纯步段 sync）。**禁臆想定罪**：下一步 = 带 `GGML_GALLOCR_SLOTS_DEBUG` 的诊断跑（gallocr 自带 `[GALLOC_SLOT] hit/miss` 计数，:1487）一行 env 点名残余 miss；守则教训记：A/B 忘带 `LLAMA_ROUND_TIMING=1`（alloc 分账缺失，下跑补）。
+### R307 ★★★ **R302c-3 采用（key 剔除 op_params = 收养全命中）：TTFT 171.9 s（-2.9%）、alloc -97%、hit=65/miss=0；★ 洞察 = 气泡搬家（隐藏 GPU 等待在 alloc→compute 间腾挪），下一刀 = n_copies≥2 双缓冲**（2026-09-24）
+
+- **机制账（双探齐）**：`[GALLOC_SLOT] hit=65 miss=0`（收养两形态全命中）｜`alloc 75.3 → 2.06 s（-97%）`｜**但 enqueue 261→315.8 s（+54 s）**——砍掉的调度税里 ~69 s 是**隐藏 GPU 等待（管线气泡）**，墙钟只兑现 9 s/rep。TTFT **171.6/172.1**（离散 0.3%）、纯步 34.3 ms 持平。
+- **收养杀手定罪**（诊断跑三段剥）：结构键的 `op_params[0]` 逐调用变 ⇒ key 每调用新 ⇒ activate 恒 -1（`n_calls=0` = [GALLOC_FAST] 零输出即铁证）；剔除后全命中。R302c 首测"槽不够"归因同步修正。
+- **战报**：距 BL1 **1.11x → 1.08x**（159.0 vs 171.9）。
+- **★ 下一刀（气泡歼灭）**：`n_copies = parallel ? GGML_SCHED_MAX_COPIES : 1`（:1913）——**`--parallel 1` 把双缓冲锁死** ⇒ 每调用 compute 内隐式串行等前调用 = enqueue 315 s 的真身候选。开 `n_copies≥2`（+拆 :1654 类同步）= 管线重叠，预期再砍 20-30 s。风险注记：split-input copies 显存 ×n_copies、与 meta 记账交互待验。
 
 ### R304-P ★★★ **天花板实测（DPROF 分相）：cuBLAS QK 在小 N 形状塌方 = 0.167 TFLOPS（正常 30-60 的 1/200）——T2 隐藏主凶补全、Path A 融合价值再确认**（2026-09-24）
 
