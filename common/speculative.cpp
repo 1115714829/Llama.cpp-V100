@@ -20,6 +20,7 @@
 #include <map>
 #include <cinttypes>
 #include <thread>
+#include <random>
 
 #define SPC_DBG(fmt, ...) LOG_DBG("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
 #define SPC_TRC(fmt, ...) LOG_TRC("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
@@ -1683,8 +1684,29 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                             scores[j] = s;
                         }
 
+                        // R347: LLAMA_SPEC_PROB=1 samples the block walk from the softmax
+                        // (BL1's draft_sample_method=probabilistic); the target verifies, so
+                        // only the draft acceptance rate is affected.
+                        static const bool spec_prob = getenv("LLAMA_SPEC_PROB") != nullptr && atoi(getenv("LLAMA_SPEC_PROB")) != 0;
+                        if (spec_prob) {
+                            const float smax = *std::max_element(scores.begin(), scores.end());
+                            float sum = 0.0f;
+                            std::vector<float> cdf(selector_top_k);
+                            for (int32_t k = 0; k < selector_top_k; ++k) {
+                                sum += std::exp(scores[k] - smax);
+                                cdf[k] = sum;
+                            }
+                            static thread_local std::mt19937 rng{12345};
+                            std::uniform_real_distribution<float> uni(0.0f, sum);
+                            const float u = uni(rng);
+                            predecessor = (int32_t) (std::lower_bound(cdf.begin(), cdf.end(), u) - cdf.begin());
+                            if (predecessor >= selector_top_k) {
+                                predecessor = selector_top_k - 1;
+                            }
+                        } else {
                         predecessor = (int32_t) std::distance(scores.begin(),
                                 std::max_element(scores.begin(), scores.end()));
+                        }
                         if (params.p_min > 0.0f) {
                             // softmax(scores) at the argmax, i.e. 1 / sum(exp(s_k - s_max))
                             float sum = 0.0f;
@@ -1707,8 +1729,30 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                         const float * row = lattice + (size_t) (beg + i) * n_embd_dec;
                         const float * scores = row + selector_top_k + (size_t) predecessor * selector_top_k;
 
+                        // R347: probabilistic block walk (see the CPU path above)
+                        static const bool spec_prob_g = getenv("LLAMA_SPEC_PROB") != nullptr && atoi(getenv("LLAMA_SPEC_PROB")) != 0;
+                        if (spec_prob_g) {
+                            float smax = scores[0];
+                            for (int32_t k = 1; k < selector_top_k; ++k) {
+                                smax = std::max(smax, scores[k]);
+                            }
+                            float sum = 0.0f;
+                            std::vector<float> cdf(selector_top_k);
+                            for (int32_t k = 0; k < selector_top_k; ++k) {
+                                sum += std::exp(scores[k] - smax);
+                                cdf[k] = sum;
+                            }
+                            static thread_local std::mt19937 rng{12345};
+                            std::uniform_real_distribution<float> uni(0.0f, sum);
+                            const float u = uni(rng);
+                            predecessor = (int32_t) (std::lower_bound(cdf.begin(), cdf.end(), u) - cdf.begin());
+                            if (predecessor >= selector_top_k) {
+                                predecessor = selector_top_k - 1;
+                            }
+                        } else {
                         predecessor = (int32_t) std::distance(scores,
                                 std::max_element(scores, scores + selector_top_k));
+                        }
                         if (params.p_min > 0.0f) {
                             // softmax(scores) at the argmax, i.e. 1 / sum(exp(s_k - s_max))
                             float sum = 0.0f;
