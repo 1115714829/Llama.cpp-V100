@@ -247,6 +247,13 @@
 - **修法（下一轮）**：`set_inputs` 的 embd 分支加 **D2D 分支**（源指针属设备时 `cudaMemcpyAsync(DeviceToDevice)`）或 `llama_batch` 加 `embd_dev` 标志位；**或**回退 host 路径并把 sync 移到 copy 后（净收益 -0，仅诊断价值）。
 - **⚠️ 判据教训**：门值是 spec-off 口径 ⇒ **spec 形状的正确性必须用 `SPEC=1 bash t1c-gate.sh`**（本轮已用但 g1 的注入路径未被触发 ✗ 需 stress 级验证）；"build 绿 + 门绿"≠"全形状绿"。
 
+- **R351 ★★★ 用户授权明确（2026-09-25）："直接把有用的 copy 过来，不需要完全重新造轮子" ⇒ 1cat 代码可直接拷贝（开源 BSD-3-Clause）；已 vendored `scalar-attention.cu`（1249 行 decode 长注意力核）+ `fp8_kv_utils.cuh`/`fused_mma.h`/`flash_v100_traits.cuh`/`paged_kv_utils.cuh` → `ggml/src/ggml-cuda/sm70-long/`（附 LICENSE 溯源）**（2026-09-25）
+
+- **拷贝方针（用户定调，长期有效）**：1cat-vLLM（BSD-3-Clause）的有用实现**直接 copy**，不做"干净室重写"；只做接口适配（剥 ATen 薄壳接 ggml）。已拷清单见 `ggml/src/ggml-cuda/sm70-long/`。
+- **P7 正确形态就位**：`scalar-attention.cu` = decode 形状（q 1..8 × 长 KV）的专用核 ✓ 正是 R339 判负时认定的"专用小-M GEMV 核" ✓ ⇒ 下一步 = 接入 ggml 的 FA 分发（decode 形状走它），剥 `torch/library.h`/ATen 依赖。
+- **并行拷贝候选**（按 ROI）：`csrc/attention/sm70_grouped_long/kernel/grouped-attention.cu`（228 KB prefill 核）、`csrc/moe/marlin_moe_wna16/sm70_marlin_*`（MoE GEMM）、`csrc/libtorch_stable/sampler.cu`（GPU 采样）、`fused_sigmoid_gating.py` 对应的 GDN 融合核。
+- **既有 P-D3' 修复在途**：`cudaMemcpyDefault` 一行修（H2D→自动推断）build 绿 ✓ 待 stress 验证。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
