@@ -1698,6 +1698,8 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
     const int64_t tp0 = cprof ? ggml_time_us() : 0;
     int64_t cp_copy_us = 0, cp_compute_us = 0;
     int64_t cp_copy_bytes = 0, cp_copy_n = 0;
+    int64_t cp_async_ok = 0, cp_fb = 0, cp_user = 0, cp_moe = 0;
+    int64_t cp_sync_us = 0, cp_cpy_us = 0;
 
     for (int split_id = 0; split_id < sched->n_splits; split_id++) {
         struct ggml_backend_sched_split * split = &splits[split_id];
@@ -1727,12 +1729,19 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
 
             if (input->flags & GGML_TENSOR_FLAG_INPUT) {
                 // inputs from the user must be copied immediately to prevent the user overwriting the data before the copy is done
+                cp_user++;
+                const int64_t ts_ = cprof ? ggml_time_us() : 0;
                 if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
                     ggml_backend_event_synchronize(sched->events[split_backend_id][sched->cur_copy]);
                 } else {
                     ggml_backend_synchronize(split_backend);
                 }
+                const int64_t tm_ = cprof ? ggml_time_us() : 0;
                 ggml_backend_tensor_copy(input, input_cpy);
+                if (cprof) {
+                    cp_sync_us += tm_ - ts_;
+                    cp_cpy_us  += ggml_time_us() - tm_;
+                }
             } else {
                 // wait for the split backend to finish using the input before overwriting it
                 if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
@@ -1833,14 +1842,30 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                 } else {
                     // try async copy, but if not possible, we can still use a sync copy without synchronizing the dst backend, since we handle the synchronization here with multiple copies and events
                     // TODO: add public function to facilitate this, since applications do not have direct access to the backend interface
-                    if (!split_backend->iface.cpy_tensor_async || !split_backend->iface.cpy_tensor_async(input_backend, split_backend, input, input_cpy)) {
+                    const int64_t ts_ = cprof ? ggml_time_us() : 0;
+                    const bool async_ok = split_backend->iface.cpy_tensor_async && split_backend->iface.cpy_tensor_async(input_backend, split_backend, input, input_cpy);
+                    if (cprof) {
+                        if (async_ok) {
+                            cp_async_ok++;
+                            cp_cpy_us += ggml_time_us() - ts_;
+                        } else {
+                            cp_fb++;
+                        }
+                    }
+                    if (!async_ok) {
+                        const int64_t tf_ = cprof ? ggml_time_us() : 0;
                         ggml_backend_synchronize(input_backend);
                         if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
                             ggml_backend_event_synchronize(sched->events[split_backend_id][sched->cur_copy]);
                         } else {
                             ggml_backend_synchronize(split_backend);
                         }
+                        const int64_t tg_ = cprof ? ggml_time_us() : 0;
                         ggml_backend_tensor_copy(input, input_cpy);
+                        if (cprof) {
+                            cp_sync_us += tg_ - tf_;
+                            cp_cpy_us  += ggml_time_us() - tg_;
+                        }
                     }
                 }
             }
@@ -1908,13 +1933,23 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         acc_n += sched->n_splits;
         static int acc_calls = 0;
         static int64_t acc_bytes = 0, acc_cn = 0;
+        static int64_t acc_async = 0, acc_fb = 0, acc_user = 0, acc_moe = 0;
+        static int64_t acc_sync = 0, acc_cpy = 0;
         acc_bytes += cp_copy_bytes;
         acc_cn += cp_copy_n;
+        acc_async += cp_async_ok;
+        acc_fb += cp_fb;
+        acc_user += cp_user;
+        acc_moe += cp_moe;
+        acc_sync += cp_sync_us;
+        acc_cpy += cp_cpy_us;
         if (++acc_calls % 256 == 0) {
-            fprintf(stderr, "[CPROF] splits/call=%.1f copy=%.2f compute=%.2f other=%.2f ms/call | copy_bytes/call=%.2f MB copies/call=%.1f (calls=%d)\n",
-                acc_n / (double) acc_calls, acc_copy / 1e3 / acc_calls,
-                acc_compute / 1e3 / acc_calls, (acc_total - acc_copy - acc_compute) / 1e3 / acc_calls,
-                acc_bytes / 1e6 / acc_calls, (double) acc_cn / acc_calls,
+            fprintf(stderr, "[CPROF] copy=%.2f ms/call | sync=%.2f cpy=%.2f | user=%.1f fb=%.1f async=%.1f moe=%.1f /call | bytes=%.2f MB/call (calls=%d)\n",
+                acc_copy / 1e3 / acc_calls,
+                acc_sync / 1e3 / acc_calls, acc_cpy / 1e3 / acc_calls,
+                acc_user / (double) acc_calls, acc_fb / (double) acc_calls,
+                acc_async / (double) acc_calls, acc_moe / (double) acc_calls,
+                acc_bytes / 1e6 / acc_calls,
                 acc_calls);
         }
     }
