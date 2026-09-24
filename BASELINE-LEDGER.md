@@ -17,7 +17,14 @@
 
 ### R302b ★★★ **alloc 33 s 真身终局：重建路径全后端同步（隐藏 GPU 等待第三案）——逐层剥洋葱定案**（2026-09-24）
 
-- **剥洋葱链（每层实证）**：① [GAT] 埋点：reserve_n_impl 仅 **2.6 ms**（3963 节点）、buf_loop **µs 级**（单池 v2 完美生效）⇒ reserve 无罪；② `GGML_SCHED_SPLIT_CACHE=1` **零效果**（33.04 vs 33.03 s）⇒ split_graph 无罪（且发现指纹 split 缓存 = 更早战役遗产、默认 OFF、P10 探针真身 = `[SCHED]`）；③ cudaMemset 逐张量嫌疑**条件排除**（仅非-COMPUTE 量化张量，不在每调用路径）；④ **算术闭合终局**：91 rebuild × ~700 ms ≈ 64 s（双 rep）= **`:1654-1658` 重建路径 `ggml_backend_synchronize(all backends)`**（注释"re-allocation may cause split inputs to move"）= **隐藏 GPU 等待**（R298-P compute-async 家族第三案）；ub 缩放表象（28 vs 139 ms/调用）= GPU 越忙等越久 ✓ 全解释。
+### R302c ★★ **收养设计尝试：概念成立（结构键 + 逐张量验证 = 断言教训闭环），整合面两坑 ⇒ 止损回退 V2；两关键账本修正**（2026-09-24）
+
+- **两账本修正（重要）**：① **alloc 只计 rebuild 调用**（[RT] 计数器语义再确认）——68.1 s/91 rebuild = **748 ms/rebuild**（非 139 ms/call 的均摊）；② rep1=176.2 / rep2=177.1（无差）= 收养在 SLOTS=1 下未生效（prefill/decode 两形态计划被单槽互相驱逐 ⇒ rep2 仍逐步重放置）。
+- **收养设计（概念成立）**：结构键 + 逐张量 `size_max` 验证（= ggml-backend.cpp:2359 断言要求的验证语义，断言教训完成设计闭环）+ 收养沿用旧地址（免 sync）+ rep1 即预热（MAX 放置向下适配）。
+- **整合面两坑（新知识入册）**：① **`ggml-backend-meta.cpp:1821 bufs.back() != nullptr` 断言**——收养跳过 reserve 侧效应 × meta/T8 缓冲记账失配（SLOTS=2 实测崩溃）；② SLOTS=2 与单池 disarm 的交互未明。⇒ **止损：工作树回退 V2 已知良好态**（git checkout + 重构建 ✓ 175.8 s 采用态复原）。
+- **下一步转向**：R302c 整合专项（meta 缓冲记账机制读码）排后；**主刀 = P-P3-T GQA-smem 摊销**（FA 78% GPU、KV 流量 ×6 = 最大奖）。
+
+### R302b ★★★ **alloc 33 s 真身终局：重建路径全后端同步（隐藏 GPU 等待第三案）——逐层剥洋葱定案**（2026-09-24）
 - **R302c 候选（下轮定设计）**：a) **形状类预热**（启动期对全部 bucket 类 × 形态预 reserve → 运行期全走命中路径 = 零 miss 零 sync ✓ 零语义风险，首选）；b) 桶阶梯加粗（24 类→12 类，sync 省 8.4 s vs FA padding +5-13% = 平/负，灰）；c) 放置稳定性/异步安全（深水区）。
 - 工具链注记：paramiko 通道 ~5 min 超时（长活必须 nohup + 分段收）；GAT2 埋点哑因未明（GAT 同 env 同流有效——疑作用域/优化差异，不阻塞主案）；`[SCHED]` %256 阈值打印两次未现身（探针可靠性注记）。
 
