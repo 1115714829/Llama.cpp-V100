@@ -224,6 +224,14 @@
 - **保留资产**：`LLAMA_SPEC_PROB=1` env（默认关 ✓ 生产零影响）+ `<random>` include ✓ 可复用作后续 draft 采样实验的基座。
 - **AL 刀序更新**：P8 的朴素形态入灰；改查 1cat 的 draft 采样真身（temperature/top-k/块级采样）后再试；P-D3'（host）仍为第一刀。
 
+- **R348 ★★★ P8 二攻方向定案（1cat 文档实读）：`probabilistic` 真身 = "exact probabilistic rejection sampling"（draft 概率 + min(1,p_t/p_d) 接受准则），非游走裸采样**（2026-09-25）
+
+- **实读证据**：`RELEASE.md:30` "exact probabilistic rejection sampling"；`vllm/v1/spec_decode/llm_base_proposer.py:2476` "probabilistic rejection sampling"；`docs/design/sm70_deepseek_v4_dspark_acceptance.md:35` "old 1Cat proposer rejected probabilistic draft sampling and always returned the greedy token ... not comparable to the paper's probabilistic results"；`draft_probs` 全链（`sm70_dflash2_lookup.py:307` `probabilistic: bool`、`speculative.py:283` `rejection_sample_method: standard/synthetic`）。
+- **机制**：我方 = **贪心 token 匹配**（draft token == target token 才收）；1cat = **拒绝采样**（收 min(1, p_target/p_draft)）⇒ **接受率系统性更高** ⇒ AL 2.76 → 3.4+ 的真落点 ✓✓。
+- **P8 二攻实施面**：verify 段改拒绝采样（需 target 的 logits 概率 + draft 的 `draft_probs`）；贪心（temp=0）路径不受影响 ⇒ **门值（greedy sha）天然安全**；非贪心路径的分布保持由"精确拒绝采样"契约保证。
+- **风险**：分布漂移须以 PPL/质量门复核（1cat 文档有 "probabilistic quality pair" 门）；TP 同步（`llm_base_proposer.py:192` "same token on all TP ranks"）。
+- **刀序（终版）**：① P-D3'（host -8~11）② **P8 二攻 = 拒绝采样**（AL↑）③ 专用 decode 核。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
