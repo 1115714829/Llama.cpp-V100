@@ -4,6 +4,7 @@ llama.cpp/
 .dsh/
 .mimocode/
 .tmpcmp/
+.tools/
 *.gguf
 
 # secrets and bulky backups — never commit
