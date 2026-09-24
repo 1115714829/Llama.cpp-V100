@@ -26,7 +26,7 @@
 
 - **三臂（同栈、双 rep、离散 ≤0.5%、纯步零回归）**：Path A **175.8 s** ｜ Wide（`LLAMA_SM70_FA_GEMM=1`）**176.9 s**（+0.6% 平）｜ Wide+RegP（`+REGP=1`，预登记"被否项组合重测"）**179.2 s**（+1.9% 略负）⇒ [S4] 口径（FA +0~10%）**三臂未达** → 全灰。RegP 单开历史"无增益"与 R272-V2"+1-2ms/轮"（decode 小账）在 256K 预填充口径归零 = 互相印证。
 - **整线收边理由**：T2"通用 PV 显式 mma 地基"的下游客户已尽失（GQA 摊销 R303-R 证伪、P-P3 分解 R300 证伪）——地基孤立无 ROI，**P-P3 全家桶（P-P3/P-P3-T/Wide/RegP）就此闭环入灰**。
-- **R302c-2 修法组合定案（meta 三读成链）**：① meta `bufs.back()` 断言改判 = **OOM 伪装**（SLOTS=2 双槽双池 2.1GB×2 撞墙，非记账失配）；② :1654 全后端同步存在条件 = **plan 重放置在池内移址 split inputs**（每次 fits 失败的 reserve 都触发 = 46-91×700ms 真身）；③ 收养零收益之谜破 = **SLOTS=1 双形态计划互驱逐**（收养从未生效）。⇒ **三件套**：收养复活（结构键+逐张量 size_max 验证）+ 单池解耦补完（slot 只持计划、池全局唯一——store/load 路径剥离 buffers）+ 同步改"仅池真 realloc 时"。预期：同步 46-91→~2 次、alloc 33→~3 s、**TTFT ~148 s ⇒ 破 BL1 spec-off**。
+- **R302c-2 实测（SLOTS=2、双 rep）**：rep1 183.5 s（预热行军如预期）｜ **rep2 177.2 s = 仅 -3.5%**——距破线预期（~150 s）差 27 s ⇒ **收养未全命中，残余 miss 源未明**（嫌疑：KV-cache 小图 copy-graph 流 / 尾批形态轮转 / 纯步段 sync）。**禁臆想定罪**：下一步 = 带 `GGML_GALLOCR_SLOTS_DEBUG` 的诊断跑（gallocr 自带 `[GALLOC_SLOT] hit/miss` 计数，:1487）一行 env 点名残余 miss；守则教训记：A/B 忘带 `LLAMA_ROUND_TIMING=1`（alloc 分账缺失，下跑补）。
 
 ### R304-P ★★★ **天花板实测（DPROF 分相）：cuBLAS QK 在小 N 形状塌方 = 0.167 TFLOPS（正常 30-60 的 1/200）——T2 隐藏主凶补全、Path A 融合价值再确认**（2026-09-24）
 
