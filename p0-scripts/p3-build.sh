@@ -41,7 +41,7 @@ echo "MARK_WS=$(grep -c sm70_decomp_ws_reserve ggml/src/ggml-cuda/fattn-sm70-d25
 echo "MARK_T1C=$(grep -c 'T1C' ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
 echo "MARK_79T_FLAT=$(grep -c T1C_CHK ggml/src/ggml-cuda/fattn79t-prefill.cu || true)"
 echo "MARK_79T_OBJ=$(grep -c ggml-cuda-fattn79t ggml/src/ggml-cuda/CMakeLists.txt || true)"
-cmake --build build-instr -j128 --target llama-server llama-bench > "$MAKELOG" 2>&1
+cmake --build build-instr -j176 --target llama-server llama-bench > "$MAKELOG" 2>&1
 BUILD_RC=$?
 echo "BUILD_RC=$BUILD_RC"
 echo "ERROR_LINES=$(grep -c 'error:' "$MAKELOG" || true)"

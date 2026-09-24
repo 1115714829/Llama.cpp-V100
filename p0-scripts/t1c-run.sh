@@ -14,7 +14,13 @@ export LD_LIBRARY_PATH=$LIBS:/usr/local/cuda/lib64
 export CUDA_VISIBLE_DEVICES=${CARDS:-0,1,2,3}
 export GGML_GALLOCR_SLOTS=${SLOTS:-1}
 if [ "${NO79T:-}" != "1" ]; then export LLAMA_SM70_79T=1; fi
-export NO_SPEC=1
+SPEC_ARGS=""
+if [ "${SPEC:-}" = "1" ]; then
+  SPEC_ARGS="--model-draft /mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max ${NMAX:-7}"
+else
+  export NO_SPEC=1
+fi
+if [ -n "${ROUND:-}" ]; then export LLAMA_ROUND_TIMING=1; fi
 if [ -n "${T1C_DUMP:-}" ]; then export T1C_DUMP=1; fi
 if [ -n "${T1C_REF:-}" ]; then export T1C_REF=1; fi
 if [ -n "${T1C_REF_PREFIX_ONLY:-}" ]; then export T1C_REF_PREFIX_ONLY=1; fi
@@ -33,6 +39,7 @@ exec "$LIBS/llama-server" \
   --split-mode tensor --tensor-split 1,1,1,1 \
   --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 \
   --parallel 1 --ubatch-size "${UB:-2048}" \
+  $SPEC_ARGS \
   --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 \
   --presence-penalty 0.0 --repeat-penalty 1.0 \
   --reasoning on --reasoning-preserve \
