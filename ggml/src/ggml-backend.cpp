@@ -1695,6 +1695,8 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
     int prev_backend_id = -1;
 
     const bool cprof = getenv("GGML_SCHED_TIMES") != nullptr;
+    const bool g_gate = getenv("GGML_SCHED_SPLIT_GATE") == nullptr ||
+        atoi(getenv("GGML_SCHED_SPLIT_GATE")) != 0;
     const int64_t tp0 = cprof ? ggml_time_us() : 0;
     int64_t cp_copy_us = 0, cp_compute_us = 0;
     int64_t cp_copy_bytes = 0, cp_copy_n = 0;
@@ -1713,7 +1715,10 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
 
         // ensure the previous split's async work has completed before we start
         // this split, the allocator may have reused buffer regions across splits
-        if (split->n_inputs == 0 && prev_backend_id >= 0 && prev_backend_id != split_backend_id) {
+        // R315: gate skip (GGML_SCHED_SPLIT_GATE=0). The reuse premise is
+        // removed by plan adoption (address-stable placements, R302c-3); this
+        // inter-split wait was the 456 ms/call bubble (R313c, 2x228ms).
+        if (g_gate && split->n_inputs == 0 && prev_backend_id >= 0 && prev_backend_id != split_backend_id) {
             if (sched->events[prev_backend_id][sched->cur_copy] != NULL) {
                 ggml_backend_event_synchronize(sched->events[prev_backend_id][sched->cur_copy]);
             } else {
