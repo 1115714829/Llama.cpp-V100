@@ -214,6 +214,22 @@ static void sm70_decomp_group(
     cublasHandle_t cublas = sm70_decomp_state(dev_id).cublas;
     CUBLAS_CHECK(cublasSetStream(cublas, stream));
 
+    // R304 ceiling probe (GGML_DECOMP_TIMES=1): phase wall times around the
+    // cuBLAS GEMMs at the production shape (the fused-form hardcap anchor).
+    // ev1/ev2 get a fallback record before the loop: a zero-block call would
+    // otherwise time unrecorded events (cudaErrorInvalidValue).
+    const bool dprof = getenv("GGML_DECOMP_TIMES") != nullptr;
+    cudaEvent_t ev0, ev1, ev2, ev3;
+    if (dprof) {
+        cudaEventCreate(&ev0);
+        cudaEventCreate(&ev1);
+        cudaEventCreate(&ev2);
+        cudaEventCreate(&ev3);
+        cudaEventRecord(ev0, stream);
+        cudaEventRecord(ev1, stream);
+        cudaEventRecord(ev2, stream);
+    }
+
     const float alpha = 1.0f;
     const float beta0 = 0.0f;
     const float beta1 = 1.0f;
@@ -225,6 +241,9 @@ static void sm70_decomp_group(
         sm70_decomp_pack_kv_kernel<<<(unsigned) ((kbn + 255) / 256), 256, 0, stream>>>(
             Vg, v_rstep, v_hstep, gkv, j0, kbn, Vp);
         CUDA_CHECK(cudaGetLastError());
+        if (dprof) {
+            cudaEventRecord(ev1, stream);
+        }
 
         // QK: S[q6, kbn] = Qp^T[q6, 256] x Kp[256, kbn], fp32 accumulate.
         CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_T, CUBLAS_OP_N,
@@ -233,6 +252,9 @@ static void sm70_decomp_group(
                 Kp, CUDA_R_16F, 256,
                 &beta0, S, CUDA_R_32F, q6,
                 CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+        if (dprof) {
+            cudaEventRecord(ev2, stream);
+        }
 
         // block softmax + running merge (scale folded via scale_log2 here).
         sm70_decomp_softmax_block_kernel<32><<<
@@ -241,7 +263,9 @@ static void sm70_decomp_group(
                 kbn, q6, q_len, n_kv, j0, gqa,
                 softmax_scale_log2, j0 == 0);
         CUDA_CHECK(cudaGetLastError());
-        (void) 0;
+        if (dprof) {
+            cudaEventRecord(ev3, stream);
+        }
 
         // PV: O[256, q6] += Vp[256, kbn] x P^T[kbn, q6], fp32 accumulate.
         CUBLAS_CHECK(cublasGemmEx(cublas, CUBLAS_OP_N, CUBLAS_OP_T,
@@ -250,11 +274,33 @@ static void sm70_decomp_group(
                 P, CUDA_R_16F, q6,
                 &beta1, O, CUDA_R_32F, 256,
                 CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+        if (dprof) {
+            cudaEventRecord(ev2, stream);
+        }
     }
 
     sm70_decomp_epilogue_kernel<<<(unsigned) min(q6, 256), 32, 0, stream>>>(
         O, out_raw, row_sum, q6, gqa, g0, o_t, o_h);
     CUDA_CHECK(cudaGetLastError());
+    if (dprof) {
+        cudaEventRecord(ev3, stream);
+        cudaEventSynchronize(ev3);
+        float tpack, tqk, tsoft, tpv;
+        cudaEventElapsedTime(&tpack, ev0, ev1);
+        cudaEventElapsedTime(&tqk, ev1, ev2);
+        cudaEventElapsedTime(&tsoft, ev2, ev3);
+        cudaEventElapsedTime(&tpv, ev1, ev3);
+        static int nd = 0;
+        if (nd < 64 || (kbn_total > 200000 && nd < 96)) {
+            nd++;
+            fprintf(stderr, "[DPROF] pack=%.2f qk=%.2f soft=%.2f rest=%.2f tot=%.2f ms (q6=%d kbn=%d)\n",
+                tpack, tqk, tsoft, tpv - tqk - tsoft, tpack + tpv, q6, kbn_total);
+        }
+        cudaEventDestroy(ev0);
+        cudaEventDestroy(ev1);
+        cudaEventDestroy(ev2);
+        cudaEventDestroy(ev3);
+    }
 }
 
 } // namespace FLASH_NAMESPACE
