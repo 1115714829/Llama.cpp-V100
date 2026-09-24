@@ -1978,9 +1978,10 @@ struct CublasQKLauncher {
 
   void launch(cudaStream_t stream) const {
     check(cublasSetStream(handle, stream), "set cuBLAS QK stream");
-    // R335: Tensor Core algorithms reject small M (cuBLAS status 13). Warmup and
-    // decode shapes have rows = q*heads_q < 128 -> default path.
-    cublasGemmAlgo_t qk_algorithm = (rows >= 128) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT;
+    // R337: cuBLAS heuristics pick Tensor Core paths that reject small m/n (status 13;
+    // decode tail blocks have width as small as 2). Force the SIMT algorithm there.
+    cublasGemmAlgo_t qk_algorithm = (rows >= 128 && width >= 8)
+        ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_ALGO0;
     if (char const* runtime_algorithm =
             std::getenv("PREFIX_QK_CUBLAS_ALGO_RUNTIME")) {
       qk_algorithm =
@@ -2007,11 +2008,19 @@ struct CublasQKLauncher {
     __half beta = __float2half(0.0f);
     constexpr cublasComputeType_t kComputeType = CUBLAS_COMPUTE_16F;
   #endif
-    check(cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, rows, width, 256,
+    cublasStatus_t cst = cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, rows, width, 256,
                        &alpha, query_transposed, CUDA_R_16F, query_stride,
                        key_transposed, CUDA_R_16F, key_stride, &beta, scores,
-                       CUDA_R_16F, rows, kComputeType, qk_algorithm),
-          "launch cuBLAS raw QK");
+                       CUDA_R_16F, rows, kComputeType, qk_algorithm);
+    if (cst != CUBLAS_STATUS_SUCCESS) {
+      fprintf(stderr,
+              "[T1C] QKFAIL status=%d rows=%d width=%d k=256 lda=%d ldb=%d ldc=%d "
+              "A=%p B=%p C=%p algo=%d cudaErr=%d\n",
+              (int) cst, rows, width, query_stride, key_stride, rows,
+              (void *) query_transposed, (void *) key_transposed, (void *) scores,
+              (int) qk_algorithm, (int) cudaGetLastError());
+    }
+    check(cst, "launch cuBLAS raw QK");
   }
 };
 #endif
@@ -3580,7 +3589,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                           rows, sub_n, kHeadDim, &alpha, ws.qt, CUDA_R_16F, rows,
                           ws.kt + (size_t) (begin + sub) * kHeadDim, CUDA_R_16F, kv_len, &beta,
                           ws.scores + (size_t) sub * rows, CUDA_R_16F, rows, CUBLAS_COMPUTE_16F,
-                          (rows >= 128) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_DEFAULT);
+                          (rows >= 128 && width >= 8) ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_ALGO0);
       if (cst != CUBLAS_STATUS_SUCCESS) break;
     }
     fprintf(stderr, "[T1C] t3qk-post cst=%d\n", (int) cst);
