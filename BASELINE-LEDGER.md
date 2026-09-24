@@ -147,6 +147,16 @@
 - **安全线**：decode 准入 = `LLAMA_SM70_79T_DECODE=1` env 门控（默认关）⇒ 生产路径零影响 ✓（stress arm Q 基线正常可证）。
 - **工装**：门值可带 env 跑（`LLAMA_SM70_79T_DECODE=1 bash t1c-gate.sh`）= P7 类改动的标准正确性检验 ✓。
 
+- **R337 ★★★ P7 真因定案：cuBLAS fp16 小 stride 对齐约束（lda=12 非 8 倍数）——TC status 13、SIMT ALGO0 status 15 双拒；prefill lda=12288 是 8 倍数故从不触发；修法 = 行填充到 8 倍数或专用 decode GEMV 核**（2026-09-25）
+
+- **诊断（QKFAIL 打印，`prefill.cu` 的 `check()` 失败点）**：
+  - 第一击：`status=13 rows=12 width=2 k=256 lda=12 ldb=256 ldc=12 algo=-1`（cuBLAS 默认启发式 = TC 路径，拒小 m/n）。
+  - 第二击：`status=15 rows=12 width=254 k=256 lda=12 ldb=256 ldc=12 algo=0`（**SIMT ALGO0 亦拒** = NOT_SUPPORTED）。
+  - ⇒ **共性 = lda=ldc=12（rows=q*heads_q=12，非 8 倍数）**；prefill rows=12288 是 8 倍数 ⇒ 从不触发 ✓。与 width 无关（2 与 254 都败）。
+- **修法定案（二选一）**：① **行填充到 8 倍数**（rows → (rows+7)&~7；workspace kRows=12288 免费；softmax/store 只认有效行；掩码按 row/heads_q 映射天然兼容）② 专用 decode GEMV 核（1cat `sm70_grouped_long/scalar-attention.cu` 同构，无 cuBLAS 约束）。
+- **正确性地基（保持）**：q=1（rows=6）门值 g1=g0 ✓（decode 注意力经引擎逐位一致）；decode 准入 = `LLAMA_SM70_79T_DECODE=1` env 门控（默认关 ⇒ 生产零影响 ✓）。
+- **下一步**：实施修法①（行填充）→ 门值（含 spec 形状）→ 性能 A/B（预期 **-9 ms/轮**）→ 采用则入采用链。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
