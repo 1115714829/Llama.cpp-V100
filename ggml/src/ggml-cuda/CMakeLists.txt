@@ -103,6 +103,7 @@ if (CUDAToolkit_FOUND)
     list(APPEND GGML_HEADERS_CUDA "../../include/ggml-cuda.h")
 
     file(GLOB   GGML_SOURCES_CUDA "*.cu")
+    list(REMOVE_ITEM GGML_SOURCES_CUDA "${CMAKE_CURRENT_SOURCE_DIR}/fattn79t-prefill.cu")
     file(GLOB   SRCS "template-instances/fattn-tile*.cu")
     list(APPEND GGML_SOURCES_CUDA ${SRCS})
     file(GLOB   SRCS "template-instances/fattn-mma*.cu")
@@ -123,6 +124,19 @@ if (CUDAToolkit_FOUND)
     # sm70 vendor headers (cute/cutlass) resolve includes relative to this root
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sm70-vendor")
         target_include_directories(ggml-cuda PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/sm70-vendor")
+    endif()
+    # T1-C 79T: isolated OBJECT target - its own full CUTLASS 2.11 root never
+    # mixes with the sm70-vendor subset (API drift proven by build).
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fattn79t-prefill.cu")
+        add_library(ggml-cuda-fattn79t OBJECT "${CMAKE_CURRENT_SOURCE_DIR}/fattn79t-prefill.cu")
+        target_include_directories(ggml-cuda-fattn79t PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/fattn-79t/include/cutlass"
+            "${CMAKE_CURRENT_SOURCE_DIR}/fattn-79t"
+            "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_compile_options(ggml-cuda-fattn79t PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:-O3;--use_fast_math;--expt-relaxed-constexpr;--expt-extended-lambda>)
+        set_target_properties(ggml-cuda-fattn79t PROPERTIES CUDA_ARCHITECTURES "70")
+        target_link_libraries(ggml-cuda PRIVATE $<TARGET_OBJECTS:ggml-cuda-fattn79t>)
     endif()
 
     if (GGML_CUDA_GRAPHS)
