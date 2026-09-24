@@ -157,6 +157,14 @@
 - **正确性地基（保持）**：q=1（rows=6）门值 g1=g0 ✓（decode 注意力经引擎逐位一致）；decode 准入 = `LLAMA_SM70_79T_DECODE=1` env 门控（默认关 ⇒ 生产零影响 ✓）。
 - **下一步**：实施修法①（行填充）→ 门值（含 spec 形状）→ 性能 A/B（预期 **-9 ms/轮**）→ 采用则入采用链。
 
+- **R338 ★★★ P7 真因第二层：cuBLAS 唯一可用组合 = Tensor Core + m/n 皆 8 倍数；decode tail 块 width=254（非 8 倍数）是最终拦路石（m 填充已解决 rows 侧；prefill width=24576 从不触发）**（2026-09-25）
+
+- **实测链**：rows=12/width=2/ALGO9(TC) → status 13；rows=12/width=254/ALGO0(SIMT) → status 15；**rows=16(已 8 倍数)/width=254/ALGO0 → 仍 status 15** ⇒ ALGO0+compute_16F 组合不支持 ⇒ 可用组合只剩 **TC 且 m/n 皆 8 倍数**。
+- **已落的半程修复（保留）**：`rows = (query_len*heads_q + 7) & ~7` 行填充 + `g_rows = rows_valid`（store 只写有效行 ✓）；spec 形状门值 **g1=g0=bcda0092 ✓**（q=1 与 spec verify 双覆盖）——**正确性地基全绿**。
+- **最后一块拼图（实施方案已定）**：tail 块 `width` 填充到 8 倍数 + **把填充列掩码到 -inf**（`t1c_tail_tri_mask` 同处注入 ✓）；prefix 块 width=24576 天然合规。或改用引擎自带 QKDirect/QKRaw 内核（绕开 cuBLAS 约束，兼得 q8_0 直读）。
+- **风险控制**：decode 准入仍 `LLAMA_SM70_79T_DECODE=1` env 门控（默认关 ⇒ 生产零影响 ✓）；每步门值（spec 形状）先行，性能 A/B 后置。
+- **工装沉淀**：`QKFAIL` 诊断打印（status/m/n/k/lda/ldb/ldc/algo）= cuBLAS 类问题的标准定位法 ✓。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
