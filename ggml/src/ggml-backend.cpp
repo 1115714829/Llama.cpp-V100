@@ -1633,8 +1633,22 @@ static bool ggml_backend_sched_alloc_splits(ggml_backend_sched_t sched) {
 
     // allocate graph
     // multi-slot gallocr (GGML_GALLOCR_SLOTS, default on, 0 = off): a cached plan hit is safe even when backend_ids_changed is true, because the plan key includes the buffer assignment. returns false when slots are disabled or on a miss.
+    const int64_t t0_dbg = ggml_time_us();
     bool allocated = ggml_gallocr_alloc_graph_n(sched->galloc, &sched->graph,
                                                sched->node_backend_ids, sched->leaf_backend_ids);
+    {
+        static const bool dbg = getenv("GGML_GALLOCR_TIMES") != NULL;
+        if (dbg) {
+            static int64_t t_acc = 0;
+            static int n_acc = 0;
+            t_acc += ggml_time_us() - t0_dbg;
+            n_acc++;
+            if (n_acc % 64 == 0) {
+                fprintf(stderr, "[GAT2] alloc_graph_n avg=%.1f us/call over %d calls nodes=%d\n",
+                    (double) t_acc / n_acc, n_acc, sched->graph.n_nodes);
+            }
+        }
+    }
     if (!allocated && (backend_ids_changed || !ggml_gallocr_alloc_graph(sched->galloc, &sched->graph))) {
 #ifndef NDEBUG
         GGML_LOG_DEBUG("%s: failed to allocate graph, reserving (backend_ids_changed = %d)\n", __func__, backend_ids_changed);

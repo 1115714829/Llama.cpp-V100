@@ -1126,6 +1126,7 @@ static void ggml_gallocr_alloc_graph_impl(ggml_gallocr_t galloc, struct ggml_cgr
 
 static bool ggml_gallocr_reserve_n_impl(
         ggml_gallocr_t galloc, struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids, bool no_alloc) {
+    const int64_t rt0 = ggml_time_us();
     galloc->plan_gen++;
     size_t min_hash_size = graph->n_nodes + graph->n_leafs;
     // add 25% margin to avoid hash collisions
@@ -1205,6 +1206,7 @@ static bool ggml_gallocr_reserve_n_impl(
     }
 
     // reallocate buffers if needed
+    const int64_t rt2 = ggml_time_us();
     for (int i = 0; i < galloc->n_buffers; i++) {
         // if the buffer type is used multiple times, we reuse the same buffer
         for (int j = 0; j < i; j++) {
@@ -1264,6 +1266,14 @@ static bool ggml_gallocr_reserve_n_impl(
         }
     }
 
+    {
+        const int64_t rt3 = ggml_time_us();
+        const bool dbg = getenv("GGML_GALLOCR_TIMES") != NULL;
+        if (dbg) {
+            fprintf(stderr, "[GAT] reserve n_nodes=%d plan_and_place=%lld buf_loop=%lld us\n",
+                graph->n_nodes, (long long) (rt2 - rt0), (long long) (rt3 - rt2));
+        }
+    }
     return true;
 }
 
