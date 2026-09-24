@@ -468,7 +468,8 @@ flowchart TD
     T1CSYNC["★★★ R324 真凶 = **自伤**: 入口每调用末尾无条件 `cudaStreamSynchronize` ⇒ 4 个 head-group 调用 (分居 4 卡) 全串行<br/>引擎自身累计 **276.8 s -> 25.9 s (10.7x)**; 每调用白等 ~13-14 ms x 7296 = ~100 s 空转<br/>修 = 热路径零同步 (仅留 cudaGetLastError 探针) + 符号拷贝改**每设备 pinned host 槽** (删同步后栈悬垂必修)"]:::hot
     T1CGATE["★★★ R324 **预填充硬指标达标 (时序口径)**: 256K 同源双臂各 2 rep, ub2048, 4 卡<br/>引擎 ON **149.243/149.256 s** (pp 1583, 离散 0.009%) vs 融合核 167.648/168.905 s (pp 1409) vs **BL1 152.5 s**<br/>=> 1.022x 反超 (从 1.11x 落后); 显存 12.96 GB/卡 (k0 11.96) 合 4xV16 包络; 引擎边际 = **61 TFLOPS/卡** (前缀扫描拟合: t ≈ 14.4 ms + 0.2064 us x prefix)"]:::ok
     T1CNUM["★★★ R324 数值门 (进行中): **宿主参考对拍法** (无需 numpy; T1C_REF=1) 逐维比 score/num/psum/out<br/>已定罪并修 6 项: ① g_row_sum_out/g_row_max 未接 (空指针 = 非法访存+全 0) ② kt 尺寸 (6.3MB vs 256K 需 134MB) ③ 前缀 K 偏移 (dim-major 应 +begin) ④ V guard 顺序必须在 PV 前 ⑤ 每调用 state 回写打爆 24-float 栈 (假死真凶)<br/>⑥ **PV 融合行和行映射错位** (psum 放大 12.9x; 反解 eff_shift 命中别行 pmax) => 自建行和核覆盖后 **首 128 行 maxdiff 0.356 -> 6e-4 (half 精度)**"]:::hot
-    T1CPVB["★★★ R324 残留真 bug (当前前线): PV (CUTLASS) A 操作数**行映射被 pitch-linear 线程图置换**<br/>REFPERM 探针: row100->242 / row127->86 / row200->242 / row6000->6025 / row12282->12124<br/>**非单射 (100 与 200 同指 242) ⇒ 不是纯置换 = 行间混合**; row0/16/60/128/129 = 恒等 (对)<br/>候选修法: ① warp-specialized PV 路径 (行索引显式线性, 含行和) ② 补 A/C 行映射 ③ 换 cuBLAS PV (但 P~ 物化流量 1.2GB/块 = 不可行)"]:::warn
+    T1CPVB["★★★ R324→R325 PV 行映射 = **一行宏缺失** (`PREFIX_PV_M128_W64_ROW_SUM` 的自动开启挂在 `PREFIX_TORCH_EXTENSION` 下, 我方 OBJECT 构建未定义)<br/>⇒ 每 tile 后 64 行套用前 64 行 max; 指纹 row0/16/60 对、row100/127 错、row128/129 又对 ✓ 全表吻合<br/>**修 = 补进 36 宏圣经**; 判决: maxdiff 33.04/2.87/3.55 -> **0.0017/0.0007/0.0016** (全部 half 精度档)"]:::ok
+    T1CGATE2["★★★ R325 **端到端门值通过**: 固定 100KB prompt + greedy(temp0/seed1234/32tok)<br/>引擎 ON sha = 引擎 OFF sha = `bcda0092...450bb8` (131 chars) ⇒ 预填充数值 token 级逐位忠实<br/>★★★ R326 **收官 A/B (数值正确版, 同源双臂各 2 rep)**: k1 引擎 **151.507/152.356 s (均值 151.93, pp 1555)** vs k0 融合核 167.160/167.723 vs **BL1 152.5**<br/>⇒ 对融合核 1.102x / 对 BL1 1.004x (**臂间区间重叠 = 打平略优, 非稳健反超**); 撤自建行和核收回 16.1 s (168.06->151.93)<br/>环境隔离: 改用自建启动器 `/root/libdir-gb/llama-server`; 正式树/systemd 零改动 (find 实证)"]:::ok
     T1CPROBE["方法学落地 (可复用): T1C_REF 宿主参考 + `T1C_REF_PREFIX_ONLY` / `T1C_SKIP_TAIL` 分段开关<br/>= 单调用级四层二分 (score / num / sum / out); 参照物 = q8_0 反量化 + 因果 softmax + PV 全在宿主复算<br/>踩坑: 宿主解引用设备指针 (psum[row]) = 段错误; 扫描计数读回必须 cudaMemcpyAsync + 流同步 (否则 bad > n 的假计数)"]:::fact
   end
   BLINE -.->|预填充侧被反超| T1CGATE
@@ -478,7 +479,8 @@ flowchart TD
   T1CP --> T1CNUM
   T1CNUM ==> T1CPVB
   T1CPROBE -.-> T1CNUM
-  T1CPVB ==>|必须清掉才能采纳| G
+  T1CPVB ==> T1CGATE2
+  T1CGATE2 ==>|数值已过门, 只差 256K 复测| G
   classDef goal fill:#ffe6cc,stroke:#d79b00,stroke-width:3px
   classDef fact fill:#e8e8e8,stroke:#666
   classDef hot  fill:#ffcccc,stroke:#cc0000,stroke-width:2px
