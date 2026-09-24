@@ -3216,6 +3216,25 @@ __global__ void transpose_tt_dh_kernel(const Element * src, Element * dst,
   dst[i] = src[row * d + dd];
 }
 
+// T1-C row sums. The Q8000 topology fuses this reduction into the PV epilogue,
+// but its row mapping does not match the llama group shape here (measured: the
+// sum of one row lands on a different row's slot, which inflates psum by up to
+// 13x and flattens the softmax). Recompute sum_j exp(s - row_max) directly.
+__global__ void t1c_row_sum_kernel(const ScoreElement * scores,
+                                   const float * row_max, float * row_sum,
+                                   int rows, int width) {
+  const int row = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row >= rows) return;
+  const float shift = row_max[row];
+  float sum = 0.0f;
+  const __half * sc = reinterpret_cast<const __half *>(scores);
+  for (int col = 0; col < width; ++col) {
+    const float s = __half2float(sc[(size_t) col * rows + row]);
+    sum += exp2f((s - shift) * 1.4426950408889634f);
+  }
+  row_sum[row] = sum;
+}
+
 // T1-C non-finite scan: counts Inf/NaN bit patterns. Prints only when dirty, so
 // the log names the first buffer that loses finiteness.
 __global__ void t1c_bad_count_u16(const unsigned short * p, long n, int * out) {
@@ -3479,6 +3498,9 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                              ws.num, rows, width, false);
     pv.launch(stream);
     T1C_CHK("s2-pv");
+    t1c_row_sum_kernel<<<(rows + 255) / 256, 256, 0, stream>>>(
+        ws.scores, ws.bmax, ws.bsum, rows, width);
+    T1C_CHK("s2-rowsum");
     stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
         reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
         ws.vacc, ws.psum, ws.pmax, b == 0);
@@ -3493,7 +3515,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
   if (getenv("T1C_STAGE_STOP") != nullptr && atoi(getenv("T1C_STAGE_STOP")) == 2) return cudaSuccess;
   // 3) Triangular tail = the chunk's own diagonal block. Masked QK -> row max
   //    -> FP32 PV -> online merge, same stable-rows scheme as the prefix blocks.
-  {
+  if (getenv("T1C_SKIP_TAIL") == nullptr) {
     const int begin = prefix;
     const int width = query_len;
     CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + begin,
@@ -3518,6 +3540,9 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                              ws.num, rows, width, false);
     pv.launch(stream);
     T1C_CHK("s3-pv");
+    t1c_row_sum_kernel<<<(rows + 255) / 256, 256, 0, stream>>>(
+        ws.scores, ws.bmax, ws.bsum, rows, width);
+    T1C_CHK("s3-rowsum");
     stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
         reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
         ws.vacc, ws.psum, ws.pmax, n_blocks == 0);
@@ -3654,8 +3679,8 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
   if (getenv("T1C_REF") != nullptr) {
     static int t1c_ref_calls = 0;
     const int ref_max = getenv("T1C_REF_MAX") ? atoi(getenv("T1C_REF_MAX")) : 8;
-    static const int kRefT[6] = {0, 0, 1, 1000, 2047, 2047};
-    static const int kRefH[6] = {0, 5, 0, 0, 0, 5};
+    static const int kRefT[11] = {0, 2, 10, 16, 21, 21, 21, 33, 166, 1000, 2047};
+    static const int kRefH[11] = {0, 4, 0, 4, 1, 2, 3, 2, 4, 0, 0};
     if (t1c_ref_calls++ < ref_max) {
       cudaStreamSynchronize(stream);
       auto h2f = [](unsigned short h) {
@@ -3684,7 +3709,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
       cudaMemcpy(vb, v, (size_t) kv_len * 272, cudaMemcpyDeviceToHost);
       fprintf(stderr, "[T1C] REF call=%d q=%d kv=%d prefix=%d\n",
               t1c_ref_calls - 1, query_len, kv_len, prefix);
-      for (int r = 0; r < 6; ++r) {
+      for (int r = 0; r < 11; ++r) {
         const int t0 = kRefT[r], h0 = kRefH[r];
         if (t0 >= query_len || h0 >= heads_q) continue;
         std::vector<float> qrow(kHeadDim);
@@ -3692,7 +3717,8 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                    (const float *) q + (size_t) h0 * kHeadDim +
                        (size_t) t0 * 1536,
                    sizeof(float) * kHeadDim, cudaMemcpyDeviceToHost);
-        const int nvalid = prefix + t0 + 1;
+        const int nvalid = getenv("T1C_REF_PREFIX_ONLY") ? prefix
+                                                        : prefix + t0 + 1;
         std::vector<float> sc(nvalid);
         float m = -1e30f;
         for (int j = 0; j < nvalid; ++j) {
@@ -3736,9 +3762,14 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
         {
           const int row = t0 * heads_q + h0;
           const int cols[5] = {0, 1, 100, 1000, nvalid - 1};
+          float eng_psum = 0.0f, eng_pmax = 0.0f;
+          cudaMemcpy(&eng_psum, ws.psum + row, sizeof(float),
+                     cudaMemcpyDeviceToHost);
+          cudaMemcpy(&eng_pmax, ws.pmax + row, sizeof(float),
+                     cudaMemcpyDeviceToHost);
           fprintf(stderr, "[T1C] REFSC row=%d refmax=%.5f engpsum=%.6g "
                           "engpmax=%.6g refZ=%.6g\n",
-                  row, m, (double) ws.psum[row], (double) ws.pmax[row], Z);
+                  row, m, (double) eng_psum, (double) eng_pmax, Z);
           for (int c = 0; c < 5; ++c) {
             const int col = cols[c];
             if (col < 0 || col >= nvalid) continue;
@@ -3750,6 +3781,123 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
             fprintf(stderr,
                     "[T1C] REFSC col=%d ref_score=%+.5f eng_score=%+.5f\n", col,
                     sc[col], h2f(hs));
+          }
+          // PV/merge bisect with the engine's own shift and value scale.
+          float eng_vmax = 0.0f;
+          cudaMemcpy(&eng_vmax, ws.vmax, sizeof(float),
+                     cudaMemcpyDeviceToHost);
+          float eng_scale = fmaxf(eng_vmax, 1.0f);
+          int eng_exp = 0;
+          const float eng_man = frexpf(eng_scale, &eng_exp);
+          eng_scale = ldexpf(1.0f, eng_exp - (eng_man == 0.5f)) * 64.0f;
+          std::vector<float> ctr(kHeadDim, 0.0f);
+          cudaMemcpy(ctr.data(), ws.vcenter, sizeof(float) * kHeadDim,
+                     cudaMemcpyDeviceToHost);
+          std::vector<double> nref(kHeadDim, 0.0);
+          double Zref = 0.0;
+          for (int j = 0; j < nvalid; ++j) {
+            const float w = expf(sc[j] - eng_pmax);
+            Zref += w;
+            const unsigned char * blk = vb + (size_t) j * 272;
+            for (int d = 0; d < kHeadDim; ++d) {
+              const unsigned char * b = blk + (d / 32) * 34;
+              const float v = h2f(*(const unsigned short *) b) *
+                              (float) (signed char) b[2 + (d % 32)];
+              nref[d] += (double) w * ((v - ctr[d]) / eng_scale);
+            }
+          }
+          float eng_num[3] = {0, 0, 0};
+          cudaMemcpy(eng_num, ws.num + (size_t) row * kHeadDim,
+                     sizeof(float) * 3, cudaMemcpyDeviceToHost);
+          fprintf(stderr,
+                  "[T1C] REFNUM eng_scale=%.4g eng_shift=%.5f Zref=%.6g "
+                  "engpsum=%.6g | num ref %+.6g %+.6g %+.6g | num eng %+.6g "
+                  "%+.6g %+.6g\n",
+                  eng_scale, eng_pmax, Zref, (double) eng_psum,
+                  nref[0], nref[1], nref[2], (double) eng_num[0],
+                  (double) eng_num[1], (double) eng_num[2]);
+          fprintf(stderr,
+                  "[T1C] REFOUT out_from_ref_num %+.5f %+.5f %+.5f | got %+.5f "
+                  "%+.5f %+.5f | true %+.5f %+.5f %+.5f\n",
+                  (float) (nref[0] / Zref * eng_scale + ctr[0]),
+                  (float) (nref[1] / Zref * eng_scale + ctr[1]),
+                  (float) (nref[2] / Zref * eng_scale + ctr[2]), got[0], got[1],
+                  got[2], (float) (acc[0] / Z), (float) (acc[1] / Z),
+                  (float) (acc[2] / Z));
+          // What shift did the engine's row sum effectively use? Compare with
+          // every row's published row max.
+          const double eff_shift =
+              (double) eng_pmax - log((double) eng_psum / Zref);
+          std::vector<float> pmax_all(rows, 0.0f);
+          cudaMemcpy(pmax_all.data(), ws.pmax, sizeof(float) * rows,
+                     cudaMemcpyDeviceToHost);
+          int hit = -1;
+          float hitv = 0.0f;
+          for (int rr = 0; rr < rows; ++rr) {
+            if (fabsf(pmax_all[rr] - (float) eff_shift) < 0.05f) {
+              hit = rr;
+              hitv = pmax_all[rr];
+              break;
+            }
+          }
+          fprintf(stderr,
+                  "[T1C] REFSHIFT row=%d eff_shift=%.4f own_pmax=%.4f "
+                  "match_row=%d match_val=%.4f\n",
+                  row, eff_shift, (double) eng_pmax, hit, (double) hitv);
+          // Which row's numerator does the engine's num[] actually hold?
+          {
+            std::vector<float> kmat((size_t) nvalid * kHeadDim);
+            for (int j = 0; j < nvalid; ++j) {
+              const unsigned char * blk = kb + (size_t) j * 272;
+              for (int d = 0; d < kHeadDim; ++d) {
+                const unsigned char * b = blk + (d / 32) * 34;
+                kmat[(size_t) j * kHeadDim + d] =
+                    h2f(*(const unsigned short *) b) *
+                    (float) (signed char) b[2 + (d % 32)];
+              }
+            }
+            float eng8[8] = {0};
+            cudaMemcpy(eng8, ws.num + (size_t) row * kHeadDim, sizeof(eng8),
+                       cudaMemcpyDeviceToHost);
+            std::vector<float> q2(kHeadDim, 0.0f);
+            std::vector<float> srow(nvalid, 0.0f);
+            int best = -1;
+            double besterr = 1e30;
+            for (int rr = std::max(0, row - 160);
+                 rr <= std::min(rows - 1, row + 160); ++rr) {
+              const int t2 = rr / heads_q, h2 = rr % heads_q;
+              cudaMemcpy(q2.data(),
+                         (const float *) q + (size_t) h2 * kHeadDim +
+                             (size_t) t2 * 1536,
+                         sizeof(float) * kHeadDim, cudaMemcpyDeviceToHost);
+              for (int j = 0; j < nvalid; ++j) {
+                const float * kc = kmat.data() + (size_t) j * kHeadDim;
+                float s = 0.0f;
+                for (int d = 0; d < kHeadDim; ++d) s += q2[d] * kc[d];
+                srow[j] = s * 0.0625f;
+              }
+              double err = 0.0;
+              for (int d0 = 0; d0 < 8; ++d0) {
+                double a2 = 0.0;
+                for (int j = 0; j < nvalid; ++j) {
+                  const float w = expf(srow[j] - pmax_all[rr]);
+                  const unsigned char * blk = vb + (size_t) j * 272;
+                  const unsigned char * b = blk + (d0 / 32) * 34;
+                  const float v = h2f(*(const unsigned short *) b) *
+                                  (float) (signed char) b[2 + (d0 % 32)];
+                  a2 += (double) w * ((v - ctr[d0]) / eng_scale);
+                }
+                err += fabs(a2 - (double) eng8[d0]);
+              }
+              if (err < besterr) {
+                besterr = err;
+                best = rr;
+              }
+            }
+            fprintf(stderr,
+                    "[T1C] REFPERM row=%d best_row=%d err=%.4g (dt=%d dh=%d)\n",
+                    row, best, besterr, best / heads_q - row / heads_q,
+                    best % heads_q - row % heads_q);
           }
         }
       }
