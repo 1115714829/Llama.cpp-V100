@@ -553,12 +553,9 @@ static uint64_t ggml_gallocr_fast_stamp(
     return s;
 }
 
-// key = graph structure + node/leaf buffer ids (buffer ids matter: same shape with a
-// different backend assignment must not share a plan). covers node dst shape, src slot
-// pattern and src shapes: the plan places tensors by lifetime, so two graphs may share
-// a plan only if their wiring is the same. the hash only picks a slot; needs_realloc
-// re-validates all sizes after the slot is loaded. (R302: exact sizes - size classes
-// were refuted by the placement assert at ggml-backend.cpp:2359.)
+// R302c-2: structure-only key (no ne dims): shape-neighbor plans are adopted
+// after per-tensor size_max validation in alloc_graph_n, so bucket steps share
+// one plan and the fallback path (global sync + re-place) is skipped entirely.
 static uint64_t ggml_gallocr_plan_key(
         const struct ggml_cgraph * graph, const int * node_buffer_ids, const int * leaf_buffer_ids) {
     uint64_t h = 0xcbf29ce484222325ull;
@@ -568,9 +565,6 @@ static uint64_t ggml_gallocr_plan_key(
         const struct ggml_tensor * t = graph->nodes[i];
         h = h * 0x100000001b3ull + (uint64_t) t->type;
         h = h * 0x100000001b3ull + (uint64_t) t->op;
-        for (int d = 0; d < 4; d++) {
-            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
-        }
         h = h * 0x100000001b3ull + (uint64_t) (uintptr_t) t->op_params[0];
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
         h = h * 0x100000001b3ull + (uint64_t) (node_buffer_ids ? node_buffer_ids[i] : 0);
@@ -581,21 +575,55 @@ static uint64_t ggml_gallocr_plan_key(
             }
             h = h * 0x100000001b3ull + (uint64_t) j;
             h = h * 0x100000001b3ull + (uint64_t) s->type;
-            for (int d = 0; d < 4; d++) {
-                h = h * 0x100000001b3ull + (uint64_t) s->ne[d];
-            }
         }
     }
     for (int i = 0; i < graph->n_leafs; i++) {
         const struct ggml_tensor * t = graph->leafs[i];
         h = h * 0x100000001b3ull + (uint64_t) t->type;
-        for (int d = 0; d < 4; d++) {
-            h = h * 0x100000001b3ull + (uint64_t) t->ne[d];
-        }
         h = h * 0x100000001b3ull + (uint64_t) (t->view_src != NULL);
         h = h * 0x100000001b3ull + (uint64_t) (leaf_buffer_ids ? leaf_buffer_ids[i] : 0);
     }
     return h;
+}
+
+// R302c-2 adoption gate: every allocated tensor must fit its reserved region.
+// The plan was measured on possibly different sizes; this is the per-tensor
+// validation the placement assert (ggml-backend.cpp:2359) demanded.
+static bool ggml_gallocr_plan_fits(ggml_gallocr_t galloc, struct ggml_cgraph * graph) {
+    if (galloc->n_nodes != graph->n_nodes || galloc->n_leafs != graph->n_leafs) {
+        return false;
+    }
+    for (int i = 0; i < graph->n_nodes; i++) {
+        struct ggml_tensor * node = graph->nodes[i];
+        struct node_alloc * na = &galloc->node_allocs[i];
+        if (na->dst.buffer_id >= 0 && na->dst.size_max > 0) {
+            if (ggml_backend_buft_get_alloc_size(galloc->bufts[na->dst.buffer_id], node) > na->dst.size_max) {
+                return false;
+            }
+        }
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            struct ggml_tensor * s = node->src[j];
+            if (s == NULL) {
+                continue;
+            }
+            struct tensor_alloc * sa = &na->src[j];
+            if (sa->buffer_id >= 0 && sa->size_max > 0) {
+                if (ggml_backend_buft_get_alloc_size(galloc->bufts[sa->buffer_id], s) > sa->size_max) {
+                    return false;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < graph->n_leafs; i++) {
+        struct ggml_tensor * leaf = graph->leafs[i];
+        struct leaf_alloc * la = &galloc->leaf_allocs[i];
+        if (la->leaf.buffer_id >= 0 && la->leaf.size_max > 0) {
+            if (ggml_backend_buft_get_alloc_size(galloc->bufts[la->leaf.buffer_id], leaf) > la->leaf.size_max) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 // R302 single-pool: keep the evicted slot's buffers as the starting pool for
@@ -1244,8 +1272,11 @@ static bool ggml_gallocr_reserve_n_impl(
                 // R302 growth headroom: small plan growth must not free+malloc
                 // the whole pool. Inflate chunk max_size so later steps fit.
                 // GGML_GALLOCR_GROWTH=1.0 disables; default 1.5.
+                // R302c-2: no inflation in slotted mode - adoption carries the
+                // shape march and per-slot pools must stay within VRAM (1.5x
+                // per slot is the OOM wall the meta assert reported).
                 {
-                    double growth = 1.5;
+                    double growth = galloc->slots_n > 0 ? 1.0 : 1.5;
                     const char * ge = getenv("GGML_GALLOCR_GROWTH");
                     if (ge != NULL && atof(ge) >= 1.0) {
                         growth = atof(ge);
@@ -1468,7 +1499,13 @@ bool ggml_gallocr_alloc_graph_n(
     }
     // a slot plan was fit-validated by needs_realloc at reserve time for this key, so the
     // per-call re-check is skipped (GGML_GALLOCR_FAST=0 restores it)
+    // R302c-2: structure-only keys may map a plan measured on other sizes; the
+    // per-tensor gate below is the fit validation (fast path keeps the skip).
     if (fast_on) {
+        if (!ggml_gallocr_plan_fits(galloc, graph)) {
+            galloc->slot_miss++;
+            return false;
+        }
         ggml_gallocr_assign_graph(galloc, graph);
     } else {
         if (!ggml_gallocr_alloc_graph(galloc, graph)) {
