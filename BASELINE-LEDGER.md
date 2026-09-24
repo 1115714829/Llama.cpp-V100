@@ -73,6 +73,14 @@
 - **注意（E14 判例）**：llama.cpp 的 MMVQ 走 Q4_K_M **曾更慢**（58.6 vs 55.8 ms/轮）⇒ 字节刀必须配**融合/M=1 专用 GEMV**（1cat marlin FP4 形态），不是裸换量化。
 - **AL 波动口径**：同构建两次跑 AL 2.76 / 3.12（内容相关）⇒ tg 必报 AL；每轮墙钟（90.5/90.6 ms）为稳定量。
 
+- **R328 ★★ 吐字线第一刀实验（P-D1 重测）：CUDA 图未被 MoE 禁用、基线 replay 已 63%；`GGML_META_REBUILD_CACHE` 收益 -2~12%（噪声内）⇒ P-D1 降级为小头寸，主因仍在 CPU 段 + draft 双调用**（2026-09-25）
+
+- **判据修正**：上条(R327 附注)「图 warmup 永远完不成、92% 直发」系 **5K 探针误读**（该探针的计数含预填充子图，直发占比被稀释）；25K 口径实测基线 replay=63%。**已修正，不删**。
+- **三臂实测（25K prompt / gen96；判据用每轮墙钟，tg 受 AL 内容波动不可比）**：A `GGML_META_REBUILD_CACHE=1` = **76.0 ms/轮**（replay 67%）；B `+GGML_META_REBUILD_PTR=1` = **68.6 ms/轮**（replay 71%）；C 基线 = **77.5 ms/轮**（replay 63%）。
+- **机制实证**：`mul_mat_id needs sync = 0`（Q8_0 在 Volta 的 mmid 上限 4，但 `should_use_mmq` 兜底 → 图不被禁）；`props changed` 11-12 次（打印条件 n<6 或 n%1000）⇒ 仍有高频属性抖动；图统计 `[GRAPH] calls/capture/replay/direct` = **子图粒度**（meta 后端每 ubatch 跑多个子图，`ggml-cuda.cu:5075` 注释可证）。
+- **刀序修正**：**P1（图/容器）降为 -2~5 ms/轮 头寸**（与 1-计划文档原账一致）；主刀改判 = **P3 GPU selector（+5 ms/轮 + 一次 host 往返）+ P4 GPU 采样 + P-D3 两 draft 合一**；其次 P5/P6（融合 GDN / fused W13）压 GPU 段。
+- **工装**：`t1c-run.sh` 支持任意 env 透传（未白名单变量直接进服务）；图诊断 `GGML_CUDA_GRAPH_DEBUG=1` 可得 `[GRAPH] props changed / capture/replay/direct` ✓ 已纳入测量法。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
