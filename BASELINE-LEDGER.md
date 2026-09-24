@@ -22,7 +22,12 @@
 - **P=2 预算数学**：O 累加器 64 regs/头 ×2 = 128 + Q/K 碎片 + 寻址 ≈ 200 < 256（`__launch_bounds__(256,1)` 无占用率损失）；P=3 超预算 ✗。q_smem ×2 = +32 KB（96 KB/SM 预算内待核 kSmemBytes）。
 - **★ 位级等价潜力**：每行 kv 块累加序列完全不变 ⇒ **输出可逐位同 ⇒ 门值免重立**（比 T2 分解形态的根本优势）。
 - **预登记（[S4] 沿用 + 本条）**：FA 算子 ≥+20% 或 256K TTFT ≥+7%（175.8 → ≤164 s）；**门值必须原样**（`c4e11b2d`/`f3edac19` 双谱系）；纯步不回退 >2%；显存不升。及格 = 全过；失败入灰。
-### R303-R ★★★ **GQA-摊销证伪（比率核算救场，动刀前夜止步）：compute:memory = 40:1 ⇒ 摊销天花板 2.1%；真瓶颈 = MMA 形态效率（45.9 = 峰值 41%）⇒ 回归 P-P3-T 显式 mma PV 原义**（2026-09-24）
+### R304-P ★★★ **天花板实测（DPROF 分相）：cuBLAS QK 在小 N 形状塌方 = 0.167 TFLOPS（正常 30-60 的 1/200）——T2 隐藏主凶补全、Path A 融合价值再确认**（2026-09-24）
+
+- **分相账（q6=3072, kbn=512 浅段块）**：pack 0.32 / **qk 4.81** / soft 0.04 / rest 0.00 ms ⇒ QK GEMM 本体 0.805 GFLOP / 4.81 ms = **0.167 TFLOPS**（cuBLAS 该形状 = 小 N(512) 启发式塌方；softmax 无辜）。
+- **三重意涵**：① T2 慢的隐藏主凶补全（S 物化 + **每块 GEMM 小 N 形状塌方**双重税）；② Path A 融合内核（45.9 TFLOPS）**远超** GEMM 组合形态 = 融合 mma 形态本身就是当前水位的持有者；③ **P-P3-T 论证修正：cuBLAS 不是形态上限参考**（同形状更慢）⇒ 41% 峰值利用率或已是 m8n8k4 形状真实水位，显式 mma 空间须**内核内实验**（非 GEMM 对标）。
+- **待补**：深段块（kbn=24576）分相采样被 `nd<64` 截断（PPL 前 64 调用全浅段）——一行改深段采样定全形状结论。
+- 教训链补全："比率是数据" + "形状是数据"（GEMM 效率是形状的函数，微基准的形状组合必须逐一对齐生产负载——T2 用生产形状跑出 0.167 TFLOPS 即为实证）。
 
 - **T1 实现蓝图（作废：被 R303-R 证伪，只改灰不删）**：smem 50→82 KB ✓ 免缩 kBlockM；寄存器 ≈150→222 ✓ <256（minBlocks=1）；**配对陷阱已识别**：必须组内配对 `head_q = j·gqa + 2c' + pass`（跨界对 (5,6) 跨 kv-head 禁忌），grid.z' = hkv·gqa/2；**mask = 解析式因果**（:1016 `Mask<true,false,false>(kv_len, kv_len-kv_offset)`——sm70 内核不读 kq_mask 张量！T2 学到的张量 mask 语义不适用于此内核，重要辨析）；三接缝 = ① Q 暂存双 tile（sQ×2）② QK-softmax-PV 双 pass（acc_s 复用、row 状态/o_storage/P-smem 逐 pass）③ K/V 预取提至 n_block 顶（tKrKNext/tVrV0-1 加载一次、双 pass 共读 smem）；epilogue 逐 pass（row_sum allreduce + out 写带 `head_q = z'·2+kPass`）。
 - **比率核算（决定性）**：256K 单层 FA = 287.5 ms @45.9 TFLOPS = **V100 fp16 峰值（~112 TFLOPS）的 41%**；K+V 全读（含 6x 组内重复）= 6.4 GB ⇒ 900 GB/s = **7.1 ms**（compute:memory ≈ **40:1**）⟹ GQA 摊销理想上限 = 省 5.9 ms/层 = **2.1% 天花板**。且逐 n_block K/V 工作集 = 32 KB ⇒ **6x 读本来就是 L2 命中**（非 DRAM 税）——流量论点的物理前提本身不成立。
