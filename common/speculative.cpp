@@ -1478,6 +1478,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         // phase split of the gather step, and optional submit-vs-wait split (diagnostic only)
         static int64_t ph_gather_us = 0;
         static int64_t ph_copy_us   = 0;
+        static int64_t ph_sync_us   = 0;
         static const bool sync_split = (getenv("LLAMA_SPEC_SYNC_SPLIT") != nullptr);
         static int64_t ph_wait_inj_us = 0;
         static int64_t ph_tok = 0;
@@ -1502,6 +1503,14 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 // injects them into the K/V cache at the target positions
                 batch_inject.n_tokens = n_chunk;
                 ph_tok += n_chunk;
+                // One context sync per injection instead of one per extract layer:
+                // llama_get_embeddings_layer_inp() synchronizes internally, so hoist it.
+                const int64_t ph_sync_t0 = inj_enabled ? ggml_time_us() : 0;
+                llama_synchronize(ctx_tgt);
+                const int64_t ph_sync_t1 = inj_enabled ? ggml_time_us() : 0;
+                if (inj_enabled) {
+                    ph_sync_us += ph_sync_t1 - ph_sync_t0;
+                }
                 for (uint32_t k = 0; k < target_layer_ids_n; ++k) {
                     const int64_t ph_t0 = inj_enabled ? ggml_time_us() : 0;
                     const float * layer = llama_get_embeddings_layer_inp(ctx_tgt, (uint32_t) target_layer_ids[k]);
@@ -1543,8 +1552,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                         ph_wait_inj_us += ggml_time_us() - ph_s0 - inj_submit_us;
                     }
                     if (++inj_n % 16 == 0) {
-                        LOG_INF("%s: inject timing: n=%d | gather=%.2f copy=%.2f submit=%.2f wait=%.2f ms/call (layers=%u tok=%.2f)\n",
-                                __func__, inj_n, ph_gather_us/1e3/inj_n, ph_copy_us/1e3/inj_n,
+                        LOG_INF("%s: inject timing: n=%d | sync=%.2f gather=%.2f copy=%.2f submit=%.2f wait=%.2f ms/call (layers=%u tok=%.2f)\n",
+                                __func__, inj_n, ph_sync_us/1e3/inj_n, ph_gather_us/1e3/inj_n, ph_copy_us/1e3/inj_n,
                                 inj_us/1e3/inj_n, ph_wait_inj_us/1e3/inj_n, target_layer_ids_n, (double) ph_tok/inj_n);
                     }
                 }
