@@ -81,6 +81,14 @@
 - **刀序修正**：**P1（图/容器）降为 -2~5 ms/轮 头寸**（与 1-计划文档原账一致）；主刀改判 = **P3 GPU selector（+5 ms/轮 + 一次 host 往返）+ P4 GPU 采样 + P-D3 两 draft 合一**；其次 P5/P6（融合 GDN / fused W13）压 GPU 段。
 - **工装**：`t1c-run.sh` 支持任意 env 透传（未白名单变量直接进服务）；图诊断 `GGML_CUDA_GRAPH_DEBUG=1` 可得 `[GRAPH] props changed / capture/replay/direct` ✓ 已纳入测量法。
 
+- **R329 ★★★ 吐字线真凶二号：meta 后端每 ubatch ~126 个子图 × ~165 µs host = 20.8 ms/轮提交墙；图 key = nodes[0] 指针 ⇒ 内容键化缺失**（2026-09-25）
+
+- **每轮分账（LLAMA_SPEC_TIMING 实测，25K/gen96）**：`spec timing: draft_decode=17.73 + selector=2.29 (fetch 0.10/topk 0.71/gate 0.63) + walk=0.08 + spec overhead 0.60` = **draft 侧 20.7 ms/轮**；target 侧 compute wall ≈55（host 20.8 + GPU ~34）⇒ 合计 ≈77.7 = 实测 77.5 ✓✓ **账闭合**。
+- **`GGML_CUDA_DIRECT_DEBUG` 归因**：`old_ne=[0,0] old_data=(nil)` ⇒ 每次与**空白图**比较 = 图对象每次 ubatch 新建；`ggml_cuda_graph_get_key = cgraph->nodes[0]`（ggml-cuda.cu:2739）= **指针作 key**，容器重建即换 key ⇒ warmup 永远差一次稳定 ⇒ 63% replay 全来自 llama 侧 `reuse` 的那部分。
+- **算术闭合**：meta 后端每 ubatch **~126 个子图**（calls=16384/130 ubatch；`ggml-cuda.cu:5075` 注释"the meta backend runs many graphs per ubatch"）× **~165 µs host/子图** ⇒ **20.8 ms/轮** ✓ = target 提交墙真身 ⇒ **P1 真刀 = 子图粒度/数量（合并子图）+ 内容键化**，而非图复用率。
+- **P3（GPU selector）现状**：`GGML_SPEC_SELECTOR_INGRAPH=1` **在 load_model 即崩**（TP 下 lm_head 被切分，图内 selector 无法构建——代码注释已预告）⇒ P3 须照 1cat `TP4_M1_FAST_SELECTOR` 实做 TP4 GPU selector；且实测 selector 仅 2.29 ms/轮 ⇒ **P3 头寸下调**，主刀回到 **P-D3（draft 2 调用合一，draft_decode 17.73 ms/轮 大头）+ P1 子图合并**。
+- **工装**：`LLAMA_SPEC_TIMING=1`（speculative.cpp:1190/1601/3261）= 每轮四段分账；`GGML_CUDA_DIRECT_DEBUG=1` = 图属性逐字段归因 ✓ 双双纳入测量法。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
