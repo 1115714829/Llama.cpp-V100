@@ -432,6 +432,8 @@ flowchart TD
   MMVQW -.->|R262 实测: +17.3% 慢 ⇒ 已否证| NCU8
   subgraph RFILT["R289 重过滤更正 (2026-09-23, docs/v100-dev 已同步)"]
     LAD["★ FA 定标: stock 35.8 / Path A 45.9 TFLOPS (R269 口径 x24 头; 1.49 已作废)<br/>78.4% = 峰值 ubatch 口径; 全程 32K~19% / 256K~2/3<br/>梯子 17.92 -> 46.6-47.1 (v1.3.0 Split-D = 移植源) -> 60.8 (PR#286/79T)<br/>=> 真差距 1.33x (非 3.1x); 及格线重立: 探针 FA>=+5% 或 256K>=+3%; 分解 FA>=+25% 或 256K>=+15%"]:::hot
+    R30X["★ R297-R304 战果链 (采用栈: 桶化 r=1.08 + UB=2048 + SLOTS=1 + 单池解耦 V2)<br/>=> 256K 预填充 289.2 -> 175.8 s (+64%), 距 BL1 1.90x -> 1.11x; 门值全绿<br/>证伪入灰: P-P3 分解 (S 物化 + GEMM 小 N 塌方 0.167 TFLOPS) / GQA 摊销 (compute:memory 40:1, 天花板 2.1%) / key 粗化 (放置 assert)<br/>R302b: alloc 残税 = 重建路径全后端同步 (隐藏 GPU 等待第三案); R304-P: cuBLAS 非形态上限, P-P3-T 须内核内实验"]:::hot
+    R30X ==>|P-P3-T 三臂 A/B 进行中| PP3FIX
     PP3FIX["P-P3 合同三处更正: ① tile 加大 = 每 FLOP 开销摊薄 (HMMA.884 固定 ISA, 非每条 mma 更多 FLOP)<br/>② rescale 降频属 kBlockN 轴, 合同 kBlockN=32 买不到 => 承诺删除<br/>③ T2 阻塞加深: SmemLayoutV kDChunk=128 非双射 (偏移 128 两解碰撞) = 错布局<br/>解法: 显式 mma.m8n8k4 PV + 常量按 kDChunk 泛化 (jusko/NF10 形态, 推荐)"]:::hot
     DANGLE["✔ 悬空实验已结清 (R291, 2026-09-23): **M1 吞吐杠杆证伪** —— TP4/TP3 @8K/32K/131K = 0.973/0.976/0.968 三档持平<br/>TP 扩展扫描: **加卡全线负收益** (TP4 x0.97, TP6 x0.94, 每卡吞吐递减 27%/54%), '上 4 卡'不成立<br/>=> 部署 = 全场景 TP3 (R275 同向无冲突), 卡数只按显存包络 (验收 <=4 卡); 131K 首跑 ub2048 全 OOM -> ub512 重测 (R282 同族)"]:::no
     VER["版本事实 (已核): 我方移植 = tag v1.3.0 commit 6ada86ed64<br/>v100-refs/1cat-vllm = 1.5.0 main b711d53 (PR#645); 79T 在树 (csrc/attention/sm70_79t/)<br/>Split-D 后裔在树 (sm70_v37/tail.cu, splitd_pv_gemm_tt 同名, B 碎片同样未泛化)<br/>=> P-P3/P-P3-T 学习源都在本地; DFlash2 属解码线, 不改预填充算术"]:::fact
