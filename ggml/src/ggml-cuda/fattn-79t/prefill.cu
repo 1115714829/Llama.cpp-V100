@@ -80,6 +80,11 @@
 #define PREFIX_UPSTREAM_TRANSPOSED_QK
 #define PREFIX_FIXED_STATE_NO_RESET
 #define PREFIX_PV_FUSED_PREFIX_SUM
+// Our OBJECT build does not define PREFIX_TORCH_EXTENSION, so the auto-enable at
+// the PV tile check never fires. The M128/W64 thread map still gives every
+// thread two contiguous A accesses, so without this the second access (rows
+// 64..127 of each tile) is transformed with the first access's row max.
+#define PREFIX_PV_M128_W64_ROW_SUM
 #define QK_TB_M 128
 #define QK_TB_N 128
 #define QK_WARP_M 32
@@ -3498,9 +3503,11 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                              ws.num, rows, width, false);
     pv.launch(stream);
     T1C_CHK("s2-pv");
-    t1c_row_sum_kernel<<<(rows + 255) / 256, 256, 0, stream>>>(
-        ws.scores, ws.bmax, ws.bsum, rows, width);
-    T1C_CHK("s2-rowsum");
+    if (getenv("T1C_OWSUM") != nullptr) {
+      t1c_row_sum_kernel<<<(rows + 255) / 256, 256, 0, stream>>>(
+          ws.scores, ws.bmax, ws.bsum, rows, width);
+      T1C_CHK("s2-rowsum");
+    }
     stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
         reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
         ws.vacc, ws.psum, ws.pmax, b == 0);
@@ -3540,9 +3547,11 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                              ws.num, rows, width, false);
     pv.launch(stream);
     T1C_CHK("s3-pv");
-    t1c_row_sum_kernel<<<(rows + 255) / 256, 256, 0, stream>>>(
-        ws.scores, ws.bmax, ws.bsum, rows, width);
-    T1C_CHK("s3-rowsum");
+    if (getenv("T1C_OWSUM") != nullptr) {
+      t1c_row_sum_kernel<<<(rows + 255) / 256, 256, 0, stream>>>(
+          ws.scores, ws.bmax, ws.bsum, rows, width);
+      T1C_CHK("s3-rowsum");
+    }
     stable_merge_prefix<<<(rows + 3) / 4, 256, 0, stream>>>(
         reinterpret_cast<StablePrefixPartial const *>(ws.num), ws.bsum, ws.bmax,
         ws.vacc, ws.psum, ws.pmax, n_blocks == 0);
@@ -3861,10 +3870,13 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                        cudaMemcpyDeviceToHost);
             std::vector<float> q2(kHeadDim, 0.0f);
             std::vector<float> srow(nvalid, 0.0f);
-            int best = -1;
-            double besterr = 1e30;
-            for (int rr = std::max(0, row - 160);
-                 rr <= std::min(rows - 1, row + 160); ++rr) {
+            // Targeted candidates: the two M-warp groups of a 128-row tile.
+            const int kOff[5] = {-128, -64, 0, 64, 128};
+            double cand[5][8];
+            for (int c = 0; c < 5; ++c) {
+              for (int d0 = 0; d0 < 8; ++d0) cand[c][d0] = 0.0;
+              const int rr = row + kOff[c];
+              if (rr < 0 || rr >= rows) continue;
               const int t2 = rr / heads_q, h2 = rr % heads_q;
               cudaMemcpy(q2.data(),
                          (const float *) q + (size_t) h2 * kHeadDim +
@@ -3876,7 +3888,6 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                 for (int d = 0; d < kHeadDim; ++d) s += q2[d] * kc[d];
                 srow[j] = s * 0.0625f;
               }
-              double err = 0.0;
               for (int d0 = 0; d0 < 8; ++d0) {
                 double a2 = 0.0;
                 for (int j = 0; j < nvalid; ++j) {
@@ -3887,17 +3898,29 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
                                   (float) (signed char) b[2 + (d0 % 32)];
                   a2 += (double) w * ((v - ctr[d0]) / eng_scale);
                 }
-                err += fabs(a2 - (double) eng8[d0]);
-              }
-              if (err < besterr) {
-                besterr = err;
-                best = rr;
+                cand[c][d0] = a2;
               }
             }
+            auto err_of = [&](const double * got_cand) {
+              double e = 0.0;
+              for (int d0 = 0; d0 < 8; ++d0) {
+                e += fabs(got_cand[d0] - (double) eng8[d0]);
+              }
+              return e;
+            };
+            const double self_c[8] = {cand[2][0], cand[2][1], cand[2][2],
+                                      cand[2][3], cand[2][4], cand[2][5],
+                                      cand[2][6], cand[2][7]};
+            double pair[8], pair2[8];
+            for (int d0 = 0; d0 < 8; ++d0) {
+              pair[d0] = cand[1][d0] + cand[2][d0];   // r-64 + r
+              pair2[d0] = cand[2][d0] + cand[3][d0];  // r + r+64
+            }
             fprintf(stderr,
-                    "[T1C] REFPERM row=%d best_row=%d err=%.4g (dt=%d dh=%d)\n",
-                    row, best, besterr, best / heads_q - row / heads_q,
-                    best % heads_q - row % heads_q);
+                    "[T1C] REFCAND row=%d err(112|%d)=%.4g err(064|%d)=%.4g "
+                    "err(self)=%.4g err(064+self)=%.4g err(self+064)=%.4g\n",
+                    row, row - 128, err_of(cand[0]), row - 64, err_of(cand[1]),
+                    err_of(self_c), err_of(pair), err_of(pair2));
           }
         }
       }
