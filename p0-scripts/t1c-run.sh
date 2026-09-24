@@ -14,6 +14,9 @@ export LD_LIBRARY_PATH=$LIBS:/usr/local/cuda/lib64
 export CUDA_VISIBLE_DEVICES=${CARDS:-0,1,2,3}
 export GGML_GALLOCR_SLOTS=${SLOTS:-1}
 if [ "${NO79T:-}" != "1" ]; then export LLAMA_SM70_79T=1; fi
+# R332: meta sub-graph capture/replay = -12.6% per round at 25K, -4.1% at 256K.
+# FULLGRAPH alone is harmful (draft faster but target slower) => keep it off.
+export GGML_META_SUBGRAPH_CAPTURE=1
 SPEC_ARGS=""
 if [ "${SPEC:-}" = "1" ]; then
   SPEC_ARGS="--model-draft /mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf --spec-type draft-dflash --spec-draft-n-max ${NMAX:-7}"
