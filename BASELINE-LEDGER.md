@@ -15,7 +15,11 @@
 | **B4** | **B3 + T8 多槽 gallocr（R273/R274；**默认 ON**，`GGML_GALLOCR_SLOTS=0` 回退；库 `/root/libdir-t8b`）** | **107.24 / 95.88 / 141.19** | 5.55 / 4.22 / 6.38 | **51.76 / 44.01 / 45.19（46.99）** | **均值 -6.5%（-3.29 ms/轮）** | 采用（B5 之前） |
 | **B5** | **B4 + FGC 关闭（R276 新鲜度反转；完全不设 `GGML_META_FULLGRAPH`）** | **113.28 / 94.32 / 145.65** | 5.55 / 4.22 / 6.38 | **49.18 / 44.99 / 43.63（45.94）** | **均值 -2.1%（-1.00 ms/轮）** | **采用（当前基准）** |
 
-### R302 ★★ **alloc 45.6 s 战役：增长余量（零效果）→ key 粗化（assert 证伪）→ 机制全图落定，单池解耦 v2 立案**（2026-09-24）
+### R302b ★★★ **alloc 33 s 真身终局：重建路径全后端同步（隐藏 GPU 等待第三案）——逐层剥洋葱定案**（2026-09-24）
+
+- **剥洋葱链（每层实证）**：① [GAT] 埋点：reserve_n_impl 仅 **2.6 ms**（3963 节点）、buf_loop **µs 级**（单池 v2 完美生效）⇒ reserve 无罪；② `GGML_SCHED_SPLIT_CACHE=1` **零效果**（33.04 vs 33.03 s）⇒ split_graph 无罪（且发现指纹 split 缓存 = 更早战役遗产、默认 OFF、P10 探针真身 = `[SCHED]`）；③ cudaMemset 逐张量嫌疑**条件排除**（仅非-COMPUTE 量化张量，不在每调用路径）；④ **算术闭合终局**：91 rebuild × ~700 ms ≈ 64 s（双 rep）= **`:1654-1658` 重建路径 `ggml_backend_synchronize(all backends)`**（注释"re-allocation may cause split inputs to move"）= **隐藏 GPU 等待**（R298-P compute-async 家族第三案）；ub 缩放表象（28 vs 139 ms/调用）= GPU 越忙等越久 ✓ 全解释。
+- **R302c 候选（下轮定设计）**：a) **形状类预热**（启动期对全部 bucket 类 × 形态预 reserve → 运行期全走命中路径 = 零 miss 零 sync ✓ 零语义风险，首选）；b) 桶阶梯加粗（24 类→12 类，sync 省 8.4 s vs FA padding +5-13% = 平/负，灰）；c) 放置稳定性/异步安全（深水区）。
+- 工具链注记：paramiko 通道 ~5 min 超时（长活必须 nohup + 分段收）；GAT2 埋点哑因未明（GAT 同 env 同流有效——疑作用域/优化差异，不阻塞主案）；`[SCHED]` %256 阈值打印两次未现身（探针可靠性注记）。
 
 - **目标**：ub2048 采用栈 alloc = 45.6 s/46 rebuild（900 ms/次整池 free+malloc）= 墙钟 25%；砍到 ~3 s ⇒ TTFT ~150 s ⇒ **反超 BL1 spec-off（159.0）**。
 - **证据链两轮**：① **增长余量（ggml-alloc.c realloc 分支 chunk max_size ×1.5+16MB）= 零效果**（alloc 45.6 不动）——因 `realloc = buffers[i]==NULL`（:1183）= **新 plan key 必然全新分配**，T8 槽对"单调增长 + 46 个一次性 key" = 逐 key 驱逐（slot_clear :610 **vbuffer_free 整池**）+ 重建，增长余量被架空。② **key 尺寸量化（2 的幂档）= assert 证伪**：`ggml-backend.cpp:2359` 张量放置越界 assert——**plan 地址布局不可跨尺寸复用**（"re-validates all sizes" 实为总量级弱验证），灰名单。
