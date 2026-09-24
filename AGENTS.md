@@ -30,7 +30,7 @@
 > **BL3 口径**：同 BL1 prompt/生成长度、thinking on、DFlash2 n-max 7、**TP4 卡 0,1,2,3**（TP3 深 KV OOM：双 KV 头 rank +578 MiB 分配失败）、`--parallel 1 --ctx-size 262144`（llama 把 ctx 按槽均分）、ub 512、库 `/root/libdir-t8b`。**BL2 = 结构性不可用**：官方 434ddbb 与 b11053 原版均 0.05s 内 D7 硬崩（`ggml-backend-meta.cpp:543`，DFlash2 selector top-k × vocab 切分），B5 的 D7 修复是入场券（账本 R292）。⚠ 合成 prompt 对双方投机都有可预测性红利（横向公平），勿与 1cat 文档真实文本 50 t/s 直接比。
 
 **当前差距分解（R293→R298-P 定案，256K 同口径）**：**预填充 = GPU-bound（GPU 152.6 s = 79%，CPU 21%）**；FA 占 GPU ~60-70%。主刀最终排序：**① P-P3 内核线**（FA 大 GEMM 分解，GPU 侧 +25~30%）→ ② R298 调度线（CPU 小头 15-30 s）→ ③ 吐字轮结构（2.65x）+ 纯步（1.44x）。tg 判据一律用 spec-off 纯步锚。
-**最新战果（R297 + R300 + R302-V2 采用栈）**：256K 预填充 **289.2 → 175.8 s（+64%）**（1344 t/s）、纯步 34.27 ms 零回归、门值全绿 ⇒ **距 BL1 预填充 1.90x → 1.11x**（spec-off 159.0 vs 175.8）。机制账：桶化收割 host 形状税、ub2048 收割 GPU 批量效率、单池解耦收割 alloc 池重建税（45.6→33 s，余量待 R302b）。剩余刀：① P-P3-T GQA-smem 摊销（FA 78% GPU、KV 全局流量 ×6 病根）② R302b alloc 残税 ③ 吐字轮结构（2.65x）。⚠ P-P3 分解版证伪入灰。
+**最新战果（R297→R317 host 收割链全落袋）**：256K 预填充 **289.2 → 169.5 s（-41%）**（R317、双 rep 169.3/169.8）、纯步 34.3 ms 零回归、门值全绿 ⇒ **距 BL1 1.90x → 1.11x**（152.5 vs 169.5）。机制链：桶化（host 形状税）→ ub2048（GPU 批量）→ 单池+收养（alloc 33→2 s）→ 事件组合拳（wait 457→0 ms）；**剩余差距 = GPU 工时本身（host 侧已到物理边际，气泡 = GPU 影子）**。⚠ ub = 启动调参非开发刀（用户 2026-09-24 红线）。⚠ P-P3 分解版证伪入灰。
 
 ### 1.1 维护 [`1cat-vllm-v100-study/PLAN-GRAPH.md`](1cat-vllm-v100-study/PLAN-GRAPH.md)
 
