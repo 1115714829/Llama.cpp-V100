@@ -21,6 +21,8 @@
 - **R302c 候选（下轮定设计）**：a) **形状类预热**（启动期对全部 bucket 类 × 形态预 reserve → 运行期全走命中路径 = 零 miss 零 sync ✓ 零语义风险，首选）；b) 桶阶梯加粗（24 类→12 类，sync 省 8.4 s vs FA padding +5-13% = 平/负，灰）；c) 放置稳定性/异步安全（深水区）。
 - 工具链注记：paramiko 通道 ~5 min 超时（长活必须 nohup + 分段收）；GAT2 埋点哑因未明（GAT 同 env 同流有效——疑作用域/优化差异，不阻塞主案）；`[SCHED]` %256 阈值打印两次未现身（探针可靠性注记）。
 
+### R302 ★★ **alloc 45.6 s 战役：增长余量（零效果）→ key 粗化（assert 证伪）→ 机制全图落定，单池解耦 v2 立案**（2026-09-24）
+
 - **目标**：ub2048 采用栈 alloc = 45.6 s/46 rebuild（900 ms/次整池 free+malloc）= 墙钟 25%；砍到 ~3 s ⇒ TTFT ~150 s ⇒ **反超 BL1 spec-off（159.0）**。
 - **证据链两轮**：① **增长余量（ggml-alloc.c realloc 分支 chunk max_size ×1.5+16MB）= 零效果**（alloc 45.6 不动）——因 `realloc = buffers[i]==NULL`（:1183）= **新 plan key 必然全新分配**，T8 槽对"单调增长 + 46 个一次性 key" = 逐 key 驱逐（slot_clear :610 **vbuffer_free 整池**）+ 重建，增长余量被架空。② **key 尺寸量化（2 的幂档）= assert 证伪**：`ggml-backend.cpp:2359` 张量放置越界 assert——**plan 地址布局不可跨尺寸复用**（"re-validates all sizes" 实为总量级弱验证），灰名单。
 - **机制全图（读码定案）**：plan_key 哈希含全量 `ne[d]`（:570）⇒ bucket 步进 = 新 key；slot 驱逐 free 整池 ⇒ 46 key × 900 ms。**plan 缓存对单调增长工作负载 = 结构性无效**。
