@@ -254,6 +254,12 @@
 - **并行拷贝候选**（按 ROI）：`csrc/attention/sm70_grouped_long/kernel/grouped-attention.cu`（228 KB prefill 核）、`csrc/moe/marlin_moe_wna16/sm70_marlin_*`（MoE GEMM）、`csrc/libtorch_stable/sampler.cu`（GPU 采样）、`fused_sigmoid_gating.py` 对应的 GDN 融合核。
 - **既有 P-D3' 修复在途**：`cudaMemcpyDefault` 一行修（H2D→自动推断）build 绿 ✓ 待 stress 验证。
 
+- **R352 ★★ P-D3' stress 仍崩 ⇒ 第二处 H2D 假设定位 = `llama_batch_allocr::init` 的 embd 拷贝（不止 `set_inputs`）；TP 咨询答复（用户问）= 拷贝 kernel 为每卡本地、不影响张量并行**（2026-09-25）
+
+- **崩溃链（两处 H2D 假设）**：① `llm_graph_result::set_inputs` 的 `ggml_backend_tensor_set`（已改 `cudaMemcpyDefault` ✓ R350）② **`llama_batch_allocr::init`（`llama-batch.cpp:25`）对 `batch_inp.embd` 的 host 假设拷贝** ⇒ 首轮注入即崩（stress 于 `n_tokens=42` 后死，门值不触发 ✗）。
+- **修法**：batch 分配器加 `embd_dev` 通道（或 embd 指针的设备判定 + D2D）；或回退 host 路径（净收益 0，仅诊断）。
+- **TP 咨询答复（用户 2026-09-25 问）**：llama.cpp `--split-mode tensor` 与 vLLM TP 同类，整除约束同源（4 KV 头 / 4 卡 = 每卡 1 头，与 BL1 同构）；**拷贝的 kernel 是每卡本地**（处理本卡分片，不跨卡通信、不参与切分）⇒ **不影响张量并行** ✓；唯一检查项 = 核内形状参数（heads_q/heads_kv）与我方一致（TP4 + 24 Q/4 KV ✓ 同构）。
+
 - **R344 ★★★ P-D3' 实施面定案：设备侧特征路径三触点 + "D2D 免改图机器"洞察（`batch_inject.embd` 指设备内存 ⇒ `ggml_backend_tensor_set` 自动 D2D ⇒ host 同步 10.4 ms/轮 整条消失）**（2026-09-25）
 
 - **三触点（代码实读）**：① `llama-context.cpp:2312` `extract_layer_inputs` 用 `ggml_backend_tensor_get_async` 落 **host** `embd_layer_inp` ⇒ 改设备缓冲 ② `common/speculative.cpp` 注入段 host memcpy 填 `batch_inject.embd` ⇒ 指针直通 ③ `set_inputs`（`llama-graph.cpp:1370`）对 embd 做 `ggml_backend_tensor_set` ⇒ **源指针为设备内存时 backend 按 kind 推断走 D2D**（CUDA memcpy 异构）⇒ **图机器免改** ✓。
