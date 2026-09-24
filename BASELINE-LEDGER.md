@@ -35,6 +35,7 @@
 - **战报**：距 BL1 **1.11x → 1.08x**（159.0 vs 171.9）。
 - **R308 双缓冲 = 无效（灰，组合条件）**：`GGML_SCHED_COPIES=2` TTFT 171.4/171.9（≈R307 逐位级持平）、enqueue 315.5 s 原封——**气泡等待不存在于 split-copy 面**（n_copies=2 的 ping-pong 无等待可消）。显存 13.1 GB 无恙。
 - **★ 重估（第三次刀序翻转，史存 + R309 修正注）**：compute 段 315 s/2rep = 墙钟 ~45%；当时判"host 实打实耗时"——**R309 修正：76% 是 host 被 GPU 同步阻塞（copy 段兜底全同步），非纯 host 计算**（见下条）。
+- **R311 字节定量判决（机制三分终局）**：`copy=487.7 ms/call、251.7 MB/call、10 次拷贝`——带宽病 ❌（516 MB/s = D2D 的 3-4%）、launch 开销 ❌（49 ms/次拷 25 MB）、**逐拷贝同步等待 ✅（49 ms/次 ≈ GPU split 时长）**。**真凶链补全**：meta `cpy_tensor_async` 缺失 → 10 次/调用全走 :1826-1833 fallback → **:1827 `ggml_backend_synchronize(input_backend)` 源后端全同步**——R310 只换了该分支一半、此行未动 = events 无效之谜破案（少改一行）。**修法 D = meta 补 `cpy_tensor_async`（委托 simple 后端 cudaMemcpyAsync）**⇒ fallback 不走、拷贝全异步；预期 copy 段 488→~20-50 ms、**TTFT 171 → ~115-125 s ⇒ 反超 BL1（159.0）**。
 - **R309 CPROF 分相判决（定量定罪）**：`copy=489.5 / compute=155.9 / other=0.0 ms/call`（splits=2.0）⇒ **输入拷贝段 = 76% 的 compute 段时间**。机制假说（可测）：meta backend **无 event 对象** → :1728-1832 兜底 `ggml_backend_synchronize(全后端)` = **每输入全同步等 GPU**（host 被 GPU 阻塞的真身；双缓冲 R308 无效亦吻合——等待不在 copy-slot 面）。**候选修法 B = events 补建 → `event_wait`（GPU 侧）替代 host 全同步** ⇒ 预期 copy 段 489→<50 ms、**TTFT 171 → ~120-130 s ⇒ 直接超 BL1（159.0）**。备选 A = 输入拷贝融合（中改）。下轮读 events 创建逻辑定 B 可行性。
 
 ### R304-P ★★★ **天花板实测（DPROF 分相）：cuBLAS QK 在小 N 形状塌方 = 0.167 TFLOPS（正常 30-60 的 1/200）——T2 隐藏主凶补全、Path A 融合价值再确认**（2026-09-24）

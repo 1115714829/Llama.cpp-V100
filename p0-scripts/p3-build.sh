@@ -22,6 +22,9 @@ fi
 if [ -f /tmp/p3-ggml-backend.cpp ]; then
   sed 's/\r$//' /tmp/p3-ggml-backend.cpp > ggml/src/ggml-backend.cpp
 fi
+if [ -f /tmp/p3-ggml-backend-meta.cpp ]; then
+  sed 's/\r$//' /tmp/p3-ggml-backend-meta.cpp > ggml/src/ggml-backend-meta.cpp
+fi
 echo "SRC_MD5:"
 md5sum ggml/src/ggml-cuda/fattn-sm70-d256.cu ggml/src/ggml-cuda/fattn-sm70-decomp.cuh
 echo "MARK_DECOMP_ENV=$(grep -c LLAMA_SM70_FA_DECOMP ggml/src/ggml-cuda/fattn-sm70-d256.cu || true)"
