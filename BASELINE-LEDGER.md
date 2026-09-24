@@ -33,7 +33,8 @@
 - **机制账（双探齐）**：`[GALLOC_SLOT] hit=65 miss=0`（收养两形态全命中）｜`alloc 75.3 → 2.06 s（-97%）`｜**但 enqueue 261→315.8 s（+54 s）**——砍掉的调度税里 ~69 s 是**隐藏 GPU 等待（管线气泡）**，墙钟只兑现 9 s/rep。TTFT **171.6/172.1**（离散 0.3%）、纯步 34.3 ms 持平。
 - **收养杀手定罪**（诊断跑三段剥）：结构键的 `op_params[0]` 逐调用变 ⇒ key 每调用新 ⇒ activate 恒 -1（`n_calls=0` = [GALLOC_FAST] 零输出即铁证）；剔除后全命中。R302c 首测"槽不够"归因同步修正。
 - **战报**：距 BL1 **1.11x → 1.08x**（159.0 vs 171.9）。
-- **★ 下一刀（气泡歼灭）**：`n_copies = parallel ? GGML_SCHED_MAX_COPIES : 1`（:1913）——**`--parallel 1` 把双缓冲锁死** ⇒ 每调用 compute 内隐式串行等前调用 = enqueue 315 s 的真身候选。开 `n_copies≥2`（+拆 :1654 类同步）= 管线重叠，预期再砍 20-30 s。风险注记：split-input copies 显存 ×n_copies、与 meta 记账交互待验。
+- **R308 双缓冲 = 无效（灰，组合条件）**：`GGML_SCHED_COPIES=2` TTFT 171.4/171.9（≈R307 逐位级持平）、enqueue 315.5 s 原封——**气泡等待不存在于 split-copy 面**（n_copies=2 的 ping-pong 无等待可消）。显存 13.1 GB 无恙。
+- **★ 重估（第三次刀序翻转，有账）**：compute 段 315 s/2rep = **墙钟 ~45% 的 host 实打实耗时**（host 645 ms/调用 > GPU ~400 ms = **host 瓶颈**）；meta 循环仅 7 ms/call（[META] 账）⇒ **其余 ~630 ms/调用 = split 管理/事件/拷贝 host 铁耗** = E 系列 meta 税旧账新面。**R309 = compute-host 分相与削减**（量级 > GDN > 吐字线）。
 
 ### R304-P ★★★ **天花板实测（DPROF 分相）：cuBLAS QK 在小 N 形状塌方 = 0.167 TFLOPS（正常 30-60 的 1/200）——T2 隐藏主凶补全、Path A 融合价值再确认**（2026-09-24）
 
