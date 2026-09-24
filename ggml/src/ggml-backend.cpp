@@ -1702,6 +1702,7 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
     int64_t cp_copy_bytes = 0, cp_copy_n = 0;
     int64_t cp_async_ok = 0, cp_fb = 0, cp_user = 0, cp_moe = 0;
     int64_t cp_sync_us = 0, cp_cpy_us = 0;
+    int64_t cp_wait_us = 0, cp_evnull = 0, cp_evwait = 0;
     // R314: copy-once registry for static host weights (inference only).
     const bool w_once = getenv("GGML_SCHED_WEIGHTS_ONCE") != nullptr;
     static void * s_wdone[4096];
@@ -1779,10 +1780,16 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                 }
             } else {
                 // wait for the split backend to finish using the input before overwriting it
-                if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
-                    ggml_backend_event_wait(split_backend, sched->events[split_backend_id][sched->cur_copy]);
-                } else {
-                    ggml_backend_synchronize(split_backend);
+                {
+                    const int64_t tw_ = cprof ? ggml_time_us() : 0;
+                    if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
+                        ggml_backend_event_wait(split_backend, sched->events[split_backend_id][sched->cur_copy]);
+                        if (cprof) { cp_evwait++; }
+                    } else {
+                        ggml_backend_synchronize(split_backend);
+                        if (cprof) { cp_evnull++; }
+                    }
+                    if (cprof) { cp_wait_us += ggml_time_us() - tw_; }
                 }
 
                 // when offloading MoE weights, we can reduce the amount of data copied by copying only the experts that are used
@@ -1970,6 +1977,7 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         static int64_t acc_bytes = 0, acc_cn = 0;
         static int64_t acc_async = 0, acc_fb = 0, acc_user = 0, acc_moe = 0;
         static int64_t acc_sync = 0, acc_cpy = 0;
+        static int64_t acc_wait = 0, acc_evnull = 0, acc_evwait = 0;
         acc_bytes += cp_copy_bytes;
         acc_cn += cp_copy_n;
         acc_async += cp_async_ok;
@@ -1978,12 +1986,15 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         acc_moe += cp_moe;
         acc_sync += cp_sync_us;
         acc_cpy += cp_cpy_us;
+        acc_wait += cp_wait_us;
+        acc_evnull += cp_evnull;
+        acc_evwait += cp_evwait;
         if (++acc_calls % 256 == 0) {
-            fprintf(stderr, "[CPROF] copy=%.2f ms/call | sync=%.2f cpy=%.2f | user=%.1f fb=%.1f async=%.1f moe=%.1f /call | bytes=%.2f MB/call (calls=%d)\n",
+            fprintf(stderr, "[CPROF] copy=%.2f ms/call | wait=%.2f sync=%.2f cpy=%.2f | evnull=%.1f evwait=%.1f user=%.1f fb=%.1f | bytes=%.2f MB (calls=%d)\n",
                 acc_copy / 1e3 / acc_calls,
-                acc_sync / 1e3 / acc_calls, acc_cpy / 1e3 / acc_calls,
+                acc_wait / 1e3 / acc_calls, acc_sync / 1e3 / acc_calls, acc_cpy / 1e3 / acc_calls,
+                acc_evnull / (double) acc_calls, acc_evwait / (double) acc_calls,
                 acc_user / (double) acc_calls, acc_fb / (double) acc_calls,
-                acc_async / (double) acc_calls, acc_moe / (double) acc_calls,
                 acc_bytes / 1e6 / acc_calls,
                 acc_calls);
         }
