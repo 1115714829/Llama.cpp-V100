@@ -21,6 +21,7 @@ else
   export NO_SPEC=1
 fi
 if [ -n "${ROUND:-}" ]; then export LLAMA_ROUND_TIMING=1; fi
+if [ -n "${ROUND_SYNC:-}" ]; then export LLAMA_ROUND_TIMING=1; export LLAMA_ROUND_TIMING_SYNC=1; fi
 if [ -n "${T1C_DUMP:-}" ]; then export T1C_DUMP=1; fi
 if [ -n "${T1C_REF:-}" ]; then export T1C_REF=1; fi
 if [ -n "${T1C_REF_PREFIX_ONLY:-}" ]; then export T1C_REF_PREFIX_ONLY=1; fi

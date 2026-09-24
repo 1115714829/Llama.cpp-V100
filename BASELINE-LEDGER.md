@@ -64,6 +64,15 @@
 - **环境隔离修正（用户质询后落实）**：本轮起 `t1c-run.sh` 改用**自建启动器**（不再借正式树二进制）；并已实证 `/root/llm/llama.cpp`、`/root/llm/systemd` 自 9/20 起**零文件改动**、当前无 llama/vllm 服务在跑、构建产物只落 `/root/libdir-gb`。**遗留风险提示**：正式单元用 `CUDA_VISIBLE_DEVICES=2,5`，测试用 `0,1,2,3` ⇒ **GPU 2 卡位重叠**（本轮正式服务未运行，未冲突）。
 - **预填充线剩余（判定为"够用但不宽裕"）**：数值 ✅ 门值 ✅ 时序 ✅（打平），余量不足 4 s ⇒ 采纳前的可选加固 = 再挖 3-5 s；**吐字线（tg 12-13 vs BL1 124.6 t/s）完全未动 = 剩下最大且最难的战线**。
 
+- **R327 ★★★ 吐字线根账（减法分离）：解码每轮 90.6 ms = host ~52-58 + GPU ~33-39；与 BL1 的 4.17x 分解闭合为 host 1.91x + 字节 1.44x × AL 1.25x**（2026-09-25）
+
+- **方法**：`LLAMA_ROUND_TIMING_SYNC=1`（树内既有开关，`llama-context.cpp:1361`）令 compute/sync 计数器给出真 GPU 等待；**减法分离** = 同形状 256K 跑 gen=128 与 gen=1 各一次相减（118 vs 158 rounds），剔除预填充段。
+- **每轮分账（256K，40 个解码轮）**：target `graph_compute` 内 **host 提交墙 20.8 ms** + **GPU 等待 33.0 ms**；**target ctx 之外 36.8 ms**（= draft 2 次调用 + CPU selector + CPU sampler + 槽位/HTTP）；build/alloc/setin 仅 0.1/1.6/≈0 ms（图缓存复用正常）。
+- **判定**：解码为 **host-bound**（~52-58 ms host vs ~33-39 ms GPU）。与 BL1（27.2 ms/轮 = 8.0 ms/token × AL 3.4）对账：**host 段 = BL1 整轮的 1.91x**；**GPU 段差 = 每轮字节 43 GB（Q8_0 27 + Q4_K_M 16）vs ~30 GB（NVFP4 15 + NVFP4 draft 15）= 1.44x**（1cat README 自述生产形态 = **Qwen3.8-27B-NVFP4 + DFlash2**；BL1 单元实读 = FP8 目标 + DFlash2 draft，卡 0,1,3,4）。
+- **追平路线（两刀）**：① **砍 host 段**（P1 图/管线 + P3 GPU selector + P4 GPU sampler + P-D1 meta 容器 + P-D3 两 draft 合一）⇒ 轮 90.6 → ~40 ms、tg 29.9 → **~85 t/s**；② **字节/格式**（NVFP4 同构 GEMV 或抬 AL）⇒ GPU 39 → 27 ⇒ tpot 8.0 达标。**红线允许**：「参数可以等价齐平」= BL1 的 FP8/NVFP4 形态可对齐。
+- **注意（E14 判例）**：llama.cpp 的 MMVQ 走 Q4_K_M **曾更慢**（58.6 vs 55.8 ms/轮）⇒ 字节刀必须配**融合/M=1 专用 GEMV**（1cat marlin FP4 形态），不是裸换量化。
+- **AL 波动口径**：同构建两次跑 AL 2.76 / 3.12（内容相关）⇒ tg 必报 AL；每轮墙钟（90.5/90.6 ms）为稳定量。
+
 - **⚠️ 口径与未决（NODROP）**：本条 = **时序口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
