@@ -34,7 +34,7 @@
 - **收养杀手定罪**（诊断跑三段剥）：结构键的 `op_params[0]` 逐调用变 ⇒ key 每调用新 ⇒ activate 恒 -1（`n_calls=0` = [GALLOC_FAST] 零输出即铁证）；剔除后全命中。R302c 首测"槽不够"归因同步修正。
 - **战报**：距 BL1 **1.11x → 1.08x**（159.0 vs 171.9）。
 - **R308 双缓冲 = 无效（灰，组合条件）**：`GGML_SCHED_COPIES=2` TTFT 171.4/171.9（≈R307 逐位级持平）、enqueue 315.5 s 原封——**气泡等待不存在于 split-copy 面**（n_copies=2 的 ping-pong 无等待可消）。显存 13.1 GB 无恙。
-- **★ 重估（第三次刀序翻转，有账）**：compute 段 315 s/2rep = **墙钟 ~45% 的 host 实打实耗时**（host 645 ms/调用 > GPU ~400 ms = **host 瓶颈**）；meta 循环仅 7 ms/call（[META] 账）⇒ **其余 ~630 ms/调用 = split 管理/事件/拷贝 host 铁耗** = E 系列 meta 税旧账新面。**R309 = compute-host 分相与削减**（量级 > GDN > 吐字线）。
+- **R309 CPROF 分相判决（定量定罪）**：`copy=489.5 / compute=155.9 / other=0.0 ms/call`（splits=2.0）⇒ **输入拷贝段 = 76% 的 compute 段时间**。机制假说（可测）：meta backend **无 event 对象** → :1728-1832 兜底 `ggml_backend_synchronize(全后端)` = **每输入全同步等 GPU**（host 被 GPU 阻塞的真身；双缓冲 R308 无效亦吻合——等待不在 copy-slot 面）。**候选修法 B = events 补建 → `event_wait`（GPU 侧）替代 host 全同步** ⇒ 预期 copy 段 489→<50 ms、**TTFT 171 → ~120-130 s ⇒ 直接超 BL1（159.0）**。备选 A = 输入拷贝融合（中改）。下轮读 events 创建逻辑定 B 可行性。
 
 ### R304-P ★★★ **天花板实测（DPROF 分相）：cuBLAS QK 在小 N 形状塌方 = 0.167 TFLOPS（正常 30-60 的 1/200）——T2 隐藏主凶补全、Path A 融合价值再确认**（2026-09-24）
 
