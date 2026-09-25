@@ -650,6 +650,21 @@ __device__ __forceinline__ uint4 fp8_e5m2_vector_to_half8(const uint64_t raw) {
       fp8_e5m2_pair_to_half2_bits(static_cast<uint16_t>(raw >> 48)));
 }
 
+// R390: 8 q8_0 values (one uint64 of int8) times the block scale, as 8 halves.
+__device__ __forceinline__ uint4 q8_0_vector_to_half8(const uint64_t raw8, const __half scale) {
+  const float   s = __half2float(scale);
+  const int8_t* q = reinterpret_cast<const int8_t*>(&raw8);
+  uint4 out;
+  uint32_t* w = reinterpret_cast<uint32_t*>(&out);
+#pragma unroll
+  for (int i = 0; i < 4; ++i) {
+    const __half2 h2 = __floats2half2_rn(s * static_cast<float>(q[2 * i]),
+                                         s * static_cast<float>(q[2 * i + 1]));
+    w[i] = *reinterpret_cast<const uint32_t*>(&h2);
+  }
+  return out;
+}
+
 __device__ __forceinline__ uint16_t fp8_e4m3fn_to_half_bits(const uint8_t raw) {
   const uint16_t sign = static_cast<uint16_t>(raw & 0x80u) << 8;
   const uint8_t magnitude = raw & 0x7fu;
@@ -806,6 +821,18 @@ __device__ __forceinline__ uint4 load_xqa_tc_kv_vector(
   if constexpr (KV_DTYPE == flash_v100::KV_CACHE_DTYPE_FP16) {
     const uint4* cache_vec = reinterpret_cast<const uint4*>(kv_cache);
     return __ldg(&cache_vec[physical_offset / 8 + vec_col]);
+  } else if constexpr (KV_DTYPE == flash_v100::KV_CACHE_DTYPE_Q8_0) {
+    // R390: q8_0 rows are 272 bytes (8 blocks of 34 = half scale + 32 int8) and the
+    // vector is 8 elements wide, so an 8-aligned physical_offset keeps every chunk
+    // inside one 32-element block.
+    const int64_t  chunk = physical_offset / 8 + vec_col;
+    const int64_t  row   = chunk >> 5;
+    const int      sub   = static_cast<int>(chunk & 31);
+    const uint8_t* p     = reinterpret_cast<const uint8_t*>(kv_cache) +
+                           row * flash_v100::KV_Q8_0_ROW_BYTES + (sub >> 2) * 34;
+    const __half   s     = *reinterpret_cast<const __half*>(p);
+    const uint64_t raw   = __ldg(reinterpret_cast<const uint64_t*>(p + 2 + (sub & 3) * 8));
+    return q8_0_vector_to_half8(raw, s);
   } else {
     static_assert(KV_DTYPE == flash_v100::KV_CACHE_DTYPE_FP8_E4M3 ||
                       KV_DTYPE == flash_v100::KV_CACHE_DTYPE_FP8_E5M2,
@@ -5032,6 +5059,13 @@ extern "C" __global__ void sm70_long_q8_0_probe(const void * kv_cache, float * o
   }
   out[i] = flash_v100::load_kv_cache_float_unscaled<flash_v100::KV_CACHE_DTYPE_Q8_0>(kv_cache, i);
 }
+
+// R390: pins the q8_0 vector loader as well. Address-taking is an odr-use, so the
+// compiler instantiates the body and reports every remaining blocker at build time.
+namespace {
+using sm70_long_q8_0_vector_loader =
+    decltype(&load_xqa_tc_kv_vector<4, false, flash_v100::KV_CACHE_DTYPE_Q8_0>);
+}  // namespace
 
 extern "C" void sm70_long_decode_f16(
     const void * q, const void * k_cache, const void * v_cache, void * out,
