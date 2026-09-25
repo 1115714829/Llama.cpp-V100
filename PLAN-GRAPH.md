@@ -32,7 +32,13 @@ flowchart TD
   W1["W1 FA q=8 长 KV 核重写<br/>KV 切分给足 CTA 并行度 + mma.sync.m8n8k4 D=256<br/>抄 v100-refs/sm70-attn（同架构同头维 D256）<br/>25.4 -> 12-13 ms（-12）"]:::hot
   W2["W2 GEMM Q8_0 MT=2 核<br/>两个 m8n8k4 row-tile 共享一次权重流 + fp32 累加，M<=16<br/>抄 v100-refs/v100-skinny skinny_fp8_qpn8_mt2<br/>需写 q8_0 codec 变体<br/>25.2 -> 10-12 ms（-13）"]:::hot
   W3["W3 小算子 17 -> 5-6 ms（-11）<br/>先查清 CPY 4.7 是哪些拷贝，再融合/图谱消除"]:::cool
-  W4["W4 host/gap 10 -> 3 ms（-7）<br/>in-graph selector 崩溃 = 待修 bug<br/>+ tail graphs + 注入重叠"]:::cool
+  W4["W4 host/gap 10 -> 3 ms（-7）<br/>in-graph selector 崩溃 = 待修 bug<br/>+ 注入重叠"]:::cool
+  OBS["用户观察：1cat 跑时 CPU 500-1000%（GPU 对应 CPU 也在用）<br/>查证（R385）：TP4 = 4 worker 进程 + engine core 的常驻轮询/逐步记账<br/>+ NCCL/custom-AR CPU proxy；dflash2 n-gram 辅助默认关（非成因）<br/>=> 其作用是把 launch/sync/采样延迟全藏住<br/>=> 我方单主循环、主机并行度低，那 10 ms host/gap 是真暴露"]:::fact
+  W41["W4-1 tail CUDA graphs：q1..q8 全部形状图化（不只 q8）<br/>1cat 默认 True（VLLM_SM70_DFLASH2_TAIL_CUDAGRAPHS）<br/>原文：eager tail 是容量点轮 dominant round cost"]:::hot
+  W42["W4-2 查我方 256K 下 q!=8 形状的注意力准入<br/>（他们修过 long-attention loader 只准入 q8 到 132096 的容量期 bug）"]:::hot
+  OBS --> W4
+  W4 --> W41
+  W4 --> W42
   W0["W0 REJ IMA 根因修复<br/>AL 3.93/4.09 已有实证（1cat probabilistic 同款）<br/>单此项 tg 37 -> 51"]:::hot
   W5["W5 TTFT 175.2 -> <= 152.5 s<br/>草稿链前向与 target 预填充重叠（-23 s）"]:::cool
   A --> W1

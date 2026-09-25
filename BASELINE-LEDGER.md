@@ -652,6 +652,25 @@
 - E15 的 −84% 真因待查（嫌疑：q=8 时 CTA 数 = 6 头 × 1 tile = **6 CTA/层/卡**，并行度灾难）⇒ **正解是 KV 切分**（W1 核心）。
 - E6 的 split floor 无效 ≠ split 无效：那是 TILE 核的 floor，不是长 KV 并行度的解法。
 
+### R385 ★★★ 用户观察（1cat 跑时 CPU 500–1000% 满载、我们不满）的代码级查证 + 方案三处修正（2026-09-26）
+
+**用户观察**：BL1 运行时 nvtop 里不只 GPU 满载，**CPU 也 500–1000%**（= 5–10 核），"GPU 对应的 CPU 也在用"；我方 llama.cpp 无此现象。
+
+**查证结论（勿再猜）**：
+1. **不是 n-gram/lookup 辅助**：`vllm/v1/worker/gpu/spec_decode/dflash2/speculator.py:478-480` 由 `speculative_config.ngram_assist` 门控，**默认 False**；`:_lookup_enabled`（:528）随之 False、`_ngram_assist is None`（:473）。**正式服务 `--speculative-config` 未设该字段 ⇒ BL1 的 124.6 t/s 里 n-gram 辅助是关的**（R384 的"AL 靠 lookup 辅助"推断作废）。
+2. **真实成分**：TP4 = **4 个 worker 进程 + engine core 进程**的常驻轮询/逐步记账（`np.logical_not(is_prefilling_np)`、CPU token 缓冲 `all_token_ids_cpu/sampled_token_ids_cpu`、lattice walk 的 `.item()` 逐步同步）+ NCCL/自定义 all-reduce 的 CPU proxy 线程。**作用 = 主机侧高并发把延迟全藏起来**（launch/sync/采样被吞，GPU 队列不空），不是"算得快"。
+3. **对我方的意义**：我们是单主循环、主机侧并行度低 ⇒ 那 **10 ms host/gap 是真暴露的**（不是测量假象）⇒ **W4 优先级上调**。
+
+**方案三处修正**：
+| # | 修正 | 依据（1cat 自己的记录） |
+|---|---|---|
+| **W4-1（新，最便宜）** | **tail CUDA graphs：把 q1…q8 全部形状图化**（不只 q8） | `docs/design/sm70_dflash2_tail_graphs_20260911.md`：`VLLM_SM70_DFLASH2_TAIL_CUDAGRAPHS` **默认 True**，把 target-only B1 的 **q1–q7 与 q8 一起注册**；原文 **"the eager tail was the dominant round cost at the capacity"**；图谱清单 `max_context: 262144, query_rows: [2,3,4,5,6,7,8]` |
+| **W4-2（新）** | **查我方 256K 下 q≠8 形状的注意力准入**：他们修过"long-attention loader 只准入 q8 到 132096"这类容量期 bug | 同上文档：容量点下 partial-verifier 与 q1 步"lose both full CUDA graphs and optimized attention dispatch" |
+| **W1（细化）** | FA 长 KV 切分的**具体形态**：q1 算子 = **256 partitions × 1024 token**；grouped 候选 = **80 logical splits + K16 compensated QK + N32 online updates + 完整 FP32 workspace**；布局契约 **B1/H6/D256/page3296**（H6/D256 与我方每卡 6 Q 头 + D=256 同构） | 同上 + `sm70_dflash2_nvfp4_17ms.md`（"FULL target and draft CUDA Graphs"、Flash-V100、FP8 E5M2 target KV/FP16 draft KV） |
+| **W0（不变）** | REJ 仍有效（我方实测 AL 3.93/4.09）；BL1 确实用 `draft_sample_method=probabilistic`（其 fork 对 dflash 的默认） | `vllm/engine/arg_utils.py:1825-1831`（mtp→greedy、其余→probabilistic 默认） |
+
+**1cat 自有工程基线（重要参照，非 256K 口径）**：`sm70_dflash2_nvfp4_17ms.md` 冻结负载 = Qwen3.8-27B / 4×V100 / TP4 / batch-one DFlash2 / 七草稿 / selector K=16 / target top-k=20 / FP8 E5M2 target KV + FP16 draft KV / Flash-V100 / FULL target+draft CUDA Graphs ⇒ **已接受基线 512-token 请求 18.465–18.537 ms/轮、AL 4.686、251.60 token/s**；1024-token 18.587–18.603 ms。⇒ 其 256K（27.2 ms）比 512-token（18.5 ms）只多 ~9 ms，**那 9 ms 就是我方 FA 25.4 ms 的战场**。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
