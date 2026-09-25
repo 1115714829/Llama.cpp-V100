@@ -555,6 +555,34 @@
   | C 重叠/融合 | 轮 40 → 30 | combo_kernels（1cat inductor 思路）、注入重叠 | tg 85 → 113 |
   | D 验收 | ≥124.6 | 同口径 + 显存 ≤ 64 GB | — |
 
+### R381 ★★★ 阶段 A 拒绝采样（`LLAMA_SPEC_REJ`）：**AL 提升有效（3.28–4.09，超 BL1 3.4），但 IMA 崩溃复现（非偶发）⇒ 保持默认关**；轮开销无差异（81–83 ms）（2026-09-25）
+
+- **A/B（e12）+ 稳定性（e13，REJ=1 × 4 rep）**：
+  | 臂 | tg | tpot ms | AL | 接受率 | 轮成本 |
+  |---|---|---|---|---|---|
+  | REJ=0（贪心匹配） | 33.4 / 44.3 | 29.9 / 22.5 | 2.66 / 3.75 | 23.9% / 40.3% | 79.6 / 84.5 |
+  | **REJ=1（拒绝采样）** | **49.2 / 40.3 / 40.1** | 20.3 / 24.8 / 24.9 | **4.09 / 3.32 / 3.28** | **44.4% / 33.5% / 32.8%** | 82.9 / 82.1 / 81.7 |
+- **✓ 有效**：REJ=1 的 AL **3.28–4.09**（均值 3.56，最高 4.09）vs REJ=0 的 2.66–3.75 ⇒ **拒绝采样提升 AL ✓，AL 4.09 已超 BL1 的 3.4**（1cat 的 `draft_sample_method: probabilistic` 同款机制）。
+- **✗ Bug**：`CUDA error: illegal memory access`（IMA）在 `llama_decode → process_ubatch → synchronize`（device 3）——**e12 rep2 + e13 rep4 两次复现**（REJ=0 未崩）⇒ **非偶发，REJ 路径有 bug**。嫌疑：`result_probs` 与 `result` 长度错位（`p_min` break 时同步性）、或 `common_sampler_accept` 提前接受改变 sampler 状态、或 `idxs` 索引错位。
+- **判定**：**REJ 保持默认关**（不入采用链）——① AL 是放大器，轮开销（81 ms）才是主因；② AL 4.09 @ 轮 84 = tg 49，**AL 4.09 @ 轮 31 = tg 132** ⇒ AL 价值须待轮开销下降后兑现；③ 默认关 ⇒ 门值/生产零风险。
+- **遗留**：IMA 定位（ASAN 或 assert 边界）→ 修复后重测；本轮转向阶段 B（内核，主攻轮开销 81 → 31 ms）。
+
+### R382 ★ 阶段 B-2（Split-D mma decode）判负：**mma 核对 decode（q=8）不适用，−84%**（E1 教训复现坐实）（2026-09-25）
+
+- **先验**（staged-baseline 流程）：假设 Split-D mma 核（`mma.sync.m8n8k4`，TC）比 TILE（SIMT）快；预期 FA 25→15 ms（−40%）、轮 78.6→68 ms；若为负则 mma 对 q=8 长 KV 不利（TC 利用率 + 固定开销）⇒ 回 TILE、记灰。
+- **改动**：`fattn-sm70-d256.cu` 的 `sm70_d256_min_q()` 加 `FISHLIKEXIE_BLACK_MAGIC=2`（decode 准入 min_q=1）⇒ env 门控同源 A/B。构建 `BUILD_RC=0`、门值 `bcda0092…` 绿。
+- **A/B（e15，ABBA 4 臂，256K spec-on）**：
+  | 臂 | 序 | tg t/s | tpot ms | 判定 |
+  |---|---|---|---|---|
+  | A（TILE，`BLACK_MAGIC=0`） | 1 | 39.27 | 25.43 | ✓ |
+  | B（mma decode，`=2`） | 2 | **5.88** | **170.14** | ✗✗ |
+  | B（mma decode，`=2`） | 3 | **5.47** | **182.78** | ✗✗ |
+  | A（TILE） | 4 | 34.21 | 29.20 | ✓ |
+- **判定**：**B 判负（−84%）**——A 臂两臂差 12.9%（墙钟噪声 ±11 ms，R378），但 B 臂 −84% 是**确定性退化**（远超噪声）⇒ 不采用。
+- **灰色名单（为什么被否）**：**mma 核（`mma.sync.m8n8k4`）对 decode（q=8）不适用**——probe 显示 Split-D 只对 prefill（q=2048）正常（`Q=(256,2048,24,1)`），q=8 时固定开销主导（E1 的 `small-prefill` 判负教训复现坐实）⇒ **mma decode 路线关闭**。
+- **A 臂基线复核**：tg 34.21–39.27、tpot 25.43–29.20 ms（与 E10 的 32–46 / 22–31 一致）⇒ 当前基线不变。
+- **下一步**：B-2 关闭 ⇒ 转 B-1（GEMM MT=2，MUL_MAT 25 ms）或 C（combo_kernels 融合 + 注入重叠）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
