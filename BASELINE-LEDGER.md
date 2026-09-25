@@ -805,6 +805,29 @@ flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
 - **删除**：`fattn-sm70-long.cu` 的 `sm70_long_stage_kv`/`sm70_long_stage_q`/`sm70_long_scatter_out` 与 O(kv) 拷贝（零拷贝直指我方 KV）。
 - **下一步**：写入 `sm70_long_decode_q8_0` raw entry（放在 `#if defined(SM70_LONG_RAW)` 块）⇒ `nvcc -DSM70_LONG_RAW` 编译 ⇒ 若 `PAGE=0` 与运行期 strides 不兼容（断言/错值），再按 R391 的退路给核加"任意页步长"实例 ⇒ sanitizer ⇒ 门值 ⇒ `[OP]` FA A/B。
 
+### R393 ★★ W1 最后一处契约：**页表按 4-token 微块索引**（`BLOCK_SIZE==4`）⇒ 用数值实验定案，不猜（2026-09-26）
+
+**族常量（已取得，`grouped-attention.cu:1838-1864`）**：`kGroupedVerifyQ8MaxQ=8`、`kGroupedVerifyRows=48`、`kGroupedVerifyBlockN=32`、`kGroupedVerifyKVStride=264`、`kGroupedVerifyProbStride=32`、`kGroupedVerifyQ8Splits=80`、`kGroupedVerifyThreads=512`
+⇒ `kCompensatedSmemBytes = sizeof(GroupedVerifySmem) + 48*32*2 + 32*264*2 = sizeof(...) + 19968`（公式见 :4985-4988）。
+
+**新发现的契约**：KV 装载器 `load_xqa_tc_kv_panel` 的 `BLOCK_SIZE == 4` 分支写死
+```cpp
+logical_block = token_offset >> 2;   block_offset = token_offset & 3;
+```
+⇒ **页表（`page_ids`/`block_table`）是按 4 个 token 一个微块索引的**，`BLOCK_SIZE` 是编译期模板参数，而 `k.size(1)`（= 运行期 `block_size`）另有用途（疑似"页内 token 数"，但 1cat 的 3296 与该猜法不自洽，故**不猜**）。
+
+**两个候选假设（下轮用数值实验判决）**
+| # | 假设 | 我方参数 |
+|---|---|---|
+| **H1** | 页表按 **4-token 微块**索引，`stride(0)` = 微块步长 | `block_stride = 4 × token_stride = 4096`、`token_stride = 1024`、`head_stride = 256`、`k.size(1) = 256`、`block_table[1][65536]` = 0..65535（256K/4） |
+| **H2** | 页表按 **页内 token 数**索引，`stride(0)` = 页步长 | `block_stride = 262144`、`token_stride = 1024`、`head_stride = 256`、`k.size(1) = 256`、`block_table[1][1024]` = 0..1023（256K/256） |
+
+两假设在**恒等映射**下都给出 `physical_offset = t*1024 + h*256 + d = row*256 + d`（`row = t*4+h` = 我方 `[d][t][h]` 物理行序）⇒ **两者对地址的最终结果一致**，差别只在页表长度与 `stride(0)` 的取值；**H2 若与微块索引冲突，取 H1**。
+
+**判决方法（廉价、决定性强）**：写一个 standalone CUDA 小程序（`nvcc -DSM70_LONG_RAW` 可直接复用核），用**小规模合成 KV**（如 128 token、1 KV 头、pattern = 已知函数）跑该核，与 CPU 参考逐元素比对 → 同时验证（a）页表语义、（b）q8_0 解量化正确性、（c）无 IMA。**通过后再上实机**（避免 R368 那样"131 次干净后 IMA"的盲撞）。
+
+**注意**：`kGroupedVerifyBlockN=32` ⇒ 每个 split 处理 32 token 一块，`kGroupedVerifyQ8Splits=80` ⇒ 80 个 split；256K/80 = 3276.8 token/split（≈1cat 的 3296 页，非整除 ⇒ 说明 split 边界由 `total_kv`/`split_tiles` 动态算，不依赖整除）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
