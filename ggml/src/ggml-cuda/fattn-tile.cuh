@@ -1431,7 +1431,12 @@ static void launch_fattn_tile_case_impl(ggml_backend_cuda_context & ctx, ggml_te
 template <int DKQ, int DV>
 void ggml_cuda_flash_attn_ext_tile_case(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     // q8_0 K/V are dequantized in-kernel (no f16 mirror); anything else stages first.
-    const bool kq8 = dst->src[1]->type == GGML_TYPE_Q8_0 && dst->src[2]->type == GGML_TYPE_Q8_0;
+    // GGML_FA_TILE_Q8_DIRECT=0 forces the staged path (same-binary A/B).
+    static const bool q8_direct = [] {
+        const char * e = getenv("GGML_FA_TILE_Q8_DIRECT");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    const bool kq8 = q8_direct && dst->src[1]->type == GGML_TYPE_Q8_0 && dst->src[2]->type == GGML_TYPE_Q8_0;
     if (kq8) {
         launch_fattn_tile_case_impl<DKQ, DV, true, true>(ctx, dst);
     } else {

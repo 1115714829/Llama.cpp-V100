@@ -767,8 +767,15 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
             return ggml_cuda_sm70_long_decode_alloc_size(dst);
         case BEST_FATTN_KERNEL_TILE:
             // q8_0 K/V are dequantized in-kernel (fattn-tile.cuh) - no f16 mirror.
-            need_f16_K = !(K->type == GGML_TYPE_Q8_0 && V->type == GGML_TYPE_Q8_0);
-            need_f16_V = need_f16_K;
+            // GGML_FA_TILE_Q8_DIRECT=0 forces the staged path (same-binary A/B).
+            {
+                static const bool q8_direct = [] {
+                    const char * e = getenv("GGML_FA_TILE_Q8_DIRECT");
+                    return e == nullptr || atoi(e) != 0;
+                }();
+                need_f16_K = !(q8_direct && K->type == GGML_TYPE_Q8_0 && V->type == GGML_TYPE_Q8_0);
+                need_f16_V = need_f16_K;
+            }
             break;
         case BEST_FATTN_KERNEL_MMA_F16:
             need_f16_K = true;
