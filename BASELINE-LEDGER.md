@@ -1180,6 +1180,27 @@ FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
 
 **下一步**：① 按清单写适配层 fp8 分支（删 `sm70_long_stage_kv`，保留 Q staging 与 scatter）② `fattn.cu` 路由 `GGML_TYPE_F8_E4M3` ③ p4-build + 门值（默认关，零回归）④ 上机 A/B（判据 `[OP]` FA 时间）。
 
+### R410 (2026-09-26) W1 适配层 fp8 零拷贝分支落地，构建通过
+
+**目的**：W1 内核线最后一公里——把 1cat grouped-verify 内核（E4M3 KV，逐位一致已验证 R409）接进 `fattn-sm70-long.cu` 的 decode 路。
+
+**接口闭环（3 个先前不能猜的点，全部由现成代码证实，无需新写 host 代码）**
+1. `sm70_long_stage_q`（:56-72）写 `dst[t*(gqa*D)+hh*D+d]` = **`[t][gqa][D]` token-major**，与内核 `q_st={6*256,256,1}`/`q_sz={n_q_pad,6,256}` **逐位一致** ⇒ Q 暂存直接复用。
+2. `ws.bt`/`ws.sl`（:341-355）已是「每 query 行一份 identity 页表 + 每行 = kv_len」⇒ 正是内核 `block_table`/`row_lengths` 契约（R409 ③④）⇒ **复用，零新增填充代码**。同时避开了图捕获期 host→device 同步拷贝（R368 雷区）。
+3. `sm70_long_decode_fp8` 的 `kv_sz={n_pages,page_tokens,n_kv_heads,256}` 中 `n_kv_heads` **只参与 `token_stride=n_kv_heads*256`**（:5089）⇒ 传 `K->data + j*256`、`n_kv_heads=hkv` 正好选中 KV 头 j，且 stride 1024 = 真实 fp8 布局。`block_stride=256*1024=262144` = 我们的页大小。
+
+**落码（`fattn-sm70-long.cu`，4 处，全部默认不触发）**
+- `extern "C" void sm70_long_decode_fp8(...)` 声明（:24-31，与 f16 同处）。
+- KV 暂存短路：`if ((!k_direct || !v_direct) && K->type != GGML_TYPE_F8_E4M3)`（省掉每步 O(kv) f16 化拷贝 = R375 算出的 ~9 ms/卡税）。
+- fp8 零拷贝分支（bt/sl 填充之后、f16 launch 之前）：`ws.partf`（80×8×gqa×256 f32）、`ws.lsef`（80×8×gqa×**2** f32，R409 证实的 pair 布局）一次性固定尺寸分配；逐 KV 头 launch；复用 `sm70_long_scatter_out`；`return`。
+- `supported()` 白名单加 `GGML_TYPE_F8_E4M3`（与分支同一次提交，避免 fp8 被塞进 f16/q8_0 暂存路）。
+
+**证据**：`MANIFEST_DIFFS=0`；`BUILD_RC=0`；`LIBGGML_CUDA_MD5=48faebc673244109324c1d4de55a29f2`；`MANIFEST_SHA256=3c321b0b8a9e62550f9964da75c99ca6b4e2c05008f8f7104f731af4206687bd`；`LLAMA_SERVER_MD5=47467cf6f2234cf73c87cbc3fa239433`。首次 rc=3 = 清单门正拒绝（本地改文件后清单未重签，`+/- ggml/src/ggml-cuda/fattn-sm70-long.cu`）——门按设计工作；随后重建清单后 rc=0。
+
+**运行时不可达性**：分支条件 = `K->type == GGML_TYPE_F8_E4M3`，当前服务 KV = q8_0 ⇒ 本提交对在跑服务零行为改变（默认关 + 类型不匹配双重保险）。
+
+**待办（W1 剩余）**：① `fattn.cu` 加 `GGML_TYPE_F8_E4M3` → `BEST_FATTN_KERNEL_SM70_LONG` 路（env 门控）② KV 缓存类型**由代码内部**选 F8_E4M3（不得经 `-ctk/-ctv` 用户启动参数，§1.6）③ 零回归门（默认关时 gate sha + `[OP]` 不变）④ 开 fp8 后按 `[OP]` FLASH_ATTN_EXT 时间判 A/B（当前 25.4 ms/轮，底线 12.1 ms）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
