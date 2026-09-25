@@ -3207,6 +3207,46 @@ static bool ggml_cuda_should_fuse_rms_norm_mul_rope(const ggml_tensor * rms_norm
     return true;
 }
 
+// R383: the fused cpy+add kernel reads both sources elementwise, so it needs dense
+// contiguous operands of a supported type and a type-compatible ADD.
+static bool ggml_cuda_should_fuse_cpy_add(const ggml_tensor * cpy, const ggml_tensor * add) {
+    if (cpy->op != GGML_OP_CPY || add->op != GGML_OP_ADD) {
+        return false;
+    }
+
+    if (add->src[0] != cpy && add->src[1] != cpy) {
+        return false;
+    }
+
+    const ggml_tensor * other = add->src[0] == cpy ? add->src[1] : add->src[0];
+
+    // ggml_add requires both operands to share the result type
+    if (other->type != add->type) {
+        return false;
+    }
+
+    const bool src_ok = cpy->src[0]->type == GGML_TYPE_F32 || cpy->src[0]->type == GGML_TYPE_F16;
+    const bool dst_ok = add->type        == GGML_TYPE_F32 || add->type        == GGML_TYPE_F16;
+    if (!src_ok || !dst_ok) {
+        return false;
+    }
+
+    if (!ggml_are_same_shape(cpy->src[0], other) || !ggml_are_same_shape(cpy, add)) {
+        return false;
+    }
+
+    if (!ggml_is_contiguous(cpy->src[0]) || !ggml_is_contiguous(other) || !ggml_is_contiguous(add)) {
+        return false;
+    }
+
+    // the fused kernel writes add->data; reading cpy->src[0] from the same buffer would race
+    if (cpy->src[0]->data == add->data) {
+        return false;
+    }
+
+    return true;
+}
+
 // match gated_delta_net + the strided cpy that scatters its state snapshots into the cache
 // (slot i -> rollback group i, slot 0 newest), so the kernel can write them and skip the cpy.
 static int ggml_cuda_try_gdn_cache_fusion(
@@ -4635,6 +4675,16 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
     if (ggml_cuda_can_fuse(cgraph, i, { GGML_OP_SCALE, GGML_OP_UNARY, GGML_OP_SCALE }, { GGML_UNARY_OP_TANH })) {
         ggml_cuda_op_softcap(*cuda_ctx, cgraph->nodes[i + 2], node);
         return 2;
+    }
+
+    // R383: fused CPY + ADD. Off by default: the win is unmeasured, so the released
+    // binary keeps the measured baseline. GGML_CUDA_FUSE_CPY_ADD=1 enables it.
+    static const bool fuse_cpy_add = getenv("GGML_CUDA_FUSE_CPY_ADD") != nullptr;
+    if (fuse_cpy_add &&
+            ggml_cuda_can_fuse(cgraph, i, { GGML_OP_CPY, GGML_OP_ADD }, {}) &&
+            ggml_cuda_should_fuse_cpy_add(node, cgraph->nodes[i + 1])) {
+        ggml_cuda_op_cpy_add_fused(*cuda_ctx, node, cgraph->nodes[i + 1]);
+        return 1;
     }
 
     return 0;

@@ -426,6 +426,56 @@ static bool ggml_cuda_cpy_as_memcpy_2d(const ggml_tensor * src0, const ggml_tens
     return spitch >= width && dpitch >= width;
 }
 
+// R383: fused CPY + ADD. One pass reads the source once, converts, adds and writes.
+template<typename src_t, typename other_t, typename dst_t>
+static __global__ void cpy_add_scalar_contiguous(const char * cx, const char * cadd, char * cdst, const int64_t ne) {
+    const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= ne) {
+        return;
+    }
+    const src_t   * x     = (const src_t   *) cx;
+    const other_t * other = (const other_t *) cadd;
+    dst_t         * dst   = (dst_t         *) cdst;
+    dst[i] = (dst_t) ((float) x[i] + (float) other[i]);
+}
+
+template<typename src_t, typename other_t, typename dst_t>
+static void ggml_cpy_add_scalar_contiguous_cuda(const char * cx, const char * cadd, char * cdst, const int64_t ne, cudaStream_t stream) {
+    const int64_t num_blocks = (ne + CUDA_CPY_BLOCK_SIZE - 1) / CUDA_CPY_BLOCK_SIZE;
+    GGML_ASSERT(num_blocks <= INT_MAX);
+    const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params((dim3)num_blocks, CUDA_CPY_BLOCK_SIZE, 0, stream);
+    ggml_cuda_kernel_launch(cpy_add_scalar_contiguous<src_t, other_t, dst_t>, launch_params, cx, cadd, cdst, ne);
+}
+
+void ggml_cuda_op_cpy_add_fused(ggml_backend_cuda_context & ctx, ggml_tensor * cpy, ggml_tensor * add) {
+    // cpy: src0 -> cpy->data. add: cpy->data + other -> add->data.
+    // fused: src0 + other -> add->data, one pass. Elementwise, same shape, contiguous.
+    const ggml_tensor * src0  = cpy->src[0];
+    const ggml_tensor * other = add->src[0] == cpy ? add->src[1] : add->src[0];
+    GGML_ASSERT(add->src[0] == cpy || add->src[1] == cpy);
+    GGML_ASSERT(ggml_are_same_shape(cpy, add));
+    GGML_ASSERT(ggml_are_same_shape(src0, other));
+    GGML_ASSERT(ggml_is_contiguous(src0) && ggml_is_contiguous(other) && ggml_is_contiguous(add));
+
+    const int64_t ne   = ggml_nelements(src0);
+    const char  * cx   = (const char *) src0->data;
+    const char  * cadd = (const char *) other->data;
+    char        * cdst = (char       *) add->data;
+
+    const cudaStream_t stream = ctx.stream();
+    if (src0->type == GGML_TYPE_F32 && other->type == GGML_TYPE_F32 && add->type == GGML_TYPE_F32) {
+        ggml_cpy_add_scalar_contiguous_cuda<float, float, float>(cx, cadd, cdst, ne, stream);
+    } else if (src0->type == GGML_TYPE_F32 && other->type == GGML_TYPE_F16 && add->type == GGML_TYPE_F16) {
+        ggml_cpy_add_scalar_contiguous_cuda<float, half, half>(cx, cadd, cdst, ne, stream);
+    } else if (src0->type == GGML_TYPE_F16 && other->type == GGML_TYPE_F32 && add->type == GGML_TYPE_F32) {
+        ggml_cpy_add_scalar_contiguous_cuda<half, float, float>(cx, cadd, cdst, ne, stream);
+    } else if (src0->type == GGML_TYPE_F16 && other->type == GGML_TYPE_F16 && add->type == GGML_TYPE_F16) {
+        ggml_cpy_add_scalar_contiguous_cuda<half, half, half>(cx, cadd, cdst, ne, stream);
+    } else {
+        GGML_ABORT("ggml_cuda_op_cpy_add_fused: unsupported type combo");
+    }
+}
+
 void ggml_cuda_cpy(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, ggml_tensor * src1) {
     const int64_t ne = ggml_nelements(src0);
     GGML_ASSERT(ne == ggml_nelements(src1));
