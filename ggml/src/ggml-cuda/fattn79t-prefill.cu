@@ -572,6 +572,9 @@ __device__ float const* g_row_max = nullptr;
 __device__ float const* g_row_inv_sum = nullptr;
 __device__ float* g_row_sum_out = nullptr;
 __device__ int g_rows = 0;
+// R357: true only when the decode experiment is enabled; keeps every prefill code
+// path (algorithm choice, GEMM width) exactly as it was when T1-C was accepted.
+static bool t1c_decode_exec = false;
 __device__ float* g_tail_row_sum_out = nullptr;
 __device__ int g_tail_rows = 0;
 __device__ int g_pv_task_base = 0;
@@ -1978,9 +1981,9 @@ struct CublasQKLauncher {
 
   void launch(cudaStream_t stream) const {
     check(cublasSetStream(handle, stream), "set cuBLAS QK stream");
-    // R337: cuBLAS heuristics pick Tensor Core paths that reject small m/n (status 13;
-    // decode tail blocks have width as small as 2). Force the SIMT algorithm there.
-    cublasGemmAlgo_t qk_algorithm = (rows % 8 == 0 && width % 8 == 0)
+    // R337: decode-only workaround for the cuBLAS small-m/n rejection. Prefill keeps
+    // the original constant algorithm so its tuned behavior is byte-for-byte unchanged.
+    cublasGemmAlgo_t qk_algorithm = (!t1c_decode_exec || (rows % 8 == 0 && width % 8 == 0))
         ? CUBLAS_GEMM_ALGO9_TENSOR_OP : CUBLAS_GEMM_ALGO0;
     if (char const* runtime_algorithm =
             std::getenv("PREFIX_QK_CUBLAS_ALGO_RUNTIME")) {
@@ -3318,6 +3321,8 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
   // R335: decode admission is opt-in (LLAMA_SM70_79T_DECODE=1); rows>=128 keeps the
   // Tensor Core QK path, smaller rows use the default cuBLAS algorithm.
   static const bool t1c_decode_env = getenv("LLAMA_SM70_79T_DECODE") != nullptr;
+  // R357: the launcher reads this to keep prefill on its original (tuned) code path.
+  t1c_decode_exec = t1c_decode_env;
   if (q == nullptr || k == nullptr || v == nullptr || out == nullptr ||
       query_len <= 0 || query_len > 2048 ||
       (query_len % 8 != 0 && !t1c_decode_env) ||
@@ -3497,7 +3502,8 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
   for (int b = 0; b < n_blocks; ++b) {
     const int begin = b * kBlockN;
     const int width = std::min(kBlockN, prefix - begin);
-    const int width_pad = (width + 7) & ~7;
+    // R337: only the decode path pads the GEMM width; prefill passes it unchanged.
+    const int width_pad = t1c_decode_exec ? ((width + 7) & ~7) : width;
     CublasQKLauncher qk{ws.cublas, ws.qt, ws.kt + begin,
                         ws.scores, rows, width_pad, rows, kv_len};
     qk.launch(stream);

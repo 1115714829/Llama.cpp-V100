@@ -2,7 +2,6 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <mma.h>
-#include <torch/library.h>
 #include <algorithm>
 #include <atomic>
 #include <climits>
@@ -11,10 +10,16 @@
 #include <string>
 #include <type_traits>
 
+#if defined(SM70_LONG_RAW)
+// ggml-cuda build: no torch/ATen available, use the minimal stand-in
+#include "sm70-long-atenshim.h"
+#else
+#include <torch/library.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
+#endif
 #include <cub/block/block_radix_sort.cuh>
 
 #include "fp8_kv_utils.cuh"
@@ -5000,6 +5005,7 @@ at::Tensor sm70_grouped_long_entry(
 }
 }  // namespace
 
+#if !defined(SM70_LONG_RAW)
 TORCH_LIBRARY_FRAGMENT(_vllm_fa2_C, ops) {
   ops.def(
       "sm70_grouped_long_fwd(Tensor q, Tensor k, Tensor v, Tensor(a!) out, "
@@ -5009,3 +5015,4 @@ TORCH_LIBRARY_FRAGMENT(_vllm_fa2_C, ops) {
 TORCH_LIBRARY_IMPL(_vllm_fa2_C, CUDA, ops) {
   ops.impl("sm70_grouped_long_fwd", &sm70_grouped_long_entry);
 }
+#endif
