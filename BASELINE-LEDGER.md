@@ -1016,6 +1016,45 @@ grouped-verify 核尾段**无条件**要求 `COMPENSATE_P`（`:2507`/`:3140`）�
 
 **剩余**（第 3 步余下）：① `fattn-sm70-long.cu` 适配层加 fp8 分支 + **删 `sm70_long_stage_kv` 的 O(kv) 拷贝** ② `fattn.cu` 分发路由 `GGML_TYPE_F8_E4M3` ③ 数值实验 2（合成数据 vs CPU 参考）④ 上机 A/B（判据 `[OP]` FA 时间）。
 
+### R404 ★★ 适配层 FP8 分支的精确设计（下轮一次写完，避免半截改动）（2026-09-26）
+
+**一、现状（读 `fattn-sm70-long.cu`）**
+- `sm70_long_ws`（:122-138）持久工作区：`k/v/q/o/bt/sl/act/mxl/exs/ors/part` + 容量 + `stats_ok`（R368 立：图捕获内禁止 per-call `cudaMalloc`）。
+- `supported()`（:145-198）的类型白名单在 `:182-185`：**只收 `F16` 或 `Q8_0`**。
+- `decode()`（:206+）现有实现：staging（`sm70_long_stage_q/kv` + `scatter_out`）后调 `sm70_long_decode_f16`。
+
+**二、设计结论（重要，缩小改动面）**
+| 成本 | 量级 | 处置 |
+|---|---|---|
+| **KV staging**（`sm70_long_stage_kv`） | **O(kv)**（256K = 9.1 GB/卡/轮） | **必须删**，FP8 路径直接传 `K->data`/`V->data`（零拷贝） |
+| Q staging（`[t][hq][d] → [q][h][d]` f16） | O(q×h×D) = 8×6×256 | **保留**（微小，且核的布局契约需要） |
+| 输出 scatter（核写 `[q][h][d]` f16 → 我方 `dst [D][n_q][hq]` f32） | 同上，微小 | **保留** |
+
+**三、FP8 分支需要的工作区缓冲**（复用 `sm70_long_ws`）
+- `bt`：`int32[n_pages]`，**恒等页表**（`bt[i] = i`），`n_pages = ceil(kv_len / 256)`；kv 长度不变时**只填一次**（用 `bt_cap` 缓存判别）。
+- `sl`：`int32[1]` = `kv_len`（`row_lengths`）。
+- `part`：`f32[80*8*6*256]` = 3.93 MB（`PARTIAL_T=float`，与 1cat 的 E4M3 实例化一致）。
+- `lse`：`f32[80*8*6]`。
+- `o`：`half[n_q_pad*hq*256]`。
+- **均已在 `sm70_long_ws` 中有对应字段**（`bt/sl/part/o`），只需按 fp8 语义调整容量与填充方式；`mxl/exs/ors/act` 在 FP8 路径**不再需要**（改走 partial/lse 组合）。
+
+**四、插入点**
+1. `supported()` `:182`：白名单加 `K->type == GGML_TYPE_F8_E4M3`（**必须与 decode 分支同时落地**，否则会把 FP8 引到只支持 f16/q8_0 的 staging 路径）。
+2. `decode()` 开头加早分支：`if (K->type == GGML_TYPE_F8_E4M3) { …零拷贝路径… return; }`。
+3. `alloc_size()`：按 fp8 路径的 workspace 需求（part 3.93 MB 为主）给出。
+
+**五、调用形态（与 R403 的 raw entry 对齐）**
+```cpp
+sm70_long_decode_fp8(q_staged_f16, K->data, V->data, ws.o,
+                     ws.bt, ws.sl, ws.part, ws.lse,
+                     n_q, n_kv_heads, n_q_heads_per_kv,
+                     /*page_tokens*/ 256, n_pages,
+                     /*k_scale*/ 1.0f, /*v_scale*/ 1.0f, scale, stream);
+// 然后 scatter ws.o -> dst（沿用 sm70_long_scatter_out）
+```
+
+**六、为什么本轮不动手**：单改 `supported()` 会把 FP8 路由到不支持的 staging 路径（危险）；而完整分支涉及 workspace 容量、页表缓存、早分支与 scatter 四处联动，需连续性——**留作下一轮一次写完并 nvcc 验证**，避免半截改动污染构建。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
