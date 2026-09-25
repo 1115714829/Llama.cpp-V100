@@ -446,6 +446,23 @@
 - **刀序（R375）**：① **KV 转换税**（预期 −9 ms/轮，先做同源 A/B）② verify 未归因分相（逐节点 GPU 计时，替代坏掉的 nsys/OP_TIMING）③ 轮内重叠（draft/注入/selector 互等）④ 预填充草稿与 target 重叠（−23 s 缺口）。
 - **⚠ 未决（下一件必做）**：**AL 方差来源未归因**（内容/采样种子/接受准则三选一）⇒ 决定后续所有 tg 型 A/B 是否可信。
 
+### R376 ★★★ KV 转换税第一刀落地：TILE 内核 q8_0 直读（免 f16 全量镜像）——256K 轮成本 **83.95 → 78.75 ms（−5.2 ms，−6.2%）**、门值绿、预填充零回归；E1（Split-D 核 + q8-direct）判负复证（2026-09-25）
+
+- **E1（先试零代码路线）判负**：`LLAMA_SM70_D256=1 LLAMA_SM70_79T_DECODE=1 LLAMA_SM70_Q8_DIRECT=1`（q8-direct 代码已在树内：`sm70_q8_dequant_one/group`、`k_direct` 免镜像路由）。256K spec-on ABBA：A（TILE+staging）tpot 28.45/27.04、轮 86.2/86.0 ms；**B（Split-D+q8-direct）tpot 125.04/144.12、轮 ~359 ms = 慢 4.2x**；spec-off 纯步 B tpot 320.7 ms vs A 33.3 ms = **慢 10x**。probe 实证路由：`ACCEPT: sm70 d256 + small-prefill (FISHLIKEXIE_BLACK_MAGIC)`（decode 形状被 small-prefill 分支接走，固定开销主导）⇒ **R339 判负在 256K + q8-direct 下复证**，Split-D 核不适合 decode。注：probe 形状 `K=(256,262144,4,1)` = **每卡 4 KV 头**（TP4 切分 16 KV 头），修正 R368 的 `hkv=1` 记述。
+- **E2（TILE 加 q8_0）采纳**：`fattn-tile.cuh` 改造（模板加 `Kq8/Vq8`；`flash_attn_tile_load_tile` 加 q8 分支 + `flash_attn_tile_dequant_q8_0`（复用 `dequantize_V_q8_0<half,2>`，舍入与 staged 路径一致）；`iter_KQ/iter/kernel` 指针改 `const char *`，q8_0 时基址=行起始、`e0_base`=绝对元素索引；half2 粒度元素偏移恒偶 ⇒ 永不跨 q8_0 block）+ `fattn.cu`（TILE 的 `need_f16_K/V = !(K==Q8_0 && V==Q8_0)`）。
+- **E2 数据（ABBA，唯一变量=TILE 改动；A=留档二进制 `libdir-gb-bak-20260925-1521`，B=`/root/libdir-gb`）**：
+  | 臂 | libggml-cuda.so | tpot ms | AL | 轮成本 ms | TTFT s |
+  |---|---|---|---|---|---|
+  | e2a1 | 7c4325fb | 29.94 | 2.84 | 85.0 | 175.17 |
+  | **e2b1** | **e497c968** | **27.31** | 2.87 | **78.4** | 175.28 |
+  | **e2b2** | **e497c968** | **26.81** | 2.95 | **79.1** | 175.37 |
+  | e2a2 | 7c4325fb | 32.50 | 2.55 | 82.9 | 175.31 |
+  **A 均值 83.95 → B 均值 78.75 ms/轮（−5.2 ms，−6.2%）**；B 离散 0.7 vs A 2.1 ⇒ 收益稳定。TTFT 175.2–175.4 四臂一致 = **预填充零回归** ✓；门值 `SPEC=1 t1c-gate.sh` g1=g0=`bcda0092…`（131 chars）✓。
+- **构建（§1.0.2 全流程）**：`p4-build.sh` 清单门 `MANIFEST_DIFFS=0`、`BUILD_RC=0`、`ERROR_LINES=0`、205 s（`-j176`）；manifest sha256 `873aecdd…`；`libggml-cuda.so` md5 `7c4325fb… → e497c968…`（**改动确证进二进制**）、`llama-server` md5 `47467cf6…` 不变。
+- **收益归因（待查）**：预期 −12 ms（转换 ~9 + 读减半 ~3），实测 −5.2 ms（43%）。候选：转换的读被 L2 部分吸收、转换与其他 kernel 重叠、q8_0 dequant 的 ALU 抵消。留待逐节点计时（刀序②）。
+- **新采用值（256K spec-on）**：轮成本 **78.75 ms**、tpot 26.8–27.3 ms、AL 2.87–2.95、tg 36.6–37.3；对 BL1（tpot 8.0）= **3.35x**（此前 3.4–3.9x）。tg 判据仍以轮成本+AL 并列（AL 方差未归因）。
+- **遗留**：① q8_0 直读未加 env 门控（默认生效）——预填充走 79T 引擎不受影响、门值/TTFT 双绿，符合冻结条款；如需回退可用留档二进制。② MMA_F16 路径仍硬编码 f16（q>16 形状）。③ 预期收益缺口待归因。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。

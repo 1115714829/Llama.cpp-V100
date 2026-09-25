@@ -1376,6 +1376,13 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
         ⑥ **节点 KVTAX（新，当前头号刀）**：`TILE`/`MMA_F16` **无条件** `need_f16_K/V=true`（`fattn.cu:763-780`）+ q8_0 下 verify 必走 TILE（`:666`：`8×gqa_ratio_eff(2) ≤ 16`）⇒ **每步 16 层 6.8 GB/卡 ≈ 9 ms** 的 q8_0→f16 转换税；上游**已有**原生 q8_0 直读实例（`fattn.cu:413-459`，含 D=256）但 Volta 仅在 `Q->ne[1]×gqa ≤ 2` 选 VEC ⇒ decode verify 拿不到。证伪/验证入口 = `[FAK]`/`[FAKD]` 诊断 + 同源 A/B + 门值。
         ⑦ **3 处旧判词改判（只改灰不删）**：1cat decode 核"判死"基于 **5K** 口径（5K 解码注意力仅 0.2-1 ms）⇒ 对 256K 不适用，改判"形态错、非无收益"；`LLAMA_SPEC_REJ` 需重立实验；N8T 判负是**单 rep**（差 −0.02 ms）⇒ 复核须 ≥2 rep。
 
+     —— Round 228（**R376 KV 转换税第一刀：TILE q8_0 直读采纳**）：
+        ① E1（零代码路线，Split-D 核 + q8-direct）判负：256K spec-on 轮 86→359 ms（4.2x 慢）、纯步 33→321 ms（10x）；probe 证 decode 形状被 small-prefill 分支接走（`ACCEPT: sm70 d256 + small-prefill`）⇒ R339 同族结论在 256K + q8-direct 下复证：该核不适合 verify。
+        ② E2（TILE 加 q8_0）采纳：`fattn-tile.cuh` 模板 `Kq8/Vq8` + `flash_attn_tile_dequant_q8_0`（复用 `dequantize_V_q8_0<half,2>`，舍入与 staged 路径一致；half2 粒度元素偏移恒偶 ⇒ 永不跨 block）+ `fattn.cu` 的 `need_f16` 判断。ABBA（A=留档二进制 7c4325fb，B=e497c968）：**A 83.95 → B 78.75 ms/轮（−5.2 ms，−6.2%）**；门值 `bcda0092…` 绿、TTFT 175.2–175.4 零回归。
+        ③ 构建证据链全程走 `p4-build.sh`（`MANIFEST_DIFFS=0`、`BUILD_RC=0`、205 s、`libggml-cuda.so 7c4325fb→e497c968` 确证改动进二进制）。
+        ④ 修正 R368 记述：TP4 下**每卡 4 KV 头**（16 KV 头切分），非 hkv=1。
+        ⑤ 收益缺口（预期 −12 vs 实测 −5.2 ms）待逐节点 GPU 计时归因（刀序②）；MMA_F16 路径仍硬编码 f16。
+
 ## 5. 作业纪律（血泪）
 
 ```
