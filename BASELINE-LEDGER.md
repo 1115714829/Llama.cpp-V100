@@ -317,6 +317,13 @@
 - **⚠️ 布局阻塞（下一步）**：我方 KV 为 **`[256d][kv][hkv]` 交织布局**（`:603` 实测 `K=(256,262144,4,1) Knb1=1088 Knb2=272 rowK=272` ⇒ head 维在里层、token 步长 1088），而 1cat 核按 **token-major `[t][256]`** 连续读 head 维 ⇒ **必须先做"转置式反量化"**（T1-C 的 `t1c_k_q8_0_to_half_t` 正是该形态，可复用/移植到胶水）；`convert.cuh` 的 `to_fp16` 只有**扁平版**（无多维重载，本轮据此修掉 7 个编译错）⇒ **在转置反量化落地前不得开启该 env**（否则镜像错误 ⇒ 数值必错）。
 - **判据纪律**：开启后第一判据 = `SPEC=1 LLAMA_SM70_LONG_DECODE=1 bash t1c-gate.sh` 的 greedy sha；通过后才跑每轮 A/B。
 
+- **R364 ★★★ 接线完成编译但**未真正生效**（诚实修正）：`LLAMA_SM70_LONG_DECODE=1` 下 `[FAK]` 显示仍选 MMA_F16/TILE；诊断定位 = **decode 形状的 FA 调用收到 `kv=256`**（不是长上下文）⇒ 被我的 kv≥512 门槛拦下；此前"门值全绿"是**走老路**的结果，不算数**（2026-09-25）
+
+- **证据链**：① `GGML_CUDA_FA_KERNEL_DEBUG=1` ⇒ `[FAK] kernel=TILE D=256 n_q=2 n_kv=256 kv_type=8` 与 `kernel=MMA_F16 D=256 n_q=42 n_kv=256`（后者是预填充分块，n_q>8 正确拒绝）② 新增形状诊断（最多 8 条）⇒ **8/8 全是 `q=2 kv=256 hq=24 hkv=4 Ktype=8 Qtype=0`、原因均为 "kv shorter than 512"**（prompt 为 5000 token 却只见 256 ✗）。
+- **待查（下一轮主线）**：为什么 decode 的 FA 只看到 `kv=256`？候选：① 该模型全注意力层是 **滑动窗口(SWA)/分块**（256 = 窗口）② KV cache 的 cell 视图语义 ③ 该 FA 调用属于别的路径。**在弄清前不得把该核接到 decode**（否则语义错）。
+- **诚实修正**：R363 的"q/kv 形状实测 24 头/4 头"仍成立 ✓，但"长上下文"前提在 decode 下**不成立** ⇒ 该核的用武之地（长 KV 解码）需要先确认 llama.cpp 侧是否真的以长 KV 调用解码注意力。
+- **代码状态**：胶水（staging/scatter/页表/scratch）已实现且编译通过 ✓、env 默认关 ✓、默认门值 g0=g1=bcda0092 ✓（生产零影响）。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
