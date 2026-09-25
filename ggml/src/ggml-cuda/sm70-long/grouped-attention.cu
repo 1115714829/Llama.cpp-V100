@@ -5023,6 +5023,16 @@ TORCH_LIBRARY_IMPL(_vllm_fa2_C, CUDA, ops) {
 // shapes follow 1cat's caller (partial [parts, n_q, 6, 256] f16, lse
 // [parts, n_q, 6] f32, online_rescales [n_q, 6, parts] f32).
 // ---------------------------------------------------------------------------
+// R389: forces instantiation of the q8_0 codec so the compiler verifies it, and doubles
+// as a smoke kernel for checking dequantized values against a CPU reference.
+extern "C" __global__ void sm70_long_q8_0_probe(const void * kv_cache, float * out, const int n) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) {
+    return;
+  }
+  out[i] = flash_v100::load_kv_cache_float_unscaled<flash_v100::KV_CACHE_DTYPE_Q8_0>(kv_cache, i);
+}
+
 extern "C" void sm70_long_decode_f16(
     const void * q, const void * k_cache, const void * v_cache, void * out,
     const void * block_table, const void * seq_lens,
@@ -5031,7 +5041,14 @@ extern "C" void sm70_long_decode_f16(
     int n_q, int n_kv_heads, int page_size, int n_pages, int n_parts,
     int n_q_heads_per_kv, float softmax_scale, cudaStream_t stream) {
   const int n_q_heads = n_kv_heads * n_q_heads_per_kv;
+  // R367: the grouped verifier's workspace is a compile-time shape
+  // (kGroupedVerifyQ8Splits=80 splits x kGroupedVerifyQ8MaxQ=8 query tokens x 6 heads),
+  // not the caller's partition count. The old glue sized it by n_parts and the kernel
+  // wrote split_id < 80 rows out of bounds.
+  constexpr int kSplits = 80;
+  constexpr int kMaxQ   = 8;
   const int n_q_pad = n_q < 2 ? 2 : n_q;   // the staged kernels assume q >= 2
+  const int launch_parts = n_parts < kSplits ? n_parts : kSplits;
 
   const std::vector<int64_t> q_sz   = {n_q_pad, n_q_heads_per_kv, 256};
   const std::vector<int64_t> q_st   = {n_q_heads_per_kv * 256, 256, 1};
@@ -5039,12 +5056,12 @@ extern "C" void sm70_long_decode_f16(
   const std::vector<int64_t> kv_st  = {(int64_t) page_size * 256, 256, (int64_t) page_size * n_pages, 1};
   const std::vector<int64_t> o_sz   = q_sz;
   const std::vector<int64_t> o_st   = q_st;
-  const std::vector<int64_t> po_sz  = {n_parts, n_q_pad, n_q_heads_per_kv, 256};
-  const std::vector<int64_t> po_st  = {n_q_pad * n_q_heads_per_kv * 256, n_q_heads_per_kv * 256, 256, 1};
-  const std::vector<int64_t> pl_sz  = {n_parts, n_q_pad, n_q_heads_per_kv};
-  const std::vector<int64_t> pl_st  = {n_q_pad * n_q_heads_per_kv, n_q_heads_per_kv, 1};
-  const std::vector<int64_t> or_sz  = {n_q_pad, n_q_heads_per_kv, n_parts};
-  const std::vector<int64_t> or_st  = {n_q_heads_per_kv * n_parts, n_parts, 1};
+  const std::vector<int64_t> po_sz  = {kSplits, kMaxQ, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> po_st  = {kMaxQ * n_q_heads_per_kv * 256, n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> pl_sz  = {kSplits, kMaxQ, n_q_heads_per_kv};
+  const std::vector<int64_t> pl_st  = {kMaxQ * n_q_heads_per_kv, n_q_heads_per_kv, 1};
+  const std::vector<int64_t> or_sz  = {kMaxQ, n_q_heads_per_kv, kSplits};
+  const std::vector<int64_t> or_st  = {n_q_heads_per_kv * kSplits, kSplits, 1};
 
   at::Tensor tq((void *) q,           at::kHalf,  q_sz,  q_st,  0);
   at::Tensor tk((void *) k_cache,     at::kHalf,  kv_sz, kv_st, 0);
@@ -5054,14 +5071,14 @@ extern "C" void sm70_long_decode_f16(
   at::Tensor tml((void *) max_logits, at::kFloat, pl_sz, pl_st, 0);
   at::Tensor tes((void *) exp_sums,   at::kFloat, pl_sz, pl_st, 0);
   at::Tensor tor((void *) online_rescales, at::kFloat, or_sz, or_st, 0);
-  at::Tensor tbt((void *) block_table,     at::kInt, {1, n_pages}, {(int64_t) n_pages, 1}, 0);
-  at::Tensor tsl((void *) seq_lens,        at::kInt, {1, 1}, {1, 1}, 0);
+  at::Tensor tbt((void *) block_table,     at::kInt, {n_q_pad, n_pages}, {(int64_t) n_pages, 1}, 0);
+  at::Tensor tsl((void *) seq_lens,        at::kInt, {n_q_pad, 1}, {1, 1}, 0);
   at::Tensor tan((void *) active_num_partitions, at::kInt, {1}, {1}, 0);
 
   (void) tk; (void) tv; (void) tsl;
   launch_flash_attention_decode_paged_xqa_tc_256_staged(
       tq, tk, tv, to, tbt, tsl, tp, tml, tes, tor, tan,
-      softmax_scale, n_parts, /*use_split_reduce=*/true, /*split_reduce_dim_tile=*/256,
+      softmax_scale, launch_parts, /*use_split_reduce=*/true, /*split_reduce_dim_tile=*/256,
       stream);
 }
 #endif
