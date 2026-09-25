@@ -13,6 +13,45 @@
 > 4. 外来想法随时接进来（§3）。
 > 5. **账在 `PLAN-to-180ts.md`**（已按 tg >= 150 重写，并经 R146/R149 两次更正）：到 150 需要 -18.5 ms；**8K 路径 = N6a + N6b + P-B + N7**（N6a 单独只值 -2~-3）；**N1 是长上下文项**；先手是 Z1-Z6。
 
+## 0. ★★★ 2026-09-26 重审：吐字内核攻坚（**当前主线**；账本 R384）
+
+> **§1 主图的目标线（tg≥150 / AL 5.55 / 55.5 ms 轮）属旧口径**（非 256K spec-on 战役），保留作历史与已落地清单；**当前主线以本节 + 账本 R384 为准**。
+
+**问题定量（256K 同口径，全部实测）**：BL1 轮 **27.2 ms**（AL 3.4 / tpot 8.0 / tg 124.6 / TTFT 152.5 s）vs 我方 **78.6 ms**（AL 2.9 / tpot 27 / tg 37 / TTFT 175.2 s）= **2.9x**。纯解码仅 1.25x（33.3 vs 24.4–27.0 ms/token）⇒ **病在轮内结构，不在纯步**。
+
+**带宽地板（每卡每轮）**：权重 9.0 ms（Q8_0 27 GB / TP4 @751 GB/s）+ KV 12.1 ms（16 层 × 570 MB）≈ **21–22 ms**
+⇒ **BL1 就在地板上**；我方 MUL_MAT 25.2 vs 9.0 = **2.8x off（36% 屋顶）**、FA 25.4 vs 12.1 = **2.1x off（48% 屋顶）**。
+
+```mermaid
+flowchart TD
+  P["★ 吐字追平：tpot <= 8.0 ms<br/>等价 轮 / AL <= 8.0"]:::goal
+  A["杠杆 A：轮 78.6 -> 30-33 ms<br/>（内核，两大核打到内存地板）"]:::hot
+  B["杠杆 B：AL 2.9 -> 4.1+<br/>（乘法因子，最便宜的杠杆）"]:::hot
+  P --> A
+  P --> B
+  W1["W1 FA q=8 长 KV 核重写<br/>KV 切分给足 CTA 并行度 + mma.sync.m8n8k4 D=256<br/>抄 v100-refs/sm70-attn（同架构同头维 D256）<br/>25.4 -> 12-13 ms（-12）"]:::hot
+  W2["W2 GEMM Q8_0 MT=2 核<br/>两个 m8n8k4 row-tile 共享一次权重流 + fp32 累加，M<=16<br/>抄 v100-refs/v100-skinny skinny_fp8_qpn8_mt2<br/>需写 q8_0 codec 变体<br/>25.2 -> 10-12 ms（-13）"]:::hot
+  W3["W3 小算子 17 -> 5-6 ms（-11）<br/>先查清 CPY 4.7 是哪些拷贝，再融合/图谱消除"]:::cool
+  W4["W4 host/gap 10 -> 3 ms（-7）<br/>in-graph selector 崩溃 = 待修 bug<br/>+ tail graphs + 注入重叠"]:::cool
+  W0["W0 REJ IMA 根因修复<br/>AL 3.93/4.09 已有实证（1cat probabilistic 同款）<br/>单此项 tg 37 -> 51"]:::hot
+  W5["W5 TTFT 175.2 -> <= 152.5 s<br/>草稿链前向与 target 预填充重叠（-23 s）"]:::cool
+  A --> W1
+  A --> W2
+  A --> W3
+  A --> W4
+  B --> W0
+  P --> W5
+  X15["E15：mma decode -84%（判负）<br/>真因待查：q=8 时 CTA 数 = 6 头 x 1 tile = 6 CTA/层/卡<br/>=> 正解是 KV 切分，不是回退 TILE"]:::no
+  X6["E6：TILE split floor 无效（判负）<br/>= TILE 核自己的 floor，非长 KV 并行度的解法"]:::no
+  X1["E1：Split-D 准入 q=8 反致 4.2x 慢<br/>= routing 到 small-prefill（cuBLAS 路）"]:::no
+  X15 -.->|纠正方向| W1
+  X6 -.->|纠正方向| W1
+  X1 -.->|纠正方向| W1
+```
+
+> **验收**：轮 ≤ 33 ms 且 AL ≥ 4.1 ⇒ tpot ≤ 8.05 ms ⇒ tg ≈ 124（§1.0 及格线）。两者缺一：只做核 → tg ≈103；只做 AL → tg ≈51。
+> **纪律**：判据 `[OP]` GPU 时间（墙钟噪声 ±11 ms）；门值 `bcda0092…`；同源 A/B（一 build + env 门控）；`p4-build.sh` 清单门；未测量改动默认关（R383）。
+
 ## 1. 主图
 
 ```mermaid

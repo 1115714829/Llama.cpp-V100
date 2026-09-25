@@ -583,6 +583,75 @@
 - **A 臂基线复核**：tg 34.21–39.27、tpot 25.43–29.20 ms（与 E10 的 32–46 / 22–31 一致）⇒ 当前基线不变。
 - **下一步**：B-2 关闭 ⇒ 转 B-1（GEMM MT=2，MUL_MAT 25 ms）或 C（combo_kernels 融合 + 注入重叠）。
 
+### R383 ★ CPY+ADD 融合：代码保留、**默认关**（未测量不得进基线）；同源 A/B 开关 `GGML_CUDA_FUSE_CPY_ADD=1`（2026-09-26）
+
+- 实现：`cpy.cu` 新 kernel `cpy_add_scalar_contiguous<src_t, other_t, dst_t>` + `ggml_cuda_op_cpy_add_fused`；`ggml-cuda.cu` 新谓词 `ggml_cuda_should_fuse_cpy_add` + `try_fuse` 分支（`{CPY, ADD}`，`return 1`）。
+- 把关：谓词排除非连续 / 非 F16-F32 组合 / 别名写入，**不满足即不融合**（不靠断言崩溃）。门值两轮绿（`bcda0092…` 全等）⇒ 数值正确。
+- **默认关的理由**：收益未测（墙钟噪声 ±11 ms 分辨不了 ~3 ms 效应），未测改动留在默认路径会污染后续所有 A/B 的基线（staged-baseline 铁律）。开关留作同源 A/B；待 W3（小算子）一击时启用测量。
+- 基线恢复构建：`libggml-cuda.so` = `ebf9f721ab2a9b737328ee7aa2d96c0a`、`MANIFEST_DIFFS=0`、门值绿。
+
+### R384 ★★★ 项目重审 + 吐字内核攻坚方案（用户 2026-09-26 指示"重新审视整个项目、解决吐字问题"；kernel-first）
+
+**一、问题的定量表述（本轮全部实测，256K 同口径）**
+
+| 指标 | BL1（vLLM+DFlash2） | 我们（llama.cpp+DFlash2） | 比值 |
+|---|---|---|---|
+| 轮成本 | **27.2 ms** | **78.6 ms**（65–87，23 rep） | **2.9x** |
+| AL | 3.4 | 2.84–2.99 | 0.85x |
+| tpot | **8.0 ms** | 22–31 ms（中位 27） | 3.4x |
+| tg | **124.6 t/s** | 32–46（中位 37） | 3.4x |
+| TTFT（spec-on） | 152.5 s | 174.0–175.1 s | 1.15x |
+| 纯解码 tpot（spec-off） | 24.4–27.0 ms | 33.0–33.6 ms | **1.25x** |
+
+**二、带宽地板（4×V100，每卡每轮）—— 决定性视角**
+
+| 流量 | 体积 | @751 GB/s（V100 实测权重流率 R212） |
+|---|---|---|
+| 权重（Q8_0 27 GB / TP4） | 6.75 GB/卡/前向 | **9.0 ms** |
+| KV（16 全注意力层 × 570 MB/层，K+V） | **9.1 GB/卡/轮** | **12.1 ms** |
+| 地板合计（层内 GEMM → FA 串行，不重叠） | | **≈21–22 ms** |
+
+⇒ **BL1 的 27.2 ms 就在地板上**（地板 + host）；**我们不是**：MUL_MAT 25.2 vs 9.0 = **2.8x off（36% 屋顶）**、FA 25.4 vs 12.1 = **2.1x off（48% 屋顶）**。**吐字问题 = 两个大核没跑到内存地板**，非模型/硬件问题（§1.0.1 原理判据）。
+
+**三、目标拆解（到轮 ≤ 33 ms，再靠 AL 收口）**
+
+| 成分 | 现在 | 目标 | 省 | 内核手段（含可抄件） |
+|---|---|---|---|---|
+| **FA** | 25.4 | **12–13** | −12 | q=8 长 KV 核：**KV 切分给足 CTA 并行度** + `mma.sync.m8n8k4`（D=256 k-slice）。抄件 `v100-refs/sm70-attn/`（Split-D N32 **D256 同头维**、同架构）。⚠ E1/E6/E15 已证：只"准入 q=8"不够（routing 到 small-prefill → 4.2x 慢；split floor 无效；mma decode −84%）⇒ **必须修并行度与流水，不是开关** |
+| **GEMM** | 25.2 | **10–12** | −13 | Q8_0 版 **MT=2**：两个 m8n8k4 row-tile **共享一次权重流** + fp32 累加，M≤16 专用。抄件 `v100-refs/v100-skinny/kernels/skinny_kernels.cu` 的 `skinny_fp8_qpn8_mt2` / `skinny_nvfp4_qpn2`（V100 实测）⇒ 需写 **q8_0 codec 变体**（我们格式是 q8_0） |
+| 小算子 | 17（CPY 4.7 / ADD 2.5 / RMS_NORM 1.4 / SCALE 1.3 / UNARY 1.2 / MUL 1.05 / CONCAT 0.8 / CONT 0.66 / GLU 0.6 / SET_ROWS 0.6 / ROPE 0.42 / views 0.5） | 5–6 | −11 | 融合模式扩展（已有 14）+ **图谱层消除冗余拷贝**（先查清 CPY 4.7 是哪些：KV 写 / rope 输出 / GDN state） |
+| host/gap | 10 | 3 | −7 | GPU selector（1cat `TP4_M1_FAST_SELECTOR`；我方 in-graph selector 启动崩 = **待修 bug，非判负**）、tail graphs、注入重叠 |
+| **合计** | **78.6** | **30–33** | **−45~−48** | |
+
+**四、AL 是另一半（乘法因子）**：`tpot = 轮 / AL`。
+- 轮 33 @ AL 3.4 = 9.7 ms（tg 103，不够）；轮 33 @ **AL 4.1** = **8.05 ms（tg 124）✓**
+- **REJ 已有实证 AL 3.93 / 4.09**（1cat `draft_sample_method=probabilistic` 同款），历史最高 AL 5.9–6.03 ⇒ **修好 REJ 的 IMA（W0）是最便宜的杠杆**：单此一项 tg 37 → 51（+38%）
+- ⇒ **W0（AL）+ W1/W2（两大核）互补，缺一不可**：只做核 → tg ≈103；只做 AL → tg ≈51
+
+**五、执行序（按 (收益 × 成功率)/成本）**
+
+| # | 工作项 | 目标 | 预期 | 成本 |
+|---|---|---|---|---|
+| **W0** | **REJ IMA 根因修复**（ASAN / CUDA_LAUNCH_BLOCKING 定位；env 门控已通） | AL 2.9 → 3.9+ | tg 37 → 51 | 0.5–1 天 |
+| **W1** | **FA q=8 长 KV 核重写**（KV 切分并行 + mma D=256；抄 sm70-attn） | 25.4 → 13 | −12 ms | 2–4 天 |
+| **W2** | **GEMM Q8_0 MT=2 核**（抄 v100-skinny，写 q8_0 codec） | 25.2 → 11 | −14 ms | 3–5 天 |
+| **W3** | **小算子**：先查清 CPY 4.7 构成，再融合/消除 | 17 → 6 | −11 ms | 2–3 天 |
+| **W4** | **host/gap**：修 in-graph selector 崩溃 + tail graphs + 注入重叠 | 10 → 3 | −7 ms | 2 天 |
+| **W5** | **TTFT**：草稿链前向与 target 预填充重叠（175.2 → ≤152.5 s） | 1.15x → ≤1.0x | −23 s | 1–2 天 |
+
+**六、测量纪律（冻结）**
+
+1. **判据 = `[OP]` GPU 时间**（R378：墙钟噪声 **±11 ms/轮**，≤5 ms 级效应全被淹没）；墙钟只作旁证，且必报 **轮成本 + AL 并列**（R375）。
+2. **门值**：greedy sha 逐位 = `bcda0092bfbaaa9d30db21d4a30ccc1bc1e6e68c3ff3101f86402069a7450bb8`；任一臂破 = 不采用（无论多快）。
+3. **同源 A/B**：一 build + env 门控（`GGML_*`），四库 md5 记录；ABBA ≥2 臂；对照臂差 <0.1% 才认。
+4. **构建**：一律 `p4-build.sh` 清单门（`MANIFEST_DIFFS=0`）+ `BUILD_MANIFEST.txt`。
+5. **预填充冻结**：W1/W2 若触公共组件，必须 env 门控 + 预填充门值重过（spec-off 151.7 s、门 `bcda0092…`）。
+6. **默认关纪律**：未测量的改动**不得**进默认路径（R383 教训）。
+
+**七、判负 ≠ 关闭（§1.6）**：E1/E6/E15 的结论是"**那种做法**不行"，不是"FA/GEMM 没救"：
+- E15 的 −84% 真因待查（嫌疑：q=8 时 CTA 数 = 6 头 × 1 tile = **6 CTA/层/卡**，并行度灾难）⇒ **正解是 KV 切分**（W1 核心）。
+- E6 的 split floor 无效 ≠ split 无效：那是 TILE 核的 floor，不是长 KV 并行度的解法。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
