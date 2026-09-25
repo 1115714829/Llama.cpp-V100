@@ -1002,6 +1002,20 @@ grouped-verify 核尾段**无条件**要求 `COMPENSATE_P`（`:2507`/`:3140`）�
 
 **下一步**：写 1→2→3，然后 `nvcc -DSM70_LONG_RAW` 编译 → 数值实验 2（合成数据 vs CPU 参考）→ 上机 A/B。
 
+### R403 ★★★★ W1 核心构件编译通过：**FP8 E4M3 零拷贝入口 `sm70_long_decode_fp8`**（`NVCC_RC=0`，符号在 `.text`）（2026-09-26）
+
+**实现**：`sm70-long/grouped-attention.cu` 的 `SM70_LONG_RAW` 块新增 `sm70_long_decode_fp8`——与 R396 的 q8_0 版同构，但：
+- `KV_DTYPE = KV_CACHE_DTYPE_FP8_E4M3` + **`COMPENSATE_P = true`**（`TWO_PASS=false`、`ROW_SEQLENS=true`、`PARTIAL_T=float` 全部满足 `:2092` 与 `:2507` 两处断言的合取）
+- KV 张量 = `at::kByte`，**strides 就是张量的自然字节步长**：`token = n_kv_heads*256 = 1024`、`head = 256`、`page = page_tokens*token = 262144`（全 8/16 对齐 ⇒ `paired = true`，走向量装载路径）
+- 传 `k_scale`/`v_scale`（首版 1.0），qk_scale 按 1cat 的折叠方式传 `softmax_scale * k_scale`
+- 地址自证：`physical_offset = (t/256)*262144 + (t%256)*1024 + h*256 + d = t*1024 + h*256 + d` = 我方 `[d][t][h]` 扁平布局的字节偏移 ✓ **零拷贝**
+
+**验证**：`nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW -I sm70-long -I . -O1 -c` ⇒ **`NVCC_RC=0`**、零 error、`/tmp/sm70fp8.o` = 1,159,624 字节；`nm` ⇒ **`T sm70_long_decode_fp8` 与 `T sm70_long_decode_f16` 并列在 `.text`**（共 181 符号）✓
+
+**意义**：这是**该核族首次以生产形态（E4M3 + compensated）在我方树内编译成功**——此前所有尝试都被 `COMPENSATE_P ⇒ E4M3` 的断言挡住（Q8_0 路线即因此改道）。**路线 B 的核侧已通**。
+
+**剩余**（第 3 步余下）：① `fattn-sm70-long.cu` 适配层加 fp8 分支 + **删 `sm70_long_stage_kv` 的 O(kv) 拷贝** ② `fattn.cu` 分发路由 `GGML_TYPE_F8_E4M3` ③ 数值实验 2（合成数据 vs CPU 参考）④ 上机 A/B（判据 `[OP]` FA 时间）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
