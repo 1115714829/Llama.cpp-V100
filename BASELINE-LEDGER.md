@@ -277,6 +277,14 @@
 - **⚠️ 新发现（口径纠正）**：**预填充必须按 spec-on 口径比**（BL1 = FP8+DFlash2 spec-on）⇒ 我方 spec-on TTFT **175.2 s vs BL1 152.5 s = 1.15x 劣** ✗（此前 R326 的 151.9 s 是 **spec-off** 口径，不能直接对 BL1）⇒ 预填充线需补 spec-on 口径的收口工作（draft 注入的 prefill 附加成本）。
 - **对比基线更新**：采纳 R349 的 F16 draft 后，256K 采用链 = tg 35.18 / 85.7 ms/轮 / AL 3.05（spec-on）。
 
+- **R357 ★★★ 用户关切核实：T1-C 的两处 decode 实验改动已限制为 decode-only，预填充恢复原始路径；复测 150.867/152.535 s（均值 151.70）vs 采用值 151.93 ⇒ 未变，仍 ≤ BL1 152.5 s**（2026-09-25）
+
+- **用户关切**（"预填充都调好了别动那边"）：自查 `git diff 37286c5fb..HEAD` 确认 T1-C 收口后有 **5 个 commit** 触及 `fattn-79t/prefill.cu`，其中**两处对预填充有真实行为差异**：① `qk_algorithm`（常量 ALGO9 → `(rows%8&&width%8)?ALGO9:ALGO0`，尾块会走 ALGO0）② `width_pad` 作为 GEMM 的 n（尾块多算 ≤7 列）。
+- **处置（R357）**：新增全局 `t1c_decode_exec`（仅 `LLAMA_SM70_79T_DECODE=1` 时为真），两处均改为 **decode-only** ⇒ 预填充回到一字不差的旧路径 ✓；行填充（rows 12288 本就是 8 倍数）与 QKFAIL 诊断打印保持（无行为影响）✓。
+- **复测证据（spec-off，k1 臂 ×2 rep，256K）**：TTFT **150.867 / 152.535 s**（均值 **151.70**，pp 1566/1549），`total=52.300s calls=14592`；对照采用值 151.93 s（R326）⇒ **未变** ✓ 仍 **≤ BL1 152.5 s** ✓；门值 g0=g1=bcda0092 ✓。
+- **启动参数未动**（已核对 `t1c-run.sh`）：`--ctx-size 262144 --ubatch-size 2048 --tensor-split 1,1,1,1 --cache-type-k/v q8_0 --flash-attn on` ✓；唯一变更 = draft 换 F16（用户指示）✓。
+- **vendored 隔离**：`sm70-long/` 为**子目录**，CMake `file(GLOB GGML_SOURCES_CUDA "*.cu")` 只收根目录 ⇒ **不进构建、零影响** ✓。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
