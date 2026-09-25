@@ -949,6 +949,27 @@ flash_attention_grouped_verify_e5m2_partial_kernel<
 
 **下一步**：路线 B 第 2 步——抄 `CopyWithScaleOp` + `fp16_bits_to_e5m2_satfinite_rn` 接入 KV **写**路径（f32→fp8 + scale），仍默认关；然后第 3 步 decode 接线（`KV_DTYPE=FP8_E5M2` + `k_scale` + 我方 strides，此刻 `COMPENSATE_P=true` 合法）。
 
+### R400 ★★★ 路线 B 第 2 步定位：KV 写路径 = `set_rows`（需加 FP8 分支）；★ 判定 **FP8 KV 必须是 E4M3**（2026-09-26）
+
+**一、写路径（读码确认）**
+| 环节 | 事实 |
+|---|---|
+| llama 侧 | `ggml_set_rows(ctx, k, k_cur, k_idxs)`（`llama-kv-cache.cpp:1354/1389/1410`），`k_cur` 为 **f32** |
+| CUDA 分派 | `ggml-cuda/set-rows.cu` 的 `set_rows_cuda<float, int32_t>`（止于 `:322`）= **白名单**（F32/F16/BF16/Q8_0/IQ4_NL）+ `GGML_ABORT` ⇒ **FP8 需新增分支** |
+| 量化子路径样板 | `set_rows_cuda_quant<idx_t, block_q8_0, QK8_0, quantize_f32_q8_0_block>`（`:300-309`）——**每块现算 scale 并写进块头**，与 FP8「无块头 + 外部 scale」语义**不同** |
+| `is_quantized` 的影响 | 只门控"注意力旋转（Hadamard）"（`llama-kv-cache.cpp:324/337`）⇒ FP8 取 `false` 无害，且我们不想要该旋转 |
+
+**二、★ 决定性判定：FP8 KV 必须用 E4M3（不是 E5M2）**
+grouped-verify 核尾段**无条件**要求 `COMPENSATE_P`（`:2507`/`:3140`），而 `COMPENSATE_P` 被 `:2092` 断言限定为 **`KV_DTYPE == FP8_E4M3`** ⇒ **E5M2 同样无法进入该核**。虽然 BL1 的 service 配置写的是 `fp8_e5m2`，但**我们的核只认 E4M3** ⇒ 取 E4M3。
+（附带收益：E4M3 尾数 3 位 ≈12% 相对误差，优于 E5M2 的 2 位 ≈25%；且 compensated-P 精度机制只在 E4M3 上存在——**我们反而拿到比 BL1 更好的 KV 精度**。）
+
+**三、scale 形态**：1cat = **外部标定**的 per-tensor / per-head scale，作为 launch 入参传给核（`k_scale`/`v_scale`，形状 `[1]` 或 `[num_heads]`）；其写核 `CopyWithScaleOp` 只做 `src*scale → fp8`。我们照抄该形态，**首版取 scale=1.0**（E4M3 范围 ±448，KV 量级通常远低于此；若出现饱和再引入标定）。
+
+**四、下一步（第 2 步实现）**
+1. `set-rows.cu` 给 `set_rows_cuda<float,int32_t>` 加 **F8_E4M3 分支**：写 1 字节/元素（`uint8_t`），转换抄 1cat 的 fp8 原语（E4M3 用 `fp8::scaled_convert<uint8_t, float, kFp8E4M3>`；E5M2 若将来要用，必须连同 `fp16_bits_to_e5m2_satfinite_rn` 一起抄以保逐位一致）。
+2. 默认**不启用**（只有显式 `--cache-type-k/v f8_e4m3` 才走到）⇒ 门值/预填充零回归。
+3. 然后第 3 步 decode 接线（`KV_DTYPE=FP8_E4M3` + `COMPENSATE_P=true` + 我方 strides）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
