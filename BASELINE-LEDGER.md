@@ -828,6 +828,14 @@ logical_block = token_offset >> 2;   block_offset = token_offset & 3;
 
 **注意**：`kGroupedVerifyBlockN=32` ⇒ 每个 split 处理 32 token 一块，`kGroupedVerifyQ8Splits=80` ⇒ 80 个 split；256K/80 = 3276.8 token/split（≈1cat 的 3296 页，非整除 ⇒ 说明 split 边界由 `total_kv`/`split_tiles` 动态算，不依赖整除）。
 
+### R394 ★★★ W1 数值实验 1 通过：**q8_0 codec 逐位精确**（`max_abs_diff=0`，768/768 元素全对）（2026-09-26）
+
+- **方法（standalone，不碰实机）**：`nvcc -DSM70_LONG_RAW -arch=sm_70 -c grouped-attention.cu` 产出目标文件（含 `sm70_long_q8_0_probe` 符号）→ 用独立测试程序 `q8_0_codec_test.cu` **链接**该目标文件并调用 probe → 与 CPU 参考逐元素比对。合成数据：3 行 × 256 元素，每行 8 个 q8_0 块（`[half scale][32 int8]`），scale = 0.5/0.75/1.0，int8 填 `((r*7+d) % 255) - 127`（覆盖正负与全量程）。
+- **结果**：`LINK_RC=0`；`Q8_0_CODEC_TEST rows=3 elems=768 mismatches=0 max_abs_diff=0 => PASS`；`RUN_RC=0`。
+- **证明了**：① vendored 核的 q8_0 块寻址（`row*272 + (sub>>2)*34`）**逐位正确**；② 行契约 `index = row*256 + d` 成立；③ 该 standalone 数值测试骨架可复用（下轮扩到"页表语义"实验）。
+- **资产**：`1cat-vllm-v100-study/p0-scripts/q8_0_codec_test.cu`（可重复执行的验证器）。
+- **下一步（数值实验 2）**：给 `load_xqa_tc_kv_vector` 加一个 dump 型 probe，用小规模合成页表判定 **H1（按 4-token 微块索引）vs H2（按页内 token 数索引）**——这决定页表长度与 `stride(0)` 的取值。通过后再写 raw entry（参考 R392 启动配方 + R393 常量）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
