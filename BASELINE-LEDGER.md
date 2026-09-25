@@ -297,6 +297,13 @@
 - **KV 呈现（零搬运）**：核按 `k_index = phys_block*k_block_stride + block_offset*k_token_stride + kv_head*k_head_stride` 寻址且 head 维连续 ⇒ 我方 f16 镜像（`[256, kv_len]`、dims 连续、token 步长 256）可表示为**页=256 token 的分页缓存**：`stride(0)=65536`、`stride(1)=256`、`stride(2)=kv_len` + **恒等页表** `[1, ceil(kv/256)]` ✓。
 - **下一步（写裸入口）**：`extern "C" sm70_long_decode_f16(...)` 构造影子 Tensor → 调该启动器；scratch（tmp_out [parts, n_q, 6, 256] f16 / max_logits+exp_sums [parts, n_q, 6] f32 / online_rescales）用 `ggml` 侧缓冲；然后接 ggml FA 的 decode 分发 + 门值 + A/B。
 
+- **R360 ★★★ 裸入口落地并编译通过：`extern "C" sm70_long_decode_f16(...)`（影子 Tensor → xqa_tc_256_staged 启动器），`.o` 导出该符号** ✓（2026-09-25）
+
+- **scratch 规格（权威来源：`flash-attn-v100/flash_attn_v100/flash_attn_interface.py:1315` + `tests/kernels/attention/test_sm70_grouped_e4m3_fp32.py`）**：`partial_out (parts, n_q, 6, 256)` **fp16**、`partial_lse (parts, n_q, 6)` f32、`online_rescales [n_q, 6, parts]` f32（`flash_decode_paged.cu:6128-6130` 的检查）、`active_num_partitions [1]` int32、`seq_lens [1]` int32、`block_table [1, n_pages]` int32。
+- **入口 ABI（已实现）**：`sm70_long_decode_f16(q, k_cache, v_cache, out, block_table, seq_lens, partial, max_logits, exp_sums, online_rescales, active_num_partitions, n_q, n_kv_heads, page_size, n_pages, n_parts, n_q_heads_per_kv, softmax_scale, stream)`；内部按页=page_size、恒等页表、`stride(0)=page*256 / stride(1)=256 / stride(2)=page*n_pages` 组织影子 Tensor；q<2 时上取 2（staged 核要求 q≥2）；`use_split_reduce=true, split_reduce_dim_tile=256`。
+- **编译证据**：`nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW` ⇒ 零 error、1.14 MB `.o`、`nm` 可见 `sm70_long_decode_f16` ✓。
+- **下一步**：① 把该文件加入构建（仿 79T 的隔离 OBJECT 目标 + `SM70_LONG_RAW` + `-std=c++17` + sm_70）② 在 FA 分发里对 decode 形状取 f16 镜像指针 + 恒等页表 + scratch 并调用 ③ 门值 + 每轮 A/B。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
