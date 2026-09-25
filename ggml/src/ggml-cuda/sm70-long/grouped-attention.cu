@@ -5067,6 +5067,79 @@ using sm70_long_q8_0_vector_loader =
     decltype(&load_xqa_tc_kv_vector<4, false, flash_v100::KV_CACHE_DTYPE_Q8_0>);
 }  // namespace
 
+// R403: zero-copy fp8 E4M3 entry for llama.cpp's flat [d][t][h] KV cache.
+//
+// One byte per element, so the cache strides are the tensor's natural byte strides:
+// token stride = n_kv_heads * 256, head stride = 256, page stride = page_tokens *
+// token stride. With the page table indexed at page_tokens granularity the loader's
+// physical_offset reduces to t*token_stride + h*head_stride + d, which is exactly the
+// flat layout, so nothing is copied. COMPENSATE_P is true: it is legal here (the
+// kernel asserts it for FP8 E4M3) and it is the precision feature the family relies on.
+extern "C" void sm70_long_decode_fp8(
+    const void * q, const void * k_cache, const void * v_cache, void * out,
+    const void * block_table, const void * row_lengths,
+    void * partial, void * lse,
+    int q_rows, int n_kv_heads, int n_q_heads_per_kv,
+    int page_tokens, int n_pages,
+    float k_scale, float v_scale, float softmax_scale, cudaStream_t stream) {
+  constexpr int kSplits = 80;
+  constexpr int kMaxQ   = 8;
+  const int  n_q_pad = q_rows < 2 ? 2 : q_rows;
+
+  const int64_t token_stride = (int64_t) n_kv_heads * 256;             // 1024 bytes
+  const int64_t block_stride = (int64_t) page_tokens * token_stride;   // 262144 bytes
+  const int64_t head_stride  = 256;
+
+  const std::vector<int64_t> q_sz  = {n_q_pad, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> q_st  = {n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> kv_sz = {n_pages, page_tokens, n_kv_heads, 256};
+  const std::vector<int64_t> kv_st = {block_stride, token_stride, head_stride, 1};
+  const std::vector<int64_t> po_sz = {kSplits, kMaxQ, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> po_st = {kMaxQ * n_q_heads_per_kv * 256, n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> pl_sz = {kSplits, kMaxQ, n_q_heads_per_kv};
+  const std::vector<int64_t> pl_st = {kMaxQ * n_q_heads_per_kv, n_q_heads_per_kv, 1};
+
+  at::Tensor tq((void *) q,            at::kHalf,  q_sz,  q_st,  0);
+  at::Tensor tk((void *) k_cache,      at::kByte,  kv_sz, kv_st, 0);
+  at::Tensor tv((void *) v_cache,      at::kByte,  kv_sz, kv_st, 0);
+  at::Tensor to((void *) out,          at::kHalf,  q_sz,  q_st,  0);
+  at::Tensor tp((void *) partial,      at::kFloat, po_sz, po_st, 0);
+  at::Tensor tl((void *) lse,          at::kFloat, pl_sz, pl_st, 0);
+  at::Tensor tbt((void *) block_table, at::kInt,  {n_q_pad, n_pages}, {(int64_t) n_pages, 1}, 0);
+  at::Tensor trl((void *) row_lengths, at::kInt,  {n_q_pad, 1}, {1, 1}, 0);
+
+  // our byte strides are multiples of 16, so the paired load path applies
+  auto kernel = flash_attention_grouped_verify_e5m2_partial_kernel<
+      8, false, 0, false, false, false, flash_v100::KV_CACHE_DTYPE_FP8_E4M3,
+      false, float, true, true, true>;
+  (void) tk; (void) tv;
+
+  constexpr int kCompensatedSmemBytes =
+      sizeof(GroupedVerifySmem) +
+      kGroupedVerifyRows * kGroupedVerifyProbStride * sizeof(__half) +
+      kGroupedVerifyBlockN * kGroupedVerifyKVStride * sizeof(__half);
+  static_assert(kCompensatedSmemBytes <= 96 * 1024,
+                "compensated P and prefetched V must fit the SM70 budget");
+  (void) cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                              kCompensatedSmemBytes);
+  (void) cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+
+  kernel<<<dim3(n_kv_heads, kSplits), kGroupedVerifyThreads, kCompensatedSmemBytes, stream>>>(
+      reinterpret_cast<const __half*>(q), k_cache, v_cache,
+      (const int *) block_table, (const int *) row_lengths,
+      (float *) partial, (float *) lse,
+      q_rows, n_pages, page_tokens,
+      block_stride, token_stride, head_stride,
+      block_stride, token_stride, head_stride,
+      softmax_scale * k_scale, v_scale, nullptr, 1, (const int *) row_lengths);
+  (void) to; (void) tp; (void) tl; (void) tbt; (void) trl;
+
+  flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
+      <<<dim3(q_rows, n_q_heads_per_kv), kGroupedVerifyThreads, 0, stream>>>(
+          (float *) partial, (float *) lse, (const int *) row_lengths,
+          reinterpret_cast<__half*>(out), q_rows, (const int *) row_lengths);
+}
+
 // R396/R400: NOT compiled by default. The grouped verify family hard-requires the
 // compensated path, which is asserted to be FP8 E4M3 only, so a q8_0 instantiation
 // cannot build. Route B (adopt the vendor's fp8 KV) supersedes this entry; the block
