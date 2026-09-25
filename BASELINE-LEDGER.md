@@ -1151,6 +1151,35 @@ out[(token * kGroupedVerifyHeads + head_idx) * D + d] = ...;             // ★ 
 
 **下轮先做的一件小事**：grep 确认 `kGroupedVerifyHeads` 的确切数值（推断 24 = 4 KV 头 × 6），避免又一次猜。
 
+### R409 ★★★★★ **数值实验 2 通过（逐位精确）：1cat FP8 E4M3 核经我方零拷贝入口与 CPU 参考完全一致**（2026-09-26）
+
+**最终输出**
+```
+FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
+  elements=49152   significant_abs_gt_0.2=49152     ← 判据非退化（全部为有效输出）
+  abs_err>2e-2: 0    sig_rel_err>2e-2: 0
+  worst_sig_rel=0    worst_all_rel=0                ← 逐位一致
+  => PASS
+```
+
+**定案的两个剩余契约（我测试侧违规，且★适配层必须同样遵守）**
+| # | 契约 | 违规后果 | 依据 |
+|---|---|---|---|
+| **A** | **`lse` 缓冲区是"成对"的**：每 (split, token, head) **2 个 float**（`lse` 与 `sum`），即 `[80][8][6][2]` f32 | 少一半 ⇒ 写越界/踩踏 ⇒ 表现为"每组只有第 0 头有值" | `:3331-3333` `partial_lse[2*lse_idx]` / `[2*lse_idx+1]` |
+| **B** | **`row_lengths` 每 query 行一项**（长度 = `query_len`） | 只给 1 项 ⇒ 行 1..7 读到 0，被显式清零 ⇒ 表现为"只有 token 行 0 有值"（=7/8 错） | `:3304-3315`，`row_lengths[token_idx] <= 0` 即 `out=0; return` |
+
+**另确认**：`kGroupedVerifyHeads = 6`（`constexpr`，**不是 24**）⇒ `kHeadsPerCta = 48/8 = 6`，每次启动处理**一个 KV 头的 6 个 Q 头**；combine 网格 `dim3(query_len, 6)`；`out` 布局 `[t][6][D]`（token 主，头步长 `D`）；`partial` = `[80][8][6][256]` f16。**R407 的"每头一次启动"是对的**，R408 的"全头数 24"推断**作废**（当时把 A/B 两个尺寸 bug 误读成头轴语义）。
+
+**适配层实现时必须满足的契约清单（照此写，勿再猜）**
+1. `partial` = `[80][8][6][256]` **f16**（`PARTIAL_T=float` 时是 f32 ⇒ 按 R400 的实例化它是 float，故 `[80][8][6][256]` f32）
+2. `lse` = `[80][8][6][2]` **f32**（成对）
+3. `row_lengths` = `int32[query_len]`，逐行填该行可用 KV 长度
+4. `block_table` = `int32[n_pages]` 恒等；`page_tokens = 256`；strides `262144/1024/256`（字节）
+5. per-KV-head 启动：`grid = dim3(1, 80)`，Q/out 用 `[t][6][D]` 平面（平面间拼接），K/V 基址 `+j*256` 字节
+6. combine：`grid = dim3(query_len, 6)`，`out` 传该组的 `[t][6][D]` 平面
+
+**下一步**：① 按清单写适配层 fp8 分支（删 `sm70_long_stage_kv`，保留 Q staging 与 scatter）② `fattn.cu` 路由 `GGML_TYPE_F8_E4M3` ③ p4-build + 门值（默认关，零回归）④ 上机 A/B（判据 `[OP]` FA 时间）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。

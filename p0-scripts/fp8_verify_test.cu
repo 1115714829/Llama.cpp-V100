@@ -52,8 +52,7 @@ int main() {
     const float scale = 1.0f / sqrtf((float) D);
 
     // ---- host inputs -----------------------------------------------------------------
-    // The kernel's query addressing is compile time fixed and head major: plane j is
-    // [h6][t][d], which is what the adapter's Q staging produces.
+    // Q plane per KV group, token major: [t][gqa][d] (the combine writes the same shape).
     std::vector<__half> hq((size_t) HKV * NQ * GQA * D);
     for (int j = 0; j < HKV; ++j)
         for (int t = 0; t < NQ; ++t)
@@ -61,7 +60,7 @@ int main() {
                 for (int d = 0; d < D; ++d) {
                     static const float qlat[5] = { 0.25f, -0.25f, 0.5f, -0.5f, 0.125f };
                     const int h = j * GQA + h6;
-                    hq[(((size_t) j * GQA + h6) * NQ + t) * D + d] = __float2half_rn(qlat[(t + h + d) % 5]);
+                    hq[(((size_t) j * NQ + t) * GQA + h6) * D + d] = __float2half_rn(qlat[(t + h + d) % 5]);
                 }
 
     // flat [d][t][h] caches, one byte per element (the llama.cpp layout)
@@ -76,13 +75,16 @@ int main() {
 
     std::vector<int32_t> bt(NP);
     for (int i = 0; i < NP; ++i) bt[i] = i;
-    std::vector<int32_t> rl(1, KV);
+    // ROW_SEQLENS: one length per query row. The combine zeroes any row whose length
+    // is <= 0, so a single entry silently blanks rows 1..7.
+    std::vector<int32_t> rl(NQ, KV);
 
     // ---- device buffers --------------------------------------------------------------
     void *dq = nullptr, *dk = nullptr, *dv = nullptr, *dout = nullptr;
     void *dbt = nullptr, *drl = nullptr, *dpart = nullptr, *dlse = nullptr;
-    const size_t part_sz = (size_t) 80 * 8 * 6 * D;
-    const size_t lse_sz  = (size_t) 80 * 8 * 6;
+    const size_t part_sz = (size_t) 80 * 8 * GQA * D;
+    // R409: the lse buffer holds PAIRS (lse, sum) per (split, token, head).
+    const size_t lse_sz  = (size_t) 80 * 8 * GQA * 2;
     cudaMalloc(&dq, hq.size() * sizeof(__half));
     cudaMalloc(&dk, hk.size());
     cudaMalloc(&dv, hv.size());
@@ -96,6 +98,9 @@ int main() {
     cudaMemcpy(dv, hv.data(), hv.size(), cudaMemcpyHostToDevice);
     cudaMemcpy(dbt, bt.data(), bt.size() * sizeof(int32_t), cudaMemcpyHostToDevice);
     cudaMemcpy(drl, rl.data(), rl.size() * sizeof(int32_t), cudaMemcpyHostToDevice);
+    // zero the output and the lse workspace so unwritten slots are distinguishable
+    cudaMemset(dout, 0, hq.size() * sizeof(__half));
+    cudaMemset(dlse, 0, lse_sz * sizeof(float));
 
     sm70_long_decode_fp8(dq, dk, dv, dout, dbt, drl, dpart, dlse,
                          NQ, HKV, GQA, PAGE, NP, 1.0f, 1.0f, scale, 0);
@@ -121,7 +126,7 @@ int main() {
             const int j   = h / GQA;
             const int h6  = h % GQA;
             const int hkv = j;
-            const size_t qo = (((size_t) j * GQA + h6) * NQ + t) * D;
+            const size_t qo = (((size_t) j * NQ + t) * GQA + h6) * D;
             std::vector<float> score(KV);
             float mx = -1e30f;
             for (int s = 0; s < KV; ++s) {
