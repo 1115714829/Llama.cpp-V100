@@ -344,7 +344,17 @@ static void sm70_kv_direct_modes(const ggml_tensor * K, const ggml_tensor * V,
 // (q_len 2-16) where a 64-row tile is wasteful.
 static int sm70_d256_min_q() {
     static const int min_q = [] {
-        return black_magic_on() ? 17 : 256;
+        // BLACK_MAGIC=2 admits decode rows on the Split-D mma path; =1 is the 17-row gate.
+        if (const char * e = getenv("FISHLIKEXIE_BLACK_MAGIC")) {
+            const int v = atoi(e);
+            if (v == 2) {
+                return 1;
+            }
+            if (v == 1) {
+                return 17;
+            }
+        }
+        return 256;
     }();
     return min_q;
 }
