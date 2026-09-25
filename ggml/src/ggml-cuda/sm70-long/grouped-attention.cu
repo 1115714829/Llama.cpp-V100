@@ -5124,20 +5124,32 @@ extern "C" void sm70_long_decode_fp8(
                               kCompensatedSmemBytes);
   (void) cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
 
-  kernel<<<dim3(n_kv_heads, kSplits), kGroupedVerifyThreads, kCompensatedSmemBytes, stream>>>(
-      reinterpret_cast<const __half*>(q), k_cache, v_cache,
-      (const int *) block_table, (const int *) row_lengths,
-      (float *) partial, (float *) lse,
-      q_rows, n_pages, page_tokens,
-      block_stride, token_stride, head_stride,
-      block_stride, token_stride, head_stride,
-      softmax_scale * k_scale, v_scale, nullptr, 1, (const int *) row_lengths);
-  (void) to; (void) tp; (void) tl; (void) tbt; (void) trl;
+  // R407: the kernel serves ONE KV head per launch, with that head's 6 query heads
+  // (grid.x = 1), which matches the vendor's dim3(1, 80) and the head-split runtime.
+  // q and out are per-group planes [j][n_q_pad][gqa][D]; K/V advance by one head stride
+  // per launch, so with the flat cache the loader offset is j*head_stride + t*token_stride + d.
+  const int64_t q_plane = (int64_t) n_q_pad * n_q_heads_per_kv * 256;
+  for (int j = 0; j < n_kv_heads; ++j) {
+    const char   * k_j = (const char *) k_cache + (int64_t) j * head_stride;
+    const char   * v_j = (const char *) v_cache + (int64_t) j * head_stride;
+    const __half * q_j = reinterpret_cast<const __half *>(q)   + j * q_plane;
+    __half       * o_j = reinterpret_cast<__half *>(out)       + j * q_plane;
 
-  flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
-      <<<dim3(q_rows, n_q_heads_per_kv), kGroupedVerifyThreads, 0, stream>>>(
-          (float *) partial, (float *) lse, (const int *) row_lengths,
-          reinterpret_cast<__half*>(out), q_rows, (const int *) row_lengths);
+    kernel<<<dim3(1, kSplits), kGroupedVerifyThreads, kCompensatedSmemBytes, stream>>>(
+        q_j, k_j, v_j,
+        (const int *) block_table, (const int *) row_lengths,
+        (float *) partial, (float *) lse,
+        q_rows, n_pages, page_tokens,
+        block_stride, token_stride, head_stride,
+        block_stride, token_stride, head_stride,
+        softmax_scale * k_scale, v_scale, nullptr, 1, (const int *) row_lengths);
+
+    flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
+        <<<dim3(q_rows, n_q_heads_per_kv), kGroupedVerifyThreads, 0, stream>>>(
+            (float *) partial, (float *) lse, (const int *) row_lengths,
+            o_j, q_rows, (const int *) row_lengths);
+  }
+  (void) to; (void) tp; (void) tl; (void) tbt; (void) trl;
 }
 
 // R396/R400: NOT compiled by default. The grouped verify family hard-requires the
