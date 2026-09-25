@@ -52,6 +52,26 @@ fi
 if [ -f /tmp/p3-llama-ext.h ]; then
   sed 's/\r$//' /tmp/p3-llama-ext.h > src/llama-ext.h
 fi
+if [ -f /tmp/p3-sm70long-grouped.cu ]; then
+  mkdir -p ggml/src/ggml-cuda/sm70-long
+  sed 's/\r$//' /tmp/p3-sm70long-grouped.cu > ggml/src/ggml-cuda/sm70-long/grouped-attention.cu
+fi
+if [ -f /tmp/p3-sm70long-shim.h ]; then
+  mkdir -p ggml/src/ggml-cuda/sm70-long
+  sed 's/\r$//' /tmp/p3-sm70long-shim.h > ggml/src/ggml-cuda/sm70-long/sm70-long-atenshim.h
+fi
+if [ -f /tmp/p3-sm70long-traits.cuh ]; then
+  sed 's/\r$//' /tmp/p3-sm70long-traits.cuh > ggml/src/ggml-cuda/sm70-long/flash_v100_traits.cuh
+fi
+if [ -f /tmp/p3-sm70long-fp8.cuh ]; then
+  sed 's/\r$//' /tmp/p3-sm70long-fp8.cuh > ggml/src/ggml-cuda/sm70-long/fp8_kv_utils.cuh
+fi
+if [ -f /tmp/p3-sm70long-fusedmma.h ]; then
+  sed 's/\r$//' /tmp/p3-sm70long-fusedmma.h > ggml/src/ggml-cuda/sm70-long/fused_mma.h
+fi
+if [ -f /tmp/p3-sm70long-paged.cuh ]; then
+  sed 's/\r$//' /tmp/p3-sm70long-paged.cuh > ggml/src/ggml-cuda/sm70-long/paged_kv_utils.cuh
+fi
 if [ -f /tmp/p3-ggml-cuda-cmakelists.txt ]; then
   sed 's/\r$//' /tmp/p3-ggml-cuda-cmakelists.txt > ggml/src/ggml-cuda/CMakeLists.txt
 fi

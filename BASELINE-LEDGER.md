@@ -304,6 +304,12 @@
 - **编译证据**：`nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW` ⇒ 零 error、1.14 MB `.o`、`nm` 可见 `sm70_long_decode_f16` ✓。
 - **下一步**：① 把该文件加入构建（仿 79T 的隔离 OBJECT 目标 + `SM70_LONG_RAW` + `-std=c++17` + sm_70）② 在 FA 分发里对 decode 形状取 f16 镜像指针 + 恒等页表 + scratch 并调用 ③ 门值 + 每轮 A/B。
 
+- **R361 ★★★ 1cat decode 核已接入我方构建并进入产物库**：新增可选隔离 OBJECT 目标 `ggml-cuda-sm70long`（CMake `-DGGML_CUDA_SM70_LONG=ON` 开启，`SM70_LONG_RAW` + `--std=c++17 -O3` + `ARCH 70`），payload 位补齐 5 个 vendored 文件；**验证：`nm libggml-cuda.so.0.24.0` 可见 `sm70_long_decode_f16`（1 处）、`grouped-attention.cu.o` 1.14 MB 在构建树** ✓；门值 g0=g1=`bcda0092` ✓ 无回归（2026-09-25）
+
+- **构建事实**：`BUILD_RC=0 / ERROR_LINES=0`；重配置 `cmake -DGGML_CUDA_SM70_LONG=ON .` rc=0 ✓。
+- **隔离性**：该目标只在显式开启时编译（默认关 ⇒ 常规构建不受 5000 行重模板影响）✓；文件仍位于子目录、与既有 FA 路径零交互 ✓。
+- **下一步**：FA 分发接线（decode 形状 → 取 f16 K/V 镜像指针 + 构造恒等页表与 scratch → 调 `sm70_long_decode_f16`）→ 门值 → 每轮 A/B（这是本线目前最大的一把刀）。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
