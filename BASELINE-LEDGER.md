@@ -1119,6 +1119,38 @@ FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
 
 **纪律**：不动半截代码；下一轮先读 combine 核体把这三条一次定案，再改，然后重跑本测试（已具备转储与分级判据）。
 
+### R408 ★★★★ combine 核体定案：三处硬契约（**推翻 R407 的"每头一次启动"判断**）（2026-09-26）
+
+**核体（`grouped-attention.cu:3283-3357`）**
+```cpp
+token_idx = blockIdx.x;  head_idx = blockIdx.y;  request_idx = blockIdx.z;
+if (token_idx >= query_len || head_idx >= kGroupedVerifyHeads) return;   // ★ 全头数
+partial_lse += request * kSplits * MAX_Q * kGroupedVerifyHeads;
+lse_idx = (split * MAX_Q + token) * kGroupedVerifyHeads + head_idx;
+split_lse[t] = partial_lse[2*lse_idx];        // ★ 成对：(lse, sum)
+split_sum[t] = partial_lse[2*lse_idx + 1];
+out[(token * kGroupedVerifyHeads + head_idx) * D + d] = ...;             // ★ out = [t][h][d]
+```
+
+**三处我搞错的契约**
+| # | 契约 | 我做的 | 正确 |
+|---|---|---|---|
+| 1 | 头轴 = **`kGroupedVerifyHeads`（全头数 24）** | 6（每组头数） | **24** |
+| 2 | `lse` 每 (split,token,head) = **2 个 float**（`lse` 与 `sum` 成对，且 `ROW_SEQLENS` 下走 `split_sum` 分支） | 1 个 | **×2** |
+| 3 | `out` = **`[t][h][d]`，头步长 `D`**（token 主） | 改成 `[h][t][d]` | **`[t][h][d]`** |
+
+**★ 结论：partial 是全尺寸共享工作区 `[80][8][24][256]` f16**（每个 KV 头的启动只填自己那 6 个头），combine 一次性读全部 24 头并把权重归并到 `out[t][h][d]`。
+⇒ **我最初的"单次启动 grid = dim3(n_kv_heads, 80)"形式本来就是对的**；R407 改成"每头一次启动"是被错误现象误导——真实原因是 **partial/lse 尺寸不对（6 宽 vs 24 宽、lse 缺一列）造成写越界/踩踏**，才表现为"只有第 0 头有值"。
+
+**下轮修正（四条）**
+1. 入口回到**单次启动**：`grid = dim3(n_kv_heads, 80)`，q 传**整张** `[n_q_pad][hq][D]`（头步长 `D`），K/V 传整张（loader 按 `head_group` 取 KV 头）。
+2. `partial` = `[80][8][kGroupedVerifyHeads=24][256]` f16。
+3. `lse` = `[80][8][24][2]` f32（**成对**）。
+4. combine：`grid = dim3(q_rows, 24)`，`out` = `[t][h][d]`。
+5. 测试同步：q/out 回 `[t][h][d]`，partial/lse 尺寸按上式（**并改用 `cudaMemset` 清零输出**，让"未写入"与"写零"可区分）。
+
+**下轮先做的一件小事**：grep 确认 `kGroupedVerifyHeads` 的确切数值（推断 24 = 4 KV 头 × 6），避免又一次猜。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
