@@ -27,6 +27,7 @@ class IntArrayRef {
 public:
     IntArrayRef() = default;
     IntArrayRef(std::initializer_list<int64_t> v) : v_(v) {}
+    IntArrayRef(const std::vector<int64_t> & v) : v_(v) {}
     int64_t size() const { return (int64_t) v_.size(); }
     int64_t operator[](size_t i) const { return v_[i]; }
     bool operator==(const IntArrayRef & o) const { return v_ == o.v_; }
@@ -65,6 +66,9 @@ public:
 
     template <typename T>
     T * data_ptr() const { return reinterpret_cast<T *>(data_); }
+
+    // only the unused ATen entry touches clone(); return an alias so it compiles
+    Tensor clone() const { return *this; }
 
     // the launchers only pass these through to the kernels
     Tensor & operator=(const Tensor &) = default;
@@ -133,4 +137,29 @@ private:
             abort();                                                            \
         }                                                                       \
     } while (0)
+#endif
+
+#ifndef TORCH_WARN
+#define TORCH_WARN(...)                                                         \
+    do {                                                                        \
+        fprintf(stderr, "[sm70-long] WARN: ");                                  \
+        fprintf(stderr, __VA_ARGS__);                                           \
+        fprintf(stderr, "\n");                                                  \
+    } while (0)
+#endif
+
+#ifndef C10_CUDA_CHECK
+#define C10_CUDA_CHECK(expr)                                                    \
+    do {                                                                        \
+        const cudaError_t err_ = (expr);                                        \
+        if (err_ != cudaSuccess) {                                              \
+            fprintf(stderr, "[sm70-long] CUDA error %d: %s at %s:%d\n",         \
+                    (int) err_, cudaGetErrorString(err_), __FILE__, __LINE__);   \
+            abort();                                                            \
+        }                                                                       \
+    } while (0)
+#endif
+
+#ifndef C10_CUDA_KERNEL_LAUNCH_CHECK
+#define C10_CUDA_KERNEL_LAUNCH_CHECK() C10_CUDA_CHECK(cudaGetLastError())
 #endif
