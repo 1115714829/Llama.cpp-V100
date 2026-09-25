@@ -691,6 +691,26 @@
 
 **另记（内核母矿，供 W2）**：`csrc/moe/marlin_moe_wna16/` = **SM70 Marlin**：`marlin_template.h`（2001 行，**0 torch 引用**）+ `kernel.h`（42 行，0 torch）+ `sm70_marlin_gemm.cuh`（2887 行）+ `sm70_marlin_u8_gemm.cu`（U8=int8，471 行）/`sm70_marlin_u8b128_gemm.cu` ⇒ **W2 = 移植 Marlin U8 并加 q8_0 布局 repack（group 32 保零量化误差）**。许可：`sm70_grouped_long/LICENSE` = BSD 3-Clause (c) 2025 D.Skryabin ✓。
 
+### R387 ★★★ W1 施工定案：**给 1cat 长注意力核加 Q8_0 codec（零拷贝直读我方 KV）** —— 已落第一块代码；路线与依据（2026-09-26）
+
+**一、为什么不能"照原样用"（三条硬约束，已实测/读码确认）**
+| 约束 | 事实 |
+|---|---|
+| 布局不兼容 | 1cat 的 `_staged` launcher 契约 = `k_cache[n_pages, page_size, 1, 256]` f16，stride `(page_size*256, 256, page_size*n_pages, 1)` = **头主连续平面 + 页分组**；我方 KV = `[d][t][h]` **头交错**（nb1=1088=4×272, nb2=272）|
+| 数据类型不兼容 | 该 launcher 硬取 `reinterpret_cast<const __half*>(k_cache.data_ptr<at::Half>())` ⇒ **只吃真 f16**；我方 q8_0 是"2B scale + 32×int8 = 34B/块"，**stride 变换解不出来** |
+| staging 必死 | f16 KV 每卡每轮 = 17.2 GB（q8_0 的 1.9 倍）⇒ 地板 23 ms；staging 另加 18.2 GB 搬运 ⇒ 注定输。**R366 只在 5K 试过，所以从未暴露** |
+
+**二、也不用"改成 FP8 KV"**：**llama.cpp/ggml 全树没有 FP8 类型**（`F8_E5M2`/`F8_E4M3` 零匹配）⇒ 走那条要新增端到端 ggml 量化类型（类型/量化核/`set_rows`/`--cache-type` 管线）+ **改被冻结的 79T 预填充 KV 读路径** ⇒ 改动面过大。
+
+**三、定案路线（零拷贝 + 只动新核，env 门控默认关，预填充零影响）**
+1. **加 `KV_CACHE_DTYPE_Q8_0` codec**（已落：`sm70-long/fp8_kv_utils.cuh` 加常量 + `q8_0_to_float` + `load_kv_cache_float_unscaled` 的 q8_0 分支；`load_kv_cache_half` 自动经 `load_kv_cache_float` 复用，无需改）。自包含、不引 ggml 依赖、**默认构建（未开 `GGML_CUDA_SM70_LONG`）零影响**。
+2. **寻址能天然对上（关键洞察）**：index 契约定为 `index = row*256 + d`，行 = 一个 (token, kv head)。我方布局的字节偏移 = `(t*4 + h)*272` ⇒ 只要传 **stride_t = 1024（=4 头 × 256）、stride_h = 256**（以"虚拟 256 元素/行"为单位），则 `index>>8 = t*4 + h = 行号`、`index&255 = d` ⇒ codec 内按 `row*272 + (d>>5)*34` 取块，**零拷贝直读我方 q8_0 KV** ✓
+3. **待办（下轮起）**：① 把该核里其余 dtype 分支放行 Q8_0（`dot_qk_cache<D,KV_DTYPE>`、`load_xqa_tc_kv_vector`、pair-load；注意 :810/:843 的 `static_assert` 只允许 E4M3/E5M2，需扩展）② 用 `LAUNCH_XQA_PARTITION(Q8_0)` 实例化 launcher 族 ③ raw entry 传我方 stride（去掉 `sm70_long_stage_kv` 的 O(kv) 拷贝）④ `-DGGML_CUDA_SM70_LONG=ON` 单目标编译验证（R361 先例）⑤ compute-sanitizer 定位残余 IMA ⑥ 判据 `[OP]` FA 时间 + 门值。
+
+**四、预期**：KV 流量回到 9.1 GB/卡 ⇒ 地板 12.1 ms；该核按 ~700 GB/s 有效带宽 ⇒ **FA 25.4 → ~13–15 ms（−10~−12 ms/轮，≈ 轮的 −15%）**。这是当前最大的单项刀。
+
+**五、铁的纪律提醒**：`_staged` 的残余 IMA（R368 修完 4 处 ABI 后仍崩）最可能源 = **按错误布局喂 KV**；改 codec + 我方 stride 后此因消失，若仍崩再用 compute-sanitizer 定位，**不得回退到 staging**（staging 在 256K 注定输）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
