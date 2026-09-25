@@ -12,6 +12,7 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <random>
 #include <unordered_map>
 #include <vector>
 
@@ -696,15 +697,40 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
     return id;
 }
 
-std::vector<llama_token> common_sampler_sample_and_accept_n(struct common_sampler * gsmpl, struct llama_context * ctx, const std::vector<int> & idxs, const llama_tokens & draft, bool grammar_first) {
+std::vector<llama_token> common_sampler_sample_and_accept_n(struct common_sampler * gsmpl, struct llama_context * ctx, const std::vector<int> & idxs, const llama_tokens & draft, bool grammar_first, const std::vector<float> & draft_p) {
     GGML_ASSERT(idxs.size() == draft.size() + 1 && "idxs.size() must be draft.size() + 1");
 
     std::vector<llama_token> result;
     result.reserve(idxs.size());
 
+    // R349: LLAMA_SPEC_REJ=1 = exact probabilistic rejection sampling - accept a draft
+    // token with min(1, p_target/p_draft) and emit it, else emit the target's sampled
+    // token and stop. Greedy requests are unaffected (the ratio is 1 on a match).
+    // No caller passes draft_p yet, so this is a no-op until the draft side is wired.
+    static const bool prob_rej = getenv("LLAMA_SPEC_REJ") != nullptr && atoi(getenv("LLAMA_SPEC_REJ")) != 0;
+
     size_t i = 0;
     for (; i < draft.size(); i++) {
         const llama_token id = common_sampler_sample(gsmpl, ctx, idxs[i], grammar_first);
+
+        if (prob_rej && i < draft_p.size() && draft_p[i] > 0.0f && draft[i] != id) {
+            float p_t = 0.0f;
+            if (gsmpl->cur_p.size > 0) {
+                for (size_t c = 0; c < gsmpl->cur_p.size; ++c) {
+                    if (gsmpl->cur_p.data[c].id == draft[i]) {
+                        p_t = gsmpl->cur_p.data[c].p;
+                        break;
+                    }
+                }
+            }
+            static thread_local std::mt19937 rng{20250925};
+            std::uniform_real_distribution<float> uni(0.0f, 1.0f);
+            if (p_t > 0.0f && uni(rng) < std::min(1.0f, p_t / draft_p[i])) {
+                common_sampler_accept(gsmpl, draft[i], true);
+                result.push_back(draft[i]);
+                continue;
+            }
+        }
 
         common_sampler_accept(gsmpl, id, true);
 
@@ -732,7 +758,7 @@ std::vector<llama_token> common_sampler_sample_and_accept_n(struct common_sample
         idxs[i] = i;
     }
 
-    return common_sampler_sample_and_accept_n(gsmpl, ctx, idxs, draft, grammar_first);
+    return common_sampler_sample_and_accept_n(gsmpl, ctx, idxs, draft, grammar_first, {});
 }
 
 uint32_t common_sampler_get_seed(const struct common_sampler * gsmpl) {

@@ -1198,6 +1198,12 @@ void launch_fattn(
             }
         }
 
+        // The scan above keeps the split at one wave, so for long contexts each block still
+        // walks a long serial KV loop. GGML_CUDA_FA_SPLIT_FLOOR raises the split to probe this.
+        if (const char * env = getenv("GGML_CUDA_FA_SPLIT_FLOOR")) {
+            parallel_blocks = std::max(parallel_blocks, std::min(atoi(env), ntiles_KV));
+        }
+
         blocks_num.x = ntiles_x;
         blocks_num.y = parallel_blocks;
         blocks_num.z = ntiles_z_gqa*K->ne[2]*Q->ne[3];
