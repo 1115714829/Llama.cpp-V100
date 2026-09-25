@@ -1080,6 +1080,25 @@ sm70_long_decode_fp8(q_staged_f16, K->data, V->data, ws.o,
 
 **四、纪律**：不做半截改动——`supported()` 白名单与 decode 早分支必须同时落地，且**先过数值实验 2 再上机**（避免 R368 的"131 次干净调用后 IMA"）。
 
+### R406 ★★★★ 数值实验 2 首次运行：**FP8 路径端到端执行、零 IMA**（里程碑）+ 索引语义定案（2026-09-26）
+
+**运行结果**（standalone，机器空闲，未触碰服务）
+```
+FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
+  worst_rel=0.79618 worst_abs=0.0039062 at (q=0, head=18, d=0) => FAIL
+```
+
+**① 里程碑：不崩。** `/tmp/sm70fp8.o` 链接成功、`sm70_long_decode_fp8` 端到端跑完、`cudaDeviceSynchronize` 无错 ⇒ **此前封存（R368"131 次干净调用后 IMA"）的故障不属于 fp8 路线**；我参数化的 fp8 + 扁平 `[d][t][h]` 缓存 + 恒等页表 + 4 KV 头组合**不触发 IMA**。**这是该核族首次在真实数据流上执行成功。**
+
+**② 索引语义定案（R405 遗留问题的答案）**：核**每个 KV 头启动一次**（`grid.x = 1`，处理该头的 6 个 Q 头）——与旧适配层注释"launched once per KV head with that head's 6 Q heads"及 1cat 的 `dim3(1, 80)` 完全一致。
+
+**③ 定位到我的入口 bug**：我一次启动就 `grid.x = n_kv_heads`（4）、`q/out` 只声明一组 6 头、combine 网格也只覆盖 6 头 ⇒ **24 头里只写了 6 头，其余是未初始化内存** ⇒ 失败点落在 `head=18`（第 4 组）**完全吻合**。
+
+**④ 修正方案（下轮实施）**：入口内部**循环 4 次**（每 KV 头一次）：`grid.x = 1`、K/V 基址 **+ j×256 字节**（我方 `[d][t][h]` 的 head 步长）、q/out 用**按组拼接平面**（`[j][n_q_pad][gqa][D]`，正是旧 `sm70_long_stage_q` 的产出布局）、combine 网格 `dim3(q_rows, gqa)` 并对 `out` 加组偏移。
+**地址自证（零拷贝仍成立）**：基址 `j×256` + `page×262144 + tok_in_page×1024 + 0×256 + d` = `j×256 + t×1024 + d` = 我方扁平布局第 j 头第 t 位置第 d 维的**字节偏移** ✓
+
+**⑤ 测试侧同步**：`fp8_verify_test.cu` 的 Q 需按 `[j][t][gqa][d]` 摆放、输出按同布局比较（镜像适配层将要做的 staging）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
