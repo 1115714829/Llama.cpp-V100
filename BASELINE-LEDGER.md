@@ -938,6 +938,17 @@ flash_attention_grouped_verify_e5m2_partial_kernel<
 
 **五、收益不变且更硬**：KV 流量 8.6 GB/卡（vs q8_0 9.1）⇒ 地板 11.5 ms；FA 25.4 → **~12–14 ms**；且 **KV 格式与 BL1 一致** ⇒ 同口径验收更硬。
 
+### R399 ★★★ FP8 KV 类型已入 ggml 且**行为中立**（`BUILD_RC=0`、门值 `bcda0092` 全等）；另查清一条运维事实（2026-09-26）
+
+**改动（路线 B 第 1 步）**
+- `ggml.h`：新增 `GGML_TYPE_F8_E4M3 = 43`、`GGML_TYPE_F8_E5M2 = 44`，`GGML_TYPE_COUNT` 43→45（**末尾追加，不复用已移除的旧号 31/32/33/36/37/38**，避免污染旧 GGUF）。
+- `ggml.c` 的 `type_traits[]`：两行照 `GGML_TYPE_I8` 的样板——`blck_size = 1`、`type_size = 1`、`is_quantized = false`、**无 to_float/from_float**（flavor 与外部 scale 是消费者的契约：KV 写核 + 注意力核）。
+- **验证**：`MANIFEST_DIFFS=0`、`BUILD_RC=0`、`ERROR_LINES=0`；`libggml-cuda.so` = `9c05fc80fd253f9fe49521b00ae9d752`；**门值两臂 `bcda0092…` 逐位一致** ⇒ 新增类型**行为中立**，且编译器未要求补其它表（traits 表是主表）。
+
+**★ 运维事实（重要）**：`GGML_CUDA_SM70_LONG` **在构建树里是 ON**（R361 的 `cmake -D` 留在 CMakeCache）⇒ **vendored `sm70-long/` 在默认构建内**，对它任何改动都必须能过 p4-build。本次即因此暴露：R396 的 Q8_0 raw entry（`COMPENSATE_P=false`）触 `:2507` 断言**打挂了强制构建** ⇒ 已用 `#if defined(SM70_LONG_Q8_0_ENTRY)` 整体置于**未定义宏之下**（保代码不编译，等路线 B 落地后再决定去留）。
+
+**下一步**：路线 B 第 2 步——抄 `CopyWithScaleOp` + `fp16_bits_to_e5m2_satfinite_rn` 接入 KV **写**路径（f32→fp8 + scale），仍默认关；然后第 3 步 decode 接线（`KV_DTYPE=FP8_E5M2` + `k_scale` + 我方 strides，此刻 `COMPENSATE_P=true` 合法）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
