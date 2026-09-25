@@ -12,7 +12,7 @@ RUNLOG=/root/llm/test/e3-run.log
 pkill -f 'llama-serve[r] --model' 2>/dev/null
 sleep 4
 tmux kill-session -t srv 2>/dev/null
-tmux new-session -d -s srv "TAG=e3 SPEC=1 ROUND=1 UB=2048 GGML_CUDA_OP_TIMING=1 GGML_CUDA_DISABLE_GRAPHS=1 GGML_META_SUBGRAPH_CAPTURE=0 bash /root/llm/test/t1c-run.sh"
+tmux new-session -d -s srv "TAG=e3 SPEC=1 ROUND=1 UB=2048 GGML_CUDA_OP_TIMING=1 GGML_CUDA_DISABLE_GRAPHS=1 GGML_META_SUBGRAPH_CAPTURE=0 GGML_CUDA_NO_CONCURRENT=1 bash /root/llm/test/t1c-run.sh"
 code=000
 for i in $(seq 1 60); do
   code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8082/health)
