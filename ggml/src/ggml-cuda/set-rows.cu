@@ -1,6 +1,20 @@
 #include "set-rows.cuh"
 #include "cpy-utils.cuh"
 
+#include <cuda_fp8.h>
+
+// R401: a one-byte fp8 E4M3 cell. The generic set_rows kernel derives its element
+// strides from sizeof(dst_t), so a one-byte struct keeps the row arithmetic intact
+// while the conversion happens in the constructor. Saturating round-to-nearest is the
+// same contract the vendor KV write uses; the external scale is the caller's business.
+struct fp8_e4m3_t {
+    uint8_t v;
+
+    fp8_e4m3_t() = default;
+    __host__ __device__ fp8_e4m3_t(float x) :
+        v(__nv_cvt_float_to_fp8(x, __NV_SATFINITE, __NV_E4M3)) {}
+};
+
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
 
 // Generic quantized set_rows kernel template
@@ -290,6 +304,16 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
     } else if (dst->type == GGML_TYPE_Q5_1) {
         set_rows_cuda_quant<idx_t, block_q5_1, QK5_1, quantize_f32_q5_1_block>(
             src0_d, src1_d, (block_q5_1*)dst->data,
+            ne00, ne01, ne02, ne03,
+            ne10, ne11, ne12, ne13,
+            nb01, nb02, nb03,
+            nb10, nb11, nb12,
+            nb1, nb2, nb3,
+            stream
+        );
+    } else if (dst->type == GGML_TYPE_F8_E4M3) {
+        set_rows_cuda(
+            src0_d, src1_d, (fp8_e4m3_t *) dst->data,
             ne00, ne01, ne02, ne03,
             ne10, ne11, ne12, ne13,
             nb01, nb02, nb03,
