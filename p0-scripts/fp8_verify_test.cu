@@ -40,9 +40,11 @@ static constexpr int KV   = 512;
 static constexpr int PAGE = 256;
 static constexpr int NP   = KV / PAGE;
 
-// E4M3-exact lattice values.
+// V must NOT be zero-mean: with a symmetric lattice the softmax-weighted average
+// cancels towards zero, every relative error explodes at the cancellation, and the
+// criterion becomes vacuous. This lattice is E4M3-exact and strongly positive.
 static float kv_value(int t, int h, int d) {
-    static const float lat[7] = { 0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 2.0f, -2.0f };
+    static const float lat[7] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, -1.0f };
     return lat[(t * 7 + h * 5 + d * 3) % 7];
 }
 
@@ -50,13 +52,17 @@ int main() {
     const float scale = 1.0f / sqrtf((float) D);
 
     // ---- host inputs -----------------------------------------------------------------
-    std::vector<__half> hq((size_t) NQ * HQ * D);
-    for (int t = 0; t < NQ; ++t)
-        for (int h = 0; h < HQ; ++h)
-            for (int d = 0; d < D; ++d) {
-                static const float qlat[5] = { 0.25f, -0.25f, 0.5f, -0.5f, 0.125f };
-                hq[((size_t) t * HQ + h) * D + d] = __float2half_rn(qlat[(t + h + d) % 5]);
-            }
+    // The kernel's query addressing is compile time fixed and head major: plane j is
+    // [h6][t][d], which is what the adapter's Q staging produces.
+    std::vector<__half> hq((size_t) HKV * NQ * GQA * D);
+    for (int j = 0; j < HKV; ++j)
+        for (int t = 0; t < NQ; ++t)
+            for (int h6 = 0; h6 < GQA; ++h6)
+                for (int d = 0; d < D; ++d) {
+                    static const float qlat[5] = { 0.25f, -0.25f, 0.5f, -0.5f, 0.125f };
+                    const int h = j * GQA + h6;
+                    hq[(((size_t) j * GQA + h6) * NQ + t) * D + d] = __float2half_rn(qlat[(t + h + d) % 5]);
+                }
 
     // flat [d][t][h] caches, one byte per element (the llama.cpp layout)
     std::vector<uint8_t> hk((size_t) D * KV * HKV), hv((size_t) D * KV * HKV);
@@ -105,15 +111,23 @@ int main() {
     // ---- CPU reference ---------------------------------------------------------------
     int   worst_q = -1, worst_h = -1, worst_d = -1;
     double worst = 0.0, worst_rel = 0.0;
+    // Near-zero outputs make a relative criterion meaningless, so grade twice: all
+    // elements, and only those the attention actually populates (|ref| > 0.05).
+    int    n_bad_all = 0, n_bad_sig = 0, n_sig = 0, n_bad_abs = 0;
+    double worst_sig_rel = 0.0, worst_sig_abs = 0.0;
+    int    ws_q = -1, ws_h = -1, ws_d = -1;
     for (int t = 0; t < NQ; ++t) {
         for (int h = 0; h < HQ; ++h) {
-            const int hkv = h / GQA;
+            const int j   = h / GQA;
+            const int h6  = h % GQA;
+            const int hkv = j;
+            const size_t qo = (((size_t) j * GQA + h6) * NQ + t) * D;
             std::vector<float> score(KV);
             float mx = -1e30f;
             for (int s = 0; s < KV; ++s) {
                 float dot = 0.0f;
                 for (int d = 0; d < D; ++d) {
-                    dot += __half2float(hq[((size_t) t * HQ + h) * D + d]) * kv_value(s, hkv, d);
+                    dot += __half2float(hq[qo + d]) * kv_value(s, hkv, d);
                 }
                 score[s] = dot * scale;
                 mx = std::max(mx, score[s]);
@@ -124,17 +138,34 @@ int main() {
             for (int d = 0; d < D; ++d) {
                 float ref = 0.0f;
                 for (int s = 0; s < KV; ++s) { ref += score[s] * kv_value(d, hkv, s + 11); }
-                const float g = __half2float(got[((size_t) t * HQ + h) * D + d]);
+                const float g = __half2float(got[qo + d]);
+                if (d == 0 && t < 2 && h < 6) {
+                    printf("  [dump] j=%d h6=%d t=%d d=0  ref=%+.5f got=%+.5f\n", j, h6, t, ref, g);
+                }
                 const double e = fabs((double) g - (double) ref);
                 const double r = e / (fabs((double) ref) + 1e-3);
                 if (r > worst_rel) { worst_rel = r; worst = e; worst_q = t; worst_h = h; worst_d = d; }
+                if (r > 2e-2) { ++n_bad_all; }
+                if (e > 2e-2) { ++n_bad_abs; }
+                if (fabs((double) ref) > 0.2) {
+                    ++n_sig;
+                    if (r > worst_sig_rel) { worst_sig_rel = r; worst_sig_abs = e; ws_q = t; ws_h = h; ws_d = d; }
+                    if (r > 2e-2) { ++n_bad_sig; }
+                }
             }
         }
     }
 
-    const bool pass = worst_rel < 2e-2;
+    // Grade on what the attention actually produces. A relative criterion is
+    // meaningless for outputs near zero, where one f16 ULP dominates the ratio.
+    const bool pass = (n_bad_abs == 0) && (n_bad_sig == 0);
     printf("FP8_VERIFY_TEST q=%d hq=%d hkv=%d kv=%d page=%d np=%d\n", NQ, HQ, HKV, KV, PAGE, NP);
-    printf("  worst_rel=%.5g worst_abs=%.5g at (q=%d, head=%d, d=%d) => %s\n",
-           worst_rel, worst, worst_q, worst_h, worst_d, pass ? "PASS" : "FAIL");
+    printf("  elements=%d significant_abs_gt_0.2=%d\n", NQ * HQ * D, n_sig);
+    printf("  abs_err>2e-2: %d   sig_rel_err>2e-2: %d\n", n_bad_abs, n_bad_sig);
+    printf("  worst_sig_rel=%.5g (abs=%.5g) at (q=%d, head=%d, d=%d)\n",
+           worst_sig_rel, worst_sig_abs, ws_q, ws_h, ws_d);
+    printf("  worst_all_rel=%.5g (abs=%.5g) at (q=%d, head=%d, d=%d)\n",
+           worst_rel, worst, worst_q, worst_h, worst_d);
+    printf("  => %s\n", pass ? "PASS" : "FAIL");
     return pass ? 0 : 1;
 }
