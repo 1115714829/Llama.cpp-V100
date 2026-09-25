@@ -2586,7 +2586,7 @@ static void ggml_backend_cuda_set_tensor_async(ggml_backend_t backend, ggml_tens
 
     GGML_ASSERT(buf->buft == ggml_backend_cuda_buffer_type(cuda_ctx->device) && "unsupported buffer type");
 
-    CUDA_CHECK(cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyHostToDevice, cuda_ctx->stream()));
+    CUDA_CHECK(cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyDefault, cuda_ctx->stream()));
 }
 
 static void ggml_backend_cuda_get_tensor_async(ggml_backend_t backend, const ggml_tensor * tensor, void * data, size_t offset, size_t size) {
@@ -2606,7 +2606,7 @@ static void ggml_backend_cuda_set_tensor_2d_async(ggml_backend_t backend, struct
     GGML_ASSERT(buf->buft == ggml_backend_cuda_buffer_type(cuda_ctx->device) && "unsupported buffer type");
 
     CUDA_CHECK(cudaMemcpy2DAsync(
-        (char *) tensor->data + offset, stride_tensor, data, stride_data, size, n_copies, cudaMemcpyHostToDevice, cuda_ctx->stream()));
+        (char *) tensor->data + offset, stride_tensor, data, stride_data, size, n_copies, cudaMemcpyDefault, cuda_ctx->stream()));
 }
 
 static void ggml_backend_cuda_get_tensor_2d_async(ggml_backend_t backend, const struct ggml_tensor * tensor, void * data,
@@ -4643,18 +4643,30 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
 // Per-op GPU timing for SM70 bring-up. Enable with GGML_CUDA_OP_TIMING.
 // Per-node events are only valid when the graph is not captured, so combine
 // with GGML_CUDA_DISABLE_GRAPHS=1. Prints one aggregate table at exit.
+static bool ggml_cuda_stream_is_capturing(cudaStream_t stream) {
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    if (cudaStreamIsCapturing(stream, &status) != cudaSuccess) {
+        (void) cudaGetLastError();
+        return false;
+    }
+    return status != cudaStreamCaptureStatusNone;
+}
+
 struct ggml_cuda_op_timing {
     bool enabled = false;
 
     // per device: one event pool per CUDA device (TP calls this once per device)
     std::vector<std::vector<cudaEvent_t>> ev_start;
     std::vector<std::vector<cudaEvent_t>> ev_stop;
-    std::vector<int> n_rec; // nodes actually recorded per device
+    std::vector<std::vector<uint8_t>> rec_flag; // 1 when node i recorded both events
+    std::vector<int> n_rec; // highest node index seen per device
 
-    double  ms[GGML_OP_COUNT]    = {};
-    int64_t calls[GGML_OP_COUNT] = {};
-    int64_t graphs = 0;
-    int64_t nodes  = 0;
+    // Accumulate per device: TP runs one thread per device, so per-device
+    // slots avoid the cross-thread race a shared table had (R333 garbage).
+    std::vector<std::vector<double>>  ms;    // [device][op]
+    std::vector<std::vector<int64_t>> calls; // [device][op]
+    std::vector<int64_t> graphs;
+    std::vector<int64_t> nodes;
     bool    ev_bad = false; // set when the driver rejects the event query
 
     ggml_cuda_op_timing() {
@@ -4665,13 +4677,23 @@ struct ggml_cuda_op_timing {
         if ((size_t) device >= ev_start.size()) {
             ev_start.resize(device + 1);
             ev_stop.resize(device + 1);
+            rec_flag.resize(device + 1);
             n_rec.resize(device + 1, 0);
+            ms.resize(device + 1);
+            calls.resize(device + 1);
+            graphs.resize(device + 1, 0);
+            nodes.resize(device + 1, 0);
+        }
+        if (ms[device].empty()) {
+            ms[device].assign(GGML_OP_COUNT, 0.0);
+            calls[device].assign(GGML_OP_COUNT, 0);
         }
         if (ev_start[device].size() >= n) {
             return;
         }
         // events are bound to the device that is current when they are created
         ggml_cuda_set_device(device);
+        rec_flag[device].resize(n, 0);
         while (ev_start[device].size() < n) {
             cudaEvent_t a = nullptr;
             cudaEvent_t b = nullptr;
@@ -4683,22 +4705,35 @@ struct ggml_cuda_op_timing {
     }
 
     void report() {
-        if (!enabled || graphs == 0) {
+        double  ms_sum[GGML_OP_COUNT] = {};
+        int64_t calls_sum[GGML_OP_COUNT] = {};
+        int64_t graphs_sum = 0;
+        int64_t nodes_sum  = 0;
+        for (size_t d = 0; d < ms.size(); d++) {
+            graphs_sum += graphs[d];
+            nodes_sum  += nodes[d];
+            for (int i = 0; i < GGML_OP_COUNT; i++) {
+                ms_sum[i]    += ms[d][i];
+                calls_sum[i] += calls[d][i];
+            }
+        }
+        if (graphs_sum == 0) {
             return;
         }
         double total = 0.0;
         for (int i = 0; i < GGML_OP_COUNT; i++) {
-            total += ms[i];
+            total += ms_sum[i];
         }
-        fprintf(stderr, "[OP] graphs=%lld nodes=%lld gpu_total=%.3f ms/ubatch\n",
-                (long long) graphs, (long long) nodes, total / graphs);
+        fprintf(stderr, "[OP] graphs=%lld nodes=%lld gpu_total=%.3f ms/ubatch devices=%zu%s\n",
+                (long long) graphs_sum, (long long) nodes_sum, total / graphs_sum, ms.size(),
+                ev_bad ? " (ev_bad)" : "");
         for (int i = 0; i < GGML_OP_COUNT; i++) {
-            if (calls[i] == 0) {
+            if (calls_sum[i] == 0) {
                 continue;
             }
             fprintf(stderr, "[OP] %-22s calls=%-7lld total=%9.3f ms %5.1f%% avg=%7.3f ms\n",
-                    ggml_op_name((ggml_op) i), (long long) calls[i], ms[i],
-                    100.0 * ms[i] / total, ms[i] / calls[i]);
+                    ggml_op_name((ggml_op) i), (long long) calls_sum[i], ms_sum[i],
+                    100.0 * ms_sum[i] / total, ms_sum[i] / calls_sum[i]);
         }
     }
 
@@ -4812,7 +4847,7 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
             }
 
             ggml_cuda_op_timing & opt = ggml_cuda_op_timing_get();
-            const bool opt_on = opt.enabled && !use_cuda_graph;
+            const bool opt_on = opt.enabled && !use_cuda_graph && !ggml_cuda_stream_is_capturing(cuda_ctx->stream());
             if (opt_on) {
                 opt.ensure(cuda_ctx->device, (size_t) cgraph->n_nodes);
             }
@@ -4898,6 +4933,7 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                 bool ok = ggml_cuda_compute_forward(*cuda_ctx, node);
                 if (opt_on) {
                     CUDA_CHECK(cudaEventRecord(opt.ev_stop[cuda_ctx->device][i], cuda_ctx->stream()));
+                    opt.rec_flag[cuda_ctx->device][i] = 1;
                     opt.n_rec[cuda_ctx->device] = i + 1; // only recorded nodes may be elapsed-time queried
                 }
                 if (!ok) {
@@ -5084,12 +5120,16 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     ggml_cuda_graph_evaluate_and_capture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);
 
     ggml_cuda_op_timing & opt = ggml_cuda_op_timing_get();
-    if (opt.enabled && !use_cuda_graph) {
+    const int dev = cuda_ctx->device;
+    if (opt.enabled && !use_cuda_graph && (size_t) dev < opt.n_rec.size() && !ggml_cuda_stream_is_capturing(cuda_ctx->stream())) {
         CUDA_CHECK(cudaDeviceSynchronize());
-        const int n_rec = (int) opt.n_rec[cuda_ctx->device];
+        const int n_rec = (int) opt.n_rec[dev];
         for (int i = 0; i < n_rec; i++) {
+            if (!opt.rec_flag[dev][i]) {
+                continue; // node skipped by fusion: no event pair recorded
+            }
             float t_ms = 0.0f;
-            const cudaError_t ev_err = cudaEventElapsedTime(&t_ms, opt.ev_start[cuda_ctx->device][i], opt.ev_stop[cuda_ctx->device][i]);
+            const cudaError_t ev_err = cudaEventElapsedTime(&t_ms, opt.ev_start[dev][i], opt.ev_stop[dev][i]);
             if (ev_err != cudaSuccess) {
                 // multi-device event queries can be rejected; degrade instead of aborting
                 (void) cudaGetLastError();
@@ -5098,13 +5138,13 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
             }
             const int op = (int) cgraph->nodes[i]->op;
             if (op >= 0 && op < GGML_OP_COUNT) {
-                opt.ms[op] += t_ms;
-                opt.calls[op]++;
+                opt.ms[dev][op] += t_ms;
+                opt.calls[dev][op]++;
             }
         }
-        opt.graphs++;
-        opt.nodes += cgraph->n_nodes;
-        if (opt.graphs % 256 == 0) {
+        opt.graphs[dev]++;
+        opt.nodes[dev] += cgraph->n_nodes;
+        if (opt.graphs[dev] % 256 == 0) {
             opt.report();
         }
     }
