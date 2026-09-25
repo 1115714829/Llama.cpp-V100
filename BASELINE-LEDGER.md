@@ -1201,6 +1201,23 @@ FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
 
 **待办（W1 剩余）**：① `fattn.cu` 加 `GGML_TYPE_F8_E4M3` → `BEST_FATTN_KERNEL_SM70_LONG` 路（env 门控）② KV 缓存类型**由代码内部**选 F8_E4M3（不得经 `-ctk/-ctv` 用户启动参数，§1.6）③ 零回归门（默认关时 gate sha + `[OP]` 不变）④ 开 fp8 后按 `[OP]` FLASH_ATTN_EXT 时间判 A/B（当前 25.4 ms/轮，底线 12.1 ms）。
 
+### R411 (2026-09-26) W1 拨回 q8_0 零拷贝原案：COMPENSATE_P 是可选项，不是墙
+
+**改变结论的一条证据**：`grouped-attention.cu:2076` 模板参数 `bool COMPENSATE_P = false`（**默认关**），`:2092-2096` 断言为**条件式** `static_assert(!COMPENSATE_P || (!TWO_PASS && ROW_SEQLENS && KV_DTYPE == KV_CACHE_DTYPE_FP8_E4M3 && std::is_same_v<PARTIAL_T,float>), "probability compensation is isolated to E4M3 FP32 groups")`。
+
+⇒ 该断言的语义是「**开了概率补偿就必须是 E4M3/fp32 组**」，**不是**「本内核必须开补偿」。R409 前把 `:2092` 读作"尾路径无条件要求 COMPENSATE_P ⇒ q8_0 不能进"是**误读**；正是它把 W1 从目标书原案（**零拷贝直读我方 q8_0 KV**）推去了 fp8 KV 迁移。
+
+**新证据（同位点）**：`k_block_stride/k_token_stride/k_head_stride` 是**运行期入参**（`:2084-2086`），故 q8_0 的 272 B/行布局可直接传入，无需内核改布局；q8_0 codec 与入口**已在树里**（`fp8_kv_utils.cuh:16` dtype=3、`grouped-attention.cu:5170` `sm70_long_decode_q8_0`、`:5205/:5208` 两处实例化）—— 当初只为 `COMPENSATE_P=true` 撞断言才 `#if defined(SM70_LONG_Q8_0_ENTRY)` 编掉。**只需改传 `false`**。
+
+**为何拨回原案（不是翻烧饼，是纠错回归）**：目标书 §W1 原文即「用 1cat 长注意力核**零拷贝直读我方 q8_0 KV**（… 给核加 `KV_CACHE_DTYPE_Q8_0` codec；FA 25.4→13-15 ms）」。fp8 迁移的代价是**连带**的：
+- XQA/预填充族有 dtype 分派（`:4295/:4345-4359` `LAUNCH_XQA_PARTITION(KV_CACHE_DTYPE_FP8_E4M3)`）⇒ 改 KV 类型即必须动**冻结的预填充路**（§1.0.1 公共组件例外，需 ① 默认不变 ② 重过 151.7 s 门值 ③ 验收不变）；
+- 需 KV 缓存类型**绕过 `-ctk/-ctv` 由内部选**（新面）；
+- E4M3 仅 3 位尾数，我方 q8_0（8 位 + 每 32 元素 f16 scale）**精度更高** ⇒ 同速而更准，无质量代价。
+
+**W1 现案（三步，全部机械）**：① 放开 `sm70_long_decode_q8_0` 并把 `COMPENSATE_P` 传 `false`；② 数值自检（拿 `p0-scripts/fp8_verify_test.cu` 改 q8_0 + `COMPENSATE_P=false` 实例化，对 f16 参考比，判据同 R409：`abs_err>2e-2` 计数 + 最坏相对误差）；③ 适配层加 q8_0 分支（复用 R410 已证接口：`stage_q` `[t][gqa][D]` / 现成 bt·sl / 逐 KV 头 `+j*head_stride`），传真实 q8_0 stride：`token_stride=hkv*272=1088`、`head_stride=272`、`block_stride=256*1088=278528`；省掉 `sm70_long_stage_kv` 的 O(kv) f16 化（R375 算的 ~9 ms/卡税）。
+
+**fp8 资产处置**：已落地的 ggml `F8_E4M3` 类型、`set_rows` fp8、适配层 fp8 分支（R410）**保留**，作为 ② 数值不过关时的备用路（E4M3 是 vendored 原生 dtype，原生 XQA 族 + 补偿 P 全齐）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
