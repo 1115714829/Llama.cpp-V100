@@ -671,6 +671,26 @@
 
 **1cat 自有工程基线（重要参照，非 256K 口径）**：`sm70_dflash2_nvfp4_17ms.md` 冻结负载 = Qwen3.8-27B / 4×V100 / TP4 / batch-one DFlash2 / 七草稿 / selector K=16 / target top-k=20 / FP8 E5M2 target KV + FP16 draft KV / Flash-V100 / FULL target+draft CUDA Graphs ⇒ **已接受基线 512-token 请求 18.465–18.537 ms/轮、AL 4.686、251.60 token/s**；1024-token 18.587–18.603 ms。⇒ 其 256K（27.2 ms）比 512-token（18.5 ms）只多 ~9 ms，**那 9 ms 就是我方 FA 25.4 ms 的战场**。
 
+### R386 ★★★ 重审发现：1cat decode 核并非"没救"，R366 判死有范围错误 —— **W1 的正确打法是"零拷贝分页复活"**（2026-09-26）
+
+**史实（R351→R368 已做过的移植）**：`sm70-long/`（vendored 1cat `scalar-attention.cu` + `fp8_kv_utils.cuh`/`fused_mma.h`/`flash_v100_traits.cuh`/`paged_kv_utils.cuh` + `sm70-long-atenshim.h` + LICENSE）已编译通过（R358 零 torch）、已进构建（R361 隔离 OBJECT + `nm` 可见 `sm70_long_decode_f16`）、已接线 FA 分发（R362 `BEST_FATTN_KERNEL_SM70_LONG=501`，env `LLAMA_SM70_LONG_DECODE=1` 默认关）、**R366 判死、R368 封存**。
+
+**R366/R368 判死的两条理由，各有致命范围错误**：
+| 判死理由（原文） | 范围错误 | 证据 |
+|---|---|---|
+| "5K 下解码注意力总共 ~0.2–1 ms/步 ⇒ 无收益空间" | **在 5K 下测的**；我方目标是 256K | R377：256K 的 `FLASH_ATTN_EXT` = **25.4 ms/步 = 轮 37.6%**（头号单项之一）⇒ 目标场景下**空间极大** |
+| "即使选中，我方集成每调用转全 KV 到 f16（O(kv) 流量）" | **这是适配层缺陷，不是核的缺陷** | 256K 下每次调用搬 ~9.1 GB/卡；1cat 生产是**分页 FP8 KV 直读零拷贝** ⇒ 该集成方式注定赢不了，也极可能是 IMA 根源 |
+
+**⇒ W1 正确打法（内核级复活，非小修）**：
+1. **KV 指针 + 页表直传**，删除 `sm70_long_stage_kv` 的 O(kv) 拷贝（`fattn-sm70-long.cu`）；1cat 的 `paged_kv_utils.cuh`（46 行纯 CUDA）原生支持分页。
+2. **给 KV 编解码加 q8_0 变体**（现支持 FP16 / FP8 E4M3 / FP8 E5M2）：`fp8_kv_utils.cuh` 仅 **88 行纯 CUDA**，q8_0 = int8 + per-32 fp16 scale，照同一形状扩展 ⇒ **不动已测的 KV 配置**（避免"换 KV 格式=变相调参"）。备选：改用 BL1 同款 fp8_e5m2 KV（其核原生支持）。
+3. **修 IMA**：4 处 ABI 修复已在手（头检查 24/4→GQA 6:1、scratch 固定 [80,8,6,256]、block_table/seq_lens 按 query token 逐行、每 KV 头平面偏移）；残余用 compute-sanitizer 定位。
+4. **判据 = `[OP]` 的 FA 时间**（R378：非墙钟）。
+
+**旁证（1cat 自己的记录）**：`docs/design/sm70_dflash2_tail_graphs_20260911.md` 明示其 256K 路径 = **B1/H6/D256/page3296 布局 + 256 partitions×1024 token（q1 标量核）** ⇒ 长 KV 是**分页 + 大分区**读的，与"零拷贝分页"结论一致；其 `sm70_dflash2_nvfp4_17ms.md` 冻结负载与我方同构（TP4/七草稿/FP8 E5M2 target KV/FP16 draft KV/Flash-V100/FULL graphs），512-token 轮 **18.465–18.537 ms、AL 4.686、251.60 t/s**，256K 为 **27.2 ms**（KV 增量仅 +9 ms）。
+
+**另记（内核母矿，供 W2）**：`csrc/moe/marlin_moe_wna16/` = **SM70 Marlin**：`marlin_template.h`（2001 行，**0 torch 引用**）+ `kernel.h`（42 行，0 torch）+ `sm70_marlin_gemm.cuh`（2887 行）+ `sm70_marlin_u8_gemm.cu`（U8=int8，471 行）/`sm70_marlin_u8b128_gemm.cu` ⇒ **W2 = 移植 Marlin U8 并加 q8_0 布局 repack（group 32 保零量化误差）**。许可：`sm70_grouped_long/LICENSE` = BSD 3-Clause (c) 2025 D.Skryabin ✓。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
