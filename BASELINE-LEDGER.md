@@ -310,6 +310,13 @@
 - **隔离性**：该目标只在显式开启时编译（默认关 ⇒ 常规构建不受 5000 行重模板影响）✓；文件仍位于子目录、与既有 FA 路径零交互 ✓。
 - **下一步**：FA 分发接线（decode 形状 → 取 f16 K/V 镜像指针 + 构造恒等页表与 scratch → 调 `sm70_long_decode_f16`）→ 门值 → 每轮 A/B（这是本线目前最大的一把刀）。
 
+- **R362 ★★★ FA 分发已接线并编译通过（env 门控默认关，门值无回归）：新增 `BEST_FATTN_KERNEL_SM70_LONG` + `fattn-sm70-long.cu` 胶水（Q/K/V→f16、恒等页表、scratch、按 KV 头调用）**（2026-09-25）
+
+- **接线内容**：`fattn.cu` 新增枚举 `BEST_FATTN_KERNEL_SM70_LONG=501` + 声明 + 分发 case + alloc/name 分支；`fattn-sm70-long.cu`（新文件，根目录 ⇒ 被 CMake glob 收）实现 `ggml_cuda_sm70_long_decode_supported/alloc_size/decode`，条件：Volta、d=256、q∈[1,8]、kv ≥ 512、GQA 恰为 6、K/V 同类型、Q 连续；env `LLAMA_SM70_LONG_DECODE=1` 开启（默认关）。
+- **验证**：`BUILD_RC=0 / ERROR_LINES=0` ✓；默认门值 **g0=g1=bcda0092** ✓（既有 FA 路径零影响）。
+- **⚠️ 布局阻塞（下一步）**：我方 KV 为 **`[256d][kv][hkv]` 交织布局**（`:603` 实测 `K=(256,262144,4,1) Knb1=1088 Knb2=272 rowK=272` ⇒ head 维在里层、token 步长 1088），而 1cat 核按 **token-major `[t][256]`** 连续读 head 维 ⇒ **必须先做"转置式反量化"**（T1-C 的 `t1c_k_q8_0_to_half_t` 正是该形态，可复用/移植到胶水）；`convert.cuh` 的 `to_fp16` 只有**扁平版**（无多维重载，本轮据此修掉 7 个编译错）⇒ **在转置反量化落地前不得开启该 env**（否则镜像错误 ⇒ 数值必错）。
+- **判据纪律**：开启后第一判据 = `SPEC=1 LLAMA_SM70_LONG_DECODE=1 bash t1c-gate.sh` 的 greedy sha；通过后才跑每轮 A/B。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。

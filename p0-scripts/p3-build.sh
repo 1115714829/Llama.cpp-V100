@@ -72,6 +72,12 @@ fi
 if [ -f /tmp/p3-sm70long-paged.cuh ]; then
   sed 's/\r$//' /tmp/p3-sm70long-paged.cuh > ggml/src/ggml-cuda/sm70-long/paged_kv_utils.cuh
 fi
+if [ -f /tmp/p3-fattn-sm70-long.cu ]; then
+  sed 's/\r$//' /tmp/p3-fattn-sm70-long.cu > ggml/src/ggml-cuda/fattn-sm70-long.cu
+fi
+if [ -f /tmp/p3-fattn.cu ]; then
+  sed 's/\r$//' /tmp/p3-fattn.cu > ggml/src/ggml-cuda/fattn.cu
+fi
 if [ -f /tmp/p3-ggml-cuda-cmakelists.txt ]; then
   sed 's/\r$//' /tmp/p3-ggml-cuda-cmakelists.txt > ggml/src/ggml-cuda/CMakeLists.txt
 fi
