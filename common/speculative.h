@@ -85,6 +85,10 @@ struct common_speculative_draft_params {
 
     // the generated draft from the last _draft() call
     llama_tokens * result;
+
+    // R379: probability of each drafted token under the draft model, for exact
+    // probabilistic rejection sampling (empty = greedy accept, the old behaviour).
+    std::vector<float> * result_probs = nullptr;
 };
 
 common_speculative_draft_params & common_speculative_get_draft_params(common_speculative * spec, llama_seq_id seq_id);

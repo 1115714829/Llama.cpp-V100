@@ -1486,6 +1486,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         static int64_t ph_gather_us = 0;
         static int64_t ph_copy_us   = 0;
         static int64_t ph_sync_us   = 0;
+        // R366: prefill and decode phase split (the cumulative average is prefill-dominated:
+        // the prefill injects every 64-token draft-ubatch chunk, decode injects once per round)
+        static int64_t ph_sync_pre_us = 0, ph_sync_dec_us = 0;
+        static int32_t inj_pre_n = 0, inj_dec_n = 0;
         static const bool sync_split = (getenv("LLAMA_SPEC_SYNC_SPLIT") != nullptr);
         static int64_t ph_wait_inj_us = 0;
         static int64_t ph_tok = 0;
@@ -1528,6 +1532,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 const int64_t ph_sync_t1 = inj_enabled ? ggml_time_us() : 0;
                 if (inj_enabled) {
                     ph_sync_us += ph_sync_t1 - ph_sync_t0;
+                    if (n_tokens > 128) {
+                        ph_sync_pre_us += ph_sync_t1 - ph_sync_t0;
+                        inj_pre_n++;
+                    } else {
+                        ph_sync_dec_us += ph_sync_t1 - ph_sync_t0;
+                        inj_dec_n++;
+                    }
                 }
                 for (uint32_t k = 0; k < target_layer_ids_n; ++k) {
                     const int64_t ph_t0 = inj_enabled ? ggml_time_us() : 0;
@@ -1587,6 +1598,11 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                         LOG_INF("%s: inject timing: n=%d | sync=%.2f gather=%.2f copy=%.2f submit=%.2f wait=%.2f ms/call (layers=%u tok=%.2f)\n",
                                 __func__, inj_n, ph_sync_us/1e3/inj_n, ph_gather_us/1e3/inj_n, ph_copy_us/1e3/inj_n,
                                 inj_us/1e3/inj_n, ph_wait_inj_us/1e3/inj_n, target_layer_ids_n, (double) ph_tok/inj_n);
+                        if (inj_pre_n > 0 && inj_dec_n > 0) {
+                            LOG_INF("%s: inject split: pre n=%d sync=%.3f ms/call | dec n=%d sync=%.3f ms/call\n",
+                                    __func__, inj_pre_n, ph_sync_pre_us/1e3/inj_pre_n,
+                                    inj_dec_n, ph_sync_dec_us/1e3/inj_dec_n);
+                        }
                     }
                 }
                 if (rc != 0) {
@@ -1747,6 +1763,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                             if (1.0f / sum < params.p_min) {
                                 break;
                             }
+                        }
+                        // R379: the walk score softmax is the draft token's probability - reuse
+                        // it for exact probabilistic rejection sampling at verify time.
+                        if (dp.result_probs != nullptr) {
+                            float psum = 0.0f;
+                            for (int32_t k = 0; k < selector_top_k; ++k) {
+                                psum += std::exp(scores[k] - scores[predecessor]);
+                            }
+                            dp.result_probs->push_back(1.0f / psum);
                         }
                         result.push_back((llama_token) ci[predecessor]);
                     }
@@ -3109,7 +3134,16 @@ common_speculative_init_result::common_speculative_init_result(
     // decode), so the reserved lm_head output grows with the draft ubatch; see
     // common_speculative_block_draft_n_ubatch for the cap rationale
     if (common_speculative_is_block_draft(params.speculative.types)) {
-        const uint32_t n_ubatch_dft = common_speculative_block_draft_n_ubatch(params.n_parallel, params.speculative.draft.n_max);
+        const uint32_t n_ubatch_dft = [&]() {
+            // R369: the injection is chunked by the draft ubatch, so the block-draft cap
+            // (n_max+1 tokens) turns every 2048-token prefill chunk into 32 injection
+            // submits (~2.5 ms host each). LLAMA_SPEC_DRAFT_UBATCH raises the floor.
+            const char * env = getenv("LLAMA_SPEC_DRAFT_UBATCH");
+            if (env != nullptr && atoi(env) > 0) {
+                return (uint32_t) atoi(env);
+            }
+            return common_speculative_block_draft_n_ubatch(params.n_parallel, params.speculative.draft.n_max);
+        }();
         if (cparams.n_ubatch > n_ubatch_dft) {
             LOG_INF("%s: capping draft context ubatch from %u to %u (block draft)\n", __func__, cparams.n_ubatch, n_ubatch_dft);
             cparams.n_ubatch = n_ubatch_dft;
