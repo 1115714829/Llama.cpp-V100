@@ -343,6 +343,109 @@
 - **风险**：`output_reorder`（`:2343`）在 host 上交换行 ⇒ 设备版需另写或 reorder 后一次 D2D；M-RoPE/多 seq 语义保持。门值 = 第一判据。
 
 - **⚠️ 口径与未决（NODROP）**：本条 = **数值/时序双口径**，FLOPs/形状与基线同构故 TTFT 可比；但**数值尚未过门**：① tail（对角块）本轮才实现、未做 PPL/greedy 校验 ② 已观测中后段**输入 Q 变非有限（99.9%）** ⇒ 模型发散 = 引擎数值错误的下游后果（`out` 非有限扫描 = 0，即我方从不写非有限值，是"值错"不是"越界写坏"）。**采纳条件 = 数值门（融合核对拍 / PPL）+ k0/k1 各 ≥2 rep 离散**。**下一刀 = 单调用参考值对拍**（融合核 dump 同 dst ↔ 引擎 dump，几何/KV 反量化/行 max/PV/merge 逐段定位）。
+### R366 ★★★ 吐字线诊断大收口：1cat decode 核判死（A/B 相同）、FULLGRAPH 判负（host -10 ms/轮 但端到端更慢 ⇒ GPU 执行受限）、256K 新最佳 tg 53.7（NMAX=7、AL 5.73 > BL1 3.4）；差距收敛到轮成本 106 vs 27.2 = 3.9x（2026-09-25）
+
+- **章程固化（用户 2026-09-25）**：吐字线与预填充同章程，**BL1 = 及格线**（tg ≥124.6 / tpot ≤8.0 / ms/轮 ≤27.2）；**预填充已落袋代码冻结**（公共组件例外但默认行为不变 + 门值重过）；显存 ≤ 1cat 包络（4×V100-16GB），超出 = 项目无意义；1cat 能实现 ⇒ 硬件没问题 ⇒ 必是代码问题。详见 AGENTS.md §1.0.1。
+- **1cat decode 核（R351-R364 集成线）判死**：运行期执行探针 `[SM70EXEC]` = **0 次**（从未执行）；同源 A/B（5K/NO_SPEC/UB2048）开 **27.32** vs 关 **27.06 ms/token** ⇒ **完全相同**。根因：`supported()` 只在建图 reserve 被问过（q=1/kv=262144 通过并打印 SELECTED），运行期 decode 的 FA 走 VEC(q=1)/TILE 路径未进该分支（R364 的"kv=256 之谜"已解 = 诊断打印 cap 被预填充/预热调用耗尽的假象）；且即使选中，我方集成每调用转全 KV 到 f16（O(kv) 流量）vs 1cat 分页 fp8 直读。**5K 下解码注意力总共 ~0.2-1 ms/步** ⇒ 无收益空间。
+- **FULLGRAPH（整步单捕获含集合通信）判负但机制学到**：实测 `sub/call 129→7.4`、`ar/call 128→7.3`、meta host 26.1→**15.6 ms/call（-10 ms/轮）** ⇒ 结构改进真实生效；但端到端 **24.72 vs 基线 22.38 ms/token（更慢）** ⇒ **解码步 = GPU 执行受限**（非 host 提交墙，R342 判读加强）。
+- **GPU 利用率直接证据**：`nvidia-smi -lms 100` 生成期四卡 **85-87% 稳态**（非空闲窗口均值 84%）⇒ 每步 ~22 ms 中仅 ~3.5 ms 气泡。
+- **权重流已到下限（独立复证 R203/R333）**：`test-backend-ops perf` 真实形状 `MUL_MAT(q8_0,m=4096,k=14336,n=1)` = **83.09 µs = 751 GB/s**（峰值 ~900）⇒ 27 GB/4 卡 = **9 ms/步地板**；每步 22 ms ⇒ **~13 ms 非权重开销**（每层 ~30 kernel × 3-6 µs；LM head 1.54 ms/步单卡独占，248320×5120 q8_0 = 1.27 GB/步）。
+- **对照实验（稠密无 GDN）**：DeepSeek-R1-Distill-Qwen-32B-Q4_K_M（64 层稠密）8K ctx **18.14 ms/token** vs 自身地板 ~6.6 ms = **2.6x**，与 27B（2.5x）同比例 ⇒ **不是 GDN 特例，是 llama.cpp 解码系统性开销**。
+- **轮分解（25K，SPEC=1 NMAX=7）**：target decode+sync **31.4** + draft_decode **13.1**（8 tok = 1.64 ms/tok，地板 1.28 ⇒ draft 不浪费）+ selector 2.3 + **injection 12.7**（sync 9.6 + submit 2.5，纯串行）+ sampling 1.6 ≈ **60-69 ms/轮（稳定）**；AL 随内容波动 3.4-5.7 ⇒ tg 波动是 AL 驱动，**轮成本才是物理量**。
+- **n_max 扫描（25K 同源）**：2/3/5/7/11/15 ⇒ 21.1/20.6/19.1/**13.1-19.2**/21.3/23.1 ms/token ⇒ **NMAX=7 最优**（11/15 更差：草稿成本线性而超出段接受率低）⇒ 保持 7。
+- **256K 新基线（NMAX=7 spec-on）**：tg **53.72 t/s**、**18.53 ms/token**、**AL 5.73（> BL1 3.4）**、轮 ≈106 ms；旧值（R356：tg 35.18、85.7 ms/轮、AL 3.05）⇒ tg +53%（AL 差异 + 代码演进）。**AL 我方更优 ⇒ 草稿质量/策略不是问题，唯一刀 = 轮成本**（106 vs BL1 27.2 = 3.9x）。
+- **刀序（数据支撑）**：① **injection 12.7 ms/轮**（sync 9.6 纯串行；P-D3' 设备特征路径蓝图见 R344/R355）② 每步 ~13 ms 非权重开销（融合工程：每层 30→15 kernel）③ lm_head 拆 4 卡 ④ 256K 解码注意力已在带宽下限（+13 ms ≈ 16 层 × 570 MB ÷ 750 GB/s）⇒ 勿投 ⑤ n_max 保持 7。
+- **本轮判死/判负清单**：1cat XQA decode 核（A/B 相同）；FULLGRAPH（端到端更慢）；TP2（KV 复制 4.35 GB/卡 ⇒ OOM，KV 非切分而是每卡全量）；draft 独立跑（`dflash requires ctx_other`）；`GGML_CUDA_OP_TIMING`（多卡 event 查询乱值/负时长）；nsys（ppc64le importer "Wrong event order" bug：node 级 trace 必崩、graph 级只出 runtime/memcpy 无 kernel 数据）。
+- **工具落袋**：`rjob.sh`/`rwait.sh`（10 秒 sleep 轮询 + 终止符，AGENTS.md §1.4.1 强制项）；`t1c-run.sh` 新增 `MODEL/CTX/TS/PROF/SUB/FULLGRAPH/METAHOST/NSYS_*` 旋钮；R203 方法复用（`test-export-graph-ops` + `test-backend-ops perf --test-file` = 真实形状逐算子账：tg 图 41 唯一 op / 3751 节点，1362 视图 op）。
+- **⚠️ NODROP（预填充观察，已判 = 零回归，口径差非回归）**：本轮 256K 跑出 TTFT 175.78 s（冻结值 151.70，+15%）⇒ 复测定性：**spec-on 两 rep 174.469/175.170**（与 R356 spec-on 175.2 吻合 ±0.5%）、**spec-off 两 rep 152.499/152.534**（vs 冻结 k1 150.867/152.535，均值 +0.5% 噪声内、rep2 逐位同）⇒ 我的 fattn.cu / fattn-sm70-long.cu 改动**零回归** ✓（门值逻辑不变）。**但体感 TTFT 口径（spec-on）预填充尚未达标**：175.2 vs BL1 152.5 = **1.15x 劣**（R356 已标注），差距 = 草稿链 prefill 附加成本 ~23 s ⇒ 归入吐字线公共组件刀序（与 injection 同源机制）。
+- **路径核实（用户 2026-09-25 提示）**：9/24 夜确有「正式二进制 `/root/llm/llama.cpp/bin/llama-server` + 测试库 `/root/libdir-gb`」混装跑（dq 系列崩溃栈 3 处证实），但**冻结值 k1（9/25 08:24 `bin=/root/libdir-gb`）与本轮全部复测均用测试二进制** ⇒ 路径不是 TTFT 差异来源；正式环境 `/root/llm/llama.cpp`（mtime 9/10）、`/root/llm/systemd`（9/16）未被动过 ✓ 只读成立。
+
+### R367 ★★★ 刀序重排（分相计数定案）：inject 刀判死（解码期 sync 仅 0.02 ms/call，"12.7 ms/轮"系预填充污染）；真实头号刀 = **target verify 59.2 ms/轮（64%）**；256K tg 新高 63.6（AL 5.89）（2026-09-25）
+
+- **分相计数（`speculative.cpp` inject split，BUILD_RC=0）**：`pre n=3693 sync=17.429 ms/call | dec n=51 sync=0.027 ms/call`（256K）；25K：pre 11.099 / dec **0.021** ms/call ⇒ **解码期注入的 sync 是免费的**（0.02 ms），R330/R331 的"注入 sync 10.4 ms/轮"与 R366 的"12.7 ms/轮"**全部是预填充期调用的累计平均污染**（预填充每 64-token 草稿 ubatch 注入一次，388-3693 次 vs 解码每轮 1 次）。**injection 解码侧刀判死（只改灰不删）**。
+- **反向坐实（公共组件刀）**：预填充期注入 = 11.1（25K）/17.4（256K）ms/call × 388-3693 calls = **spec-on TTFT 附加成本 ~23 s 的真身**（R356 口径差）⇒ 该刀仍在，但落点是**预填充期注入的分块次数**（草稿 ubatch 被 cap 到 64 ⇒ 2048-token 块 = 32 次注入调用/块），刀法 = 调大草稿注入批/合并调用，属公共组件（默认行为不变 + 门值重过）。
+- **真实轮账（GEN=320，NMAX=7，LLAMA_SPEC_TIMING）**：256K **target decode+sync 59.169 ms/轮（64%）** + draft_decode 13.65 + selector 2.33 + injection ~3 + walk 0.08 ≈ 78；实测轮 92.6 ms（tg 63.60、AL 5.89）⇒ **~14 ms 未归因**（sampling 1.6 + accept/walk + 调度间隙）。25K：target **36.794** + draft 12.96 + selector 2.34，实测轮 63.4。
+- **tg 新高**：256K **tg 63.60 t/s、15.69 ms/token、AL 5.89**（此前 53.72/18.53/5.73）；25K tg 45.55（AL 2.89，此 rep 接受率偏低）。距 BL1 124.6 = 1.96x（轮 92.6 vs 27.2 = 3.4x）。
+- **target verify 59.2 ms 的成分账（256K）**：权重流 9（下限）+ KV 注意力 ~11.9 + M=1→8 GEMM 增量 ~5（n=1 83 µs → n=4 89.9 µs 外推 465 GEMM/步）+ 非权重算子 ~13 + lm_head 1.5 + 余量。
+- **待定罪（决定 #1 刀形态）**：256K 注意力 11.9 ms/步的两种可能——(a) KV 每卡复制全量读 9.1 GB ÷ 750 GB/s；(b) KV 头切分但 decode 内核低效（2.3 GB ÷ ~200 GB/s，= v100-skinny §A-2 的"标量注意力"病）。**双 ctx（8192 vs 262144）显存差分在测**：差 ≈9 GB ⇒ (a) 刀 = TP 布局头切分；差 ≈2.3 GB ⇒ (b) 刀 = decode 注意力内核效率（抄 sm70-attn 的内核内 q4_0 直读改造 XQA）。
+- **刀序（R367 重排后）**：① target verify 59.2（其中注意力 11.9 待定罪、非权重 13 融合、M=8 增量 5、lm_head 1.5 拆分）② draft+selector 16 ③ 轮内 ~14 ms 未归因（分账补测）④ 预填充期注入分块合并（spec-on TTFT 23 s）⑤ ~~解码期 injection~~（判死）。
+
+### R368 ★★ 1cat decode 核：三处 ABI 修好后 131 调用干净，但**受阻于 F3 图捕获安全 + staging 流量**（判"暂缓"）；verify 59.2 ms 之谜立项（2026-09-25）
+
+- **ABI 修复链（三处真 bug，均已修）**：① 头检查 `hq==24 && hkv==4` 改 GQA 6:1 任意对 ⇒ **[SM70EXEC] 首次真正执行**（`q=4 kv=236544 hq=6 hkv=1`，TP 头切分确认）② scratch 按 `n_parts` 分配 → 内核实际按编译期常量 `kSplits=80 × MAX_Q=8 × 6` 索引（`partial [80,8,6,256]`）⇒ 越界写；已改固定工作区 ③ `block_table`/`seq_lens` 内核按 **query token**（`batch_idx=q.size(0)`）逐行索引 ⇒ 需 n_q_pad 行，原 1 行 ⇒ 越界读到垃圾页号。修后 131 次调用（kv staged/kernel done/scatter done 全过）。
+- **判"暂缓"（不是判死）**：第 132 次崩 `operation not permitted when stream is capturing` —— 我的胶水每调用 `cudaMalloc/cudaFree`+host 参数，撞上 F3 子图捕获/回放（回放时 host 代码不执行、kv_len 等参数被烘焙）。要继续需：持久工作区（alloc_size 期分配）+ 参数走设备内存 + 去 host 同步 + **免 staging**（当前每调用把全 KV 转 f16 = 9.8 GB 流量 ≈ 本身 12 ms，与 stock 相当）⇒ 报酬不确定，先转刀。
+- **verify 之谜（新立项，#1 目标）**：256K 轮 92.6 ms 里 **target verify = 59.2 ms**，而 v100-skinny 同模型族同卡的 verify（M=8）仅 **~5 ms**（+0.383 ms/行 × 8）⇒ **12x**。我方 verify 成分：权重 9 + 256K 注意力 ~12 + 非权重算子 ~13 + M=8 GEMM 增量 ~5 + lm_head 1.5 ≈ 40，**~19 ms 未归因**。已在测：M=8 全形状 GEMM 账 + spec-on 生成期 GPU 利用率。
+- **刀序（R368）**：① verify 59.2 之谜（归因 → 融合/M=8 GEMM/lm_head）② draft+selector 16（其注意力 ~6-7 ms = 草稿 KV 读全上下文，草稿 KV dtype/窗口待查）③ 轮内 ~14 ms 未归因 ④ 预填充期注入分块（spec-on TTFT 23 s）⑤ 1cat 核（暂缓）⑥ 解码 injection（判死）。
+
+### R369 ★★ 三刀判负/封存 + verify/draft 成本模型定型（斜率实验）：草稿 KV dtype ✗、注入批调大 ✗（23 s TTFT = 草稿注入前向真工时）、1cat 核封存；**fusion 线成为主刀**（2026-09-25）
+
+- **斜率实验（NMAX=2/5/7，256K spec-on，target decode+sync）**：43.90(3 tok) / 51.70(6) / 55.03(8) ⇒ **target verify = 37.2 ms 固定 + 2.23 ms/token**；draft_decode = 12.09/13.88/13.90 ⇒ **draft block = ~12 ms 固定 + 0.36 ms/token**（8 次迭代/块的形态，10x 于其 1.3 ms 权重地板）。
+- **M=8 GEMM 无罪**：`MUL_MAT(q8_0,m=4096,k=14336)` n=1 = 82.83 µs vs n=8 = 112.11 µs = **1.35x** ⇒ 每 token GEMM 增量 ~0.4 ms，verify 斜率 2.23 的其余 ~1.8 ms/token ≈ PV 相位每 query 重读 V。
+- **spec-on 生成期 GPU 利用率 = 85%**（与 spec-off 同）⇒ 轮是 GPU 工时受限，非 host。
+- **判负 ① 草稿 KV dtype（DCTK/DCTV 旋钮）**：q8_0 比 f16 **慢 2 ms/轮**（draft_decode 15.12 vs 13.12，dequant 税）⇒ 草稿 KV 保持 f16。
+- **判负 ② 注入批调大（LLAMA_SPEC_DRAFT_UBATCH）**：64→512 TTFT 175.3→176.9（无收益）、1024 OOM（草稿缓冲 2155 MiB）⇒ 预填充期 17.4 ms/call 的 sync 实为**每 2048-token 块一次的 GPU 尾巴**（550 ms ÷ 32 调用）；spec-on TTFT +23 s = **草稿注入前向的真实 GPU 工时**（236K token 过 5 层草稿 ≈ 0.1 ms/token），要收只能**与目标预填充重叠**（管线化），非分块问题。
+- **封存 ③ 1cat decode 核**：已修 4 处真 ABI bug（头检查 24/4→GQA6:1、scratch 固定 [80,8,6,256]、block_table/seq_lens 按 query token 逐行、每 KV 头平面偏移），131 调用干净后仍有 IMA（vendored 内核内部契约与胶水不匹配）；env 默认关 = 生产零风险。**复活条件**：捕获安全工作区（已做）+ 内核 ABI 对拍（用 1cat 原始 caller 的 TORCH_CHECK 形状表）+ 免 staging（f16 直传已做）。
+- **fusion 线升为主刀**（R368 刀序 ①②合并）：每步 ~13 ms 非权重算子（每层 ~30 kernel：RMS_NORM 257/步、MUL 225、SCALE 192、GET_ROWS 193、ADD 176、UNARY 160、CPY 144）× 目标+草稿两处 ⇒ 轮 ~27 ms 可收；对应 v100-skinny 的 GDN spec-state 快路（去 21 同步/70 拷贝/步）与 sm70-attn 的融合先例。
+
+### R370 ★★★ P0+P1 落袋（GQA 打包 ncols2=3 + f16 KV）：256K 纯步 32.59→**27.12 ms/token（-17%）**、注意力差分 11.59→**5.65 ms（-51%）**；spec-on 侧待 N8T；f16 KV + spec-on @256K = OOM（2026-09-25）
+
+- **轮子直接落地（用户授权 copy）**：`1cat-vllm-v100-study/patches/0001-t2-001-gqa-packing-sm70.patch`（jackinthebox52/qwen38-v100-serve T2-001，16 hunk 只改 `fattn-vec.cuh` +71/-21）`git apply --check` 过 → 已入树。机制：vec 核 `ncols2=1`（零打包）⇒ GQA=6 时 6x KV 重读；打包 `ncols2=3` ⇒ 2x。守卫 `packing_supported = K/V 都 F16/BF16 && gqa_ratio%3==0` ⇒ 对 q8_0 现役配置**惰性零风险**。
+- **实测（256K spec-off 纯步，f16 KV）**：无打包 32.59 → **+打包 27.12 ms/token**；注意力差分（256K−5K）11.59 → **5.65 ms** ✓ 与"消掉 3x 重读"的预测同向（X1 先例 +44.9% 是 128K 单卡口径，我方 256K TP4 = -17% 纯步）。
+- **spec-on 侧不受惠**：verify（q=8）走 TILE（`Q->ne[1]*gqa_ratio_eff=16>2`），补丁只覆盖 `Q->ne[1]==1` 的 VEC 分支 ⇒ 轮成本 90 ms 不变。**下一刀 = N8T**（TILE `ncols2=2→3`，配方在 PLAN-GRAPH §3.6：`launch_fattn_tile_switch_ncols2` 的 %2 判断前插 `gqa_ratio%3==0` → `switch_ncols1<256,256,3>`；约束 #28761：`ncols1*ncols2≤32` ⇒ 只能 8×3=24）。⚠ R165"收益≈0"的判词是 ctx 斜率口径（0.070-0.094 µs/ctx-token，与我方实测 0.09-0.11 同值）；但 256K 下 spec 轮的注意力差分 +21-25 ms/轮 仍在账上，N8T 在长上下文的真实收益**待实测复核**。
+- **VRAM 包络卡死 f16 KV + spec-on**：f16 目标 KV 4.3 GB/卡 + 草稿 1 GB + KQ_mask 2.15 GB + 权重 10.5 GB ⇒ OOM（>16 GB/卡）⇒ **生产 KV 保持 q8_0**；打包的 f16 前提使其只能服务纯步/短 KV 场景，除非 ① 草稿 KV 降 q8_0（-2 GB，代价 draft_decode +2 ms）② 或 q8-direct（`LLAMA_SM70_Q8_DIRECT=1` 回收 470 MB f16 镜像，R319 遗产）。
+- **刀序（R370）**：① N8T（TILE 打包，verify 侧 -10~15 ms/轮潜力）② verify 斜率 2.23 ms/token 之谜（与注意力差分分开归因）③ draft block 12 ms（10x 地板）④ fusion（目标+草稿 ~27 ms/轮）⑤ 1cat 核（封存）。
+
+### R371 ★★ N8T 判负（TILE 打包零收益，R165 判词 256K 复证）+ verify 斜率归因定案（斜率与 ctx 无关 = 每 token 固定工；截距 ctx 部分 = 14.9 ms = q8_0→f16 暂存）（2026-09-25）
+
+- **N8T 实现并判负**：`fattn-tile.cuh` 加 ncols2=3 专用阶梯（cols 24/12/6/3 + 4 配置项，`nthreads` 按 cpw=2^n 选 96/192/384）+ env `LLAMA_FA_TILE_GQA3`。**贪心 sha 逐位相同（4d6ae837…）= 数值正确 ✓**，但 256K spec-on **target verify 57.197（关）vs 57.177（开）ms/轮 = 零收益** ⇒ TILE 路的 GQA 冗余确实被 L2 吸收（R165 判词在 256K 亦成立）；打包刀的收益只在 VEC 路（q=1，R370 已落 -17%）。
+- **踩坑两条（写进工装认知）**：① ncols2=3 的通用阶梯 `cols_per_block/ncols2` 非整除 ⇒ 必须专用阶梯（R155 补正复证）② 配置项被所有 DKQ/DV 实例化 ⇒ 仅加 256/256 会触发别处 static_assert；且 `cpw=ncols/nwarps` 必须 2 的幂（memcpy 尺寸）⇒ nthreads 96/192/384 而非 256。
+- **verify 斜率归因（5K vs 256K 同源对照，spec-on）**：5K NMAX=2/7 ⇒ 27.238/35.440 ms（斜率 **1.64 ms/token**、截距 22.3）；256K ⇒ 55.0/57.2（斜率 2.23、截距 37.2）⇒ ① **截距随 ctx +14.9 ms = 256K 的 KV 读 + q8_0→f16 暂存**（f16 KV 可省 ~7-8 ms，但 spec-on VRAM OOM，见 R370）② **斜率 1.64 ms/token 与 ctx 无关 = 每 token 固定工**（GEMM M>1 增量 + GDN 状态 + 小算子数据量），非 KV 重读 ⇒ 需逐 token 算子级归因。
+- **draft 块 = 固定 ~12 ms/轮**（NMAX=2→11.81、7→12.99；25K 12.96、256K 13.12）⇒ 与 token 数、ctx 都无关 = 5 层单次前向的**固定开销**（其权重地板 1.3 ms）⇒ 10x 地板，待插桩。
+- **刀序（R371）**：① verify 截距 ctx 部分（f16 KV + VRAM 瘦身 或 核内 q8_0 直读）② verify 斜率 1.64 ms/token（逐 token 算子）③ draft 固定 12 ms ④ fusion（每层 ~30 kernel）⑤ N8T/1cat 核（判负/封存）。
+
+### R372 ★★★ draft 块 12 ms 定性（LLAMA_SPEC_SYNC_SPLIT 探针）：**真实 GPU 工时非 host 开销**（wait=-12.65 = decode 调用内已等完）；轮 GPU 账闭合 ⇒ fusion 线 = 唯一能同时打 verify ops / draft ops / 每 token 工三处的刀（2026-09-25）
+
+- **探针**：`LLAMA_SPEC_SYNC_SPLIT=1` 在 draft 的 `llama_decode` 后加同步并计 `wait = sync耗时 - decode耗时`。实测 256K：`draft_decode=13.56 ms/round, wait=**-12.65**` ⇒ 负值 = **decode 调用内部已等待 GPU 完成**（不是 host 提交开销）⇒ draft 的 13.5 ms 是**真实 GPU 工时**；注入同样 `sync=17.10, wait=-1.47`。整轮基本串行在 GPU 上（与 85% 利用率、R366 的 GPU 执行受限判定自洽）。
+- **轮 GPU 账闭合（256K，~90 ms）**：verify 权重 12（Q8_0 地板 9 + M=8 增量 3）+ verify ctx 部分 14.9（q8_0→f16 暂存 + KV 读）+ verify 每 token 工 ~11（1.64/token，非 KV 重读）+ draft 13.5 + 注入/selector/间隙 ~15。**~35 ms = 算子数/内核效率**（verify ops ~16 + draft ops + 每 token 工）。
+- **draft 13.5 ms 之谜收窄**：一次 `llama_decode`（3759 次调用中仅 31 次是块调用 ⇒ **每轮 1 次前向**）、ctx 无关（25K 12.96 / 256K 13.12）、token 数弱相关（3 tok 11.81 / 8 tok 12.99）⇒ **一次 5 层 8-token 前向 = 13.5 ms（10x 其 1.3 ms 权重地板）**，成分待逐算子归因（疑似 8 个块位置的算子链/权重重读）。
+- **fusion 线 = 主刀定案**（与 PLAN-GRAPH R179 合流）：目标 + 草稿两处算子数（每层 ~30 kernel、~1550 kernel/步）是唯一能同时打三处的杠杆；对应 v100-skinny 教训 #3（GDN spec-state 快路去 21 同步/70 拷贝/步）与 sglang SK8（主机侧小算子 +19.4%）。
+- **刀序（R372）**：① fusion（RS 状态链 529 op/步、RMS_NORM+ADD 433、MUL+UNARY 385）② verify ctx 部分（核内 q8_0 直读，去暂存 -7~9 ms）③ draft 13.5（逐算子归因后定刀）④ 1cat 核（封存）。
+
+### R373 ★★ 逐算子真值修正预算（decode 形状）：小算子仅 **~5.3 ms/步**（2-5 µs/个）非 16；两谜团定位（verify 斜率 1.64 ms/token、draft 固定 12 ms）；attention 暂存 = 最大可归因项（2026-09-25）
+
+- **逐算子真值（R203 方法复用，`test-export-graph-ops` + `test-backend-ops perf --test-file`，只取 tok=1 案例）**：RMS_NORM 4.0 µs、SCALE 5.1、CPY 4.7、GET_ROWS 3.4、MUL 2.4、ADD 2.3、SWIGLU 2.3、SILU 2.1、SIGMOID 2.0、SOFTPLUS 1.9、SSM_CONV 2.4、CONT 3.0、GATED_DELTA_NET（decode 案例未覆盖，prefill 案例 457 µs）。按 [OP] 计数加权 ⇒ **小算子合计 ~5.3 ms/步**（此前按 8-10 µs 估的 12-16 ms **作废**）。
+- **纯步预算闭合（5K，f16 KV+打包 27.12 ms）**：GEMM 9（27 GB/4 卡 ÷ 751 GB/s）+ 小算子 5.3 + 注意力 5.65 + lm_head 1.5 + GDN ~2.5 + 间隙 ~3 ✓ 自洽。
+- **两谜团（未归因）**：① **verify 斜率 1.64 ms/token（5K）/2.23（256K）** —— 与 lm_head M=1 的 1.54 ms 严丝合缝但草稿侧证伪（draft 3→8 tok 只 +0.24/token，若是每 token lm_head 应 +1.54）⇒ 待查 ② **draft 块固定 12 ms**（3 tok 11.81 / 8 tok 12.99 = 几乎不随 token 数变化）⇒ 疑似块扩散的固定迭代数（每次迭代重读权重 1.3 ms × N）。
+- **最大可归因可修项 = attention 暂存 14.9 ms**（256K 截距 ctx 部分）：q8_0→f16 全量暂存 9.8 GB 流量；f16 KV/全镜像都被 spec-on VRAM 卡死 ⇒ **唯一 VRAM 中性解 = 核内 q8_0 直读**（sm70-attn 的 "in-kernel q4_0 direct loads" 同构先例，需移植到 q8_0）。
+- **fusion 价值重估**：小算子仅 5.3 ms ⇒ 融合省 ~2-3 ms/步（非 27）；**主刀重排**：① attention 暂存（-7~10 ms/轮）② 两谜团归因 ③ fusion（-2~3）④ lm_head 拆卡（-1）。
+
+### R374 ★★ n_max 256K 双 rep 判平（刀序收敛到代码线）+ draft 图结构勘察（dflash.cpp）；两谜团候选因定位（2026-09-25）
+
+- **n_max 256K 双 rep（度量底线）**：NMAX=5 tg 32.17/34.13（AL 2.57/2.70）、NMAX=7 tg 33.33/31.76（AL 2.77/2.65）⇒ **统计上判平**（离散带内）；且 **AL 波动 2.6↔5.9 同配置跨跑** ⇒ tg 对比被内容噪声主导，**轮成本（~90 ms 稳定）才是物理量**。n_max 配置刀**判死**（保持 7）。
+- **draft 图结构（`src/models/dflash.cpp`）**：5 层 ×（`build_dflash2_conv`（conv tap 链）+ `dflash_attn_conv_proj`/`dflash_ffn_conv_proj` GEMM + 注意力 + FFN）+ DFlash2 selector（`dflash_selector_hidden [5120,256]` + `next/prev [256,248320]` = 127 MB×2，get_rows + score_run）⇒ 一次前向 ~120-200 节点。**draft 12-13.5 ms 的成分仍未闭合**（GEMM ~1.3 + 算子 ~0.4 + selector ~0.3 ≈ 2 ms vs 实测 12-13.5）⇒ 下一手：conv tap 链的 `ggml_cont/concat` 实测、以及逐算子 dump（`test-export-graph-ops` 用 draft 模型）。
+- **verify 斜率 1.64 ms/token 的候选因**：lm_head 逐位置假设**被 MTP 图代码否证**（`build_lora_mm(head_w, cur)` 是批量 M=8 ✓）⇒ 斜率另有其源（GEMM M>1 增量 0.24 + GDN 状态 0.25 + ?）；**下一手：以 draft/verify 的真实图 dump 逐算子对账**（R203 方法 + draft 模型导出）。
+- **刀序（R374，收敛）**：① attention 暂存（verify ctx 14.9 → 核内 q8_0 直读，-7~10 ms/轮，最大可归因项）② draft 12 ms 归因（conv 链/逐算子 dump）③ verify 斜率归因 ④ fusion（小算子仅 5.3 ms，-2~3）⑤ 配置刀全部判死（n_max/注入批/草稿 KV dtype）。
+
+### R375 ★★★ 证据链审计（用户批准"先修证据链"）+ 口径定案：全树哈希对账 2061/2066 一致、4 处漂移（`LLAMA_SPEC_REJ` 从未进过二进制）+ 吐字判据只锁 tpot/tg + KV 转换税立项（2026-09-25）
+
+- **方法**：CR 归一化 md5 全树对账（本地工作树 2066 源文件 vs 构建树 `/root/llm/test/v100-opt/llama.cpp` 2082）+ 服务器独有代码回收 + 清单门控构建（fail-closed）+ manifest。脚本：`.tools/tree-md5.sh`、`.tools/p4-build.sh`（服务器 `/tmp/`）。
+- **对账结果**：**2061 一致 / 4 差异 / 1 仅本地 / 16 仅服务器**（16 = `build-nccl/` 构建产物 15 + `common/build-info.h`，白名单）。
+  - **`common/sampling.cpp`**：本地 `3905bcf3…`（含 `LLAMA_SPEC_REJ` 精确拒绝采样）vs 构建树 `21998222…`；**payload 名单里没有该文件**（`p3-build.sh` 只覆盖 24 个 `/tmp/p3-*`）⇒ R348/R349 定为 **P8 二攻方向**的机制**从未进过任何被测二进制**。"build 绿 + 门值绿 ≠ 改动进了二进制"的第三次实证。
+  - **`ggml/src/ggml-cuda/fattn-common.cuh`**：**构建树多 6 行** —— `GGML_CUDA_FA_SPLIT_FLOOR`（强制抬高 FA 的 KV split 数，env 门控），实机加过、本地缺失 ⇒ **已回收到本地并逐字节对齐**（两侧 LF-md5 `68f700aa…`）。
+  - **`src/llama-kv-cache.h`**：本地多 1 行注释（R296b 的 r=1.25 记录）⇒ 构建树落后，已同步。
+  - **`ggml/src/ggml-cuda/fattn-79t/prefill.cu`**：子目录档案副本陈旧（7284 vs 7749 行）⇒ **不进构建**（`CMakeLists:106` 从 GLOB 移除、`:130-139` 单独 OBJECT 目标编译**扁平名** `fattn79t-prefill.cu`；该扁平名两侧一致）⇒ **预填充冻结值对应的引擎源码未被污染** ✓（判据：`build-instr/.../ggml-cuda-fattn79t.dir/fattn79t-prefill.cu.o` 存在）。
+  - **`sm70-long/scalar-attention.cu`**：仅本地存在（`sm70-long/` 子目录默认不编译）⇒ 已补齐。
+- **处置**：构建树已与本地工作树逐字节对齐；**`p4-build.sh` 取代 `p3-build.sh`**（全树对账 → 漂移即拒绝构建 → 构建 → 落 `$LIBS/BUILD_MANIFEST.txt`：时间/清单 sha256/文件数/两个二进制的 md5/BUILD_RC）；基准二进制留档 `/root/libdir-gb-bak-20260925-1521`（`libggml-cuda.so` md5 `7c4325fb2eda2f1e52daeab1bab7619a`）。纪律见 AGENTS.md §1.0.2。
+- **口径定案（用户 2026-09-25 复核）**：**硬指标只有两条 = tpot ≤ 8.0 ms（⇔ tg ≥ 124.6 t/s）与 TTFT ≤ 152.5 s**；`ms/轮 ≤ 27.2` **降级为派生诊断值**（= 8.0 ms × AL 3.4，**vLLM 不报 AL**，该 AL 系反推）⇒ 不得单独作为不及格判据（AL 5.9 时 47 ms 即等价达标）。
+- **预填充口径修正**：**必须按 spec-on 比**（BL1 全时段带 DFlash2）。我方今日 7 次 256K 实测 TTFT **174.0 / 174.9 / 175.2 / 175.3 / 175.4 / 175.8 / 177.4 s**（pp 1345-1358）vs BL1 **152.5 s** = **1.15x，未达标**；spec-off **151.7 / 152.5 s** 只是纯目标侧数字 ⇒ **R326「预填充达标（1.004x）」结论作废**（不删史）。缺口 ~23 s = 草稿链预填充前向（236K token × 5 层 × 1.92B ≈ 900 TFLOP，20-40 TFLOPS 有效算力 ⇒ 22-45 s，与实测吻合）。
+- **吐字实测方差（今日 11 次 256K spec-on 原始 `-stress.log`）**：tg **26.1–63.6**、AL **2.57–6.03**、接受率 23.7–73.8%（同二进制 `/root/libdir-gb`、同 prompt `bl-prompt90.txt`、同采样参数）⇒ **tg 单点读数不可比**，轮成本（~83–106 ms）才稳定。**R366 的 tg 63.6 与 R374 的 tg 31.8 是同一配置的两次抽样，不是性能回归**（判读修正）。
+- **KV 转换税立项（R373「最大可归因可修项」的形式化，代码实证）**：`fattn.cu:763-780` 对 `TILE`/`MMA_F16` **无条件** `need_f16_K = need_f16_V = true`；Volta 下 q=8 的 verify 必走 TILE（`:666`，`Q->ne[1]×gqa_ratio_eff = 8×2 = 16 ≤ 16`）⇒ `fattn-common.cuh:1026/1054` **每次调用**全量 `to_fp16(K_data, K_f16, ggml_nelements(K))`。按每卡 1 KV 头（R368 实测 `hq=6 hkv=1`）算：q8_0 KV ≈ 2.28 GB/卡、f16 镜像 4.56 GB/卡（与 R370「f16 目标 KV 4.3 GB/卡」吻合）⇒ **每步 16 层 ≈ 6.8 GB/卡 ≈ 9 ms @751 GB/s**。上游**已有**原生 q8_0 直读实例（`fattn.cu:413-459`：`FATTN_VEC_CASES_ALL_D(…, Q8_0)` 含 D=256），但 Volta 分支只在 `Q->ne[1]×gqa_ratio_eff ≤ 2` 才选 VEC ⇒ **decode verify 永远拿不到它**。
+- **判死/改判（只改灰不删）**：① **1cat decode 核"判死"依据是 5K 口径 A/B**（5K 下解码注意力总耗 0.2-1 ms，天然无收益空间）⇒ 对 256K（差分 11.6-14.9 ms）**无效**，改判为"**形态错，非无收益**"；② `LLAMA_SPEC_REJ` 需重立实验（从未测过，与"判负"无关）；③ N8T 判负为**单 rep**（差 −0.02 ms）⇒ 复核时须 ≥2 rep。
+- **构建与门值（本里程碑收口）**：清单门控构建 `p4e` **BUILD_RC=0 / ERROR_LINES=0 / MANIFEST_DIFFS=0**（`cmake --build build-instr -j176`，70 s 增量）；manifest sha256 `b97e84439d8c84b303ac5e56893b713dd2d4398e0538ba9d8ee1165482f41314`（2066 文件）、`libggml-cuda.so` md5 `7c4325fb2eda2f1e52daeab1bab7619a`（**与备份基准逐位相同 ⇒ 今日全部 CUDA 侧 256K 实测数据仍有效**；变的是 `llama-server` md5 `47467cf6f2234cf73c87cbc3fa239433`）；**门值 `SPEC=1 t1c-gate.sh`：g1 = g0 = `bcda0092bfbaaa9d…`（len=131, predicted=32）⇒ 默认路径零回归** ✓。
+- **顺带修掉两处真缺陷（"REJ 从未编译过"的独立铁证）**：① `common/sampling.cpp` 缺 `<random>`（`std::mt19937` 未声明）；② `common/sampling.h:86` 的声明仍是 **5 参**而实现已改 **6 参** ⇒ `libllama-server-impl.so` 链接报 `undefined reference to common_sampler_sample_and_accept_n(..., bool)`。修法：头文件声明补默认参数 `const std::vector<float> & draft_p = {}`（调用方零改动），REJ 段注释改为"生成端尚未提供 draft_p ⇒ **当前 no-op**"。**若该机制曾进过任何构建，这两处必然早已暴露**。
+- **刀序（R375）**：① **KV 转换税**（预期 −9 ms/轮，先做同源 A/B）② verify 未归因分相（逐节点 GPU 计时，替代坏掉的 nsys/OP_TIMING）③ 轮内重叠（draft/注入/selector 互等）④ 预填充草稿与 target 重叠（−23 s 缺口）。
+- **⚠ 未决（下一件必做）**：**AL 方差来源未归因**（内容/采样种子/接受准则三选一）⇒ 决定后续所有 tg 型 A/B 是否可信。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。

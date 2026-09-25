@@ -169,7 +169,7 @@ flowchart TD
     E6V["E6 判决 (R185-186): direct 的根因 + 一次失败<br/>[FPSTAT] 实测 832 calls: same_as_prev=0 distinct=24 max_count=266<br/>=> N6a 的单槽(紧邻一次)缓存**结构上永不命中** (追溯解释它实测无效)<br/>=> 图内容只有 24 种, 最高频占 32% => 多槽/内容感知轮转**理论上能兑现**<br/>对照可复现性: e6c0a/e6c0b tg **96.46/96.45 (差 0.01%)**, FPSTAT 逐位相同<br/>x 三个变体全部 abort: ggml-backend-meta.cpp:2144 GGML_ASSERT(bcj.nodes[i])<br/>(1)fp%N 选槽+命中不 reset (2)再加立即提交 stc_compute_index (3)保留无条件 reset 只改槽位<br/>=&gt; **否证: stc_compute 索引不可自由重选** (buffer_simple_tensor 依赖<br/>per-container 状态; 提交点在 :1332 另一个函数)<br/>下一手: 内容感知 2 路轮转(索引永在 {0,1}, 不跳 reset) env GGML_META_FP_SLOTS<br/>WIP 存档 wip-slot-cache.patch; 机器已还原(libdir-instr = libdir-c0)"]:::warn
     N7["N7 P2-selector 上 GPU<br/>4.3 ms/轮 = 7.7%<br/>⚠️ R159: ninfer 那个 op **不是 drop-in** ——<br/>它的契约是「路径选择」(predecessor/successor<br/>codebook 的 K 步链, candidate_ids+unary_scores<br/>+projected_hidden, 16 候选), 与我们的<br/>CPU selector 语义不同 => 需要先做语义映射"]:::todo
     N8["N8-vec GQA read-once —— **R165 同源斜率否定**<br/>6 遍冗余同样没有变成 DRAM 流量<br/>（与 N8T 同因：L2 吸收）"]:::no
-    N8T["N8T TILE ncols2 2->3/6 —— **R165 实测否定**<br/>同源斜率 0.070/0.094 us/ctx-token<br/>= 等价于 KV 只读 1 遍 @435 GB/s<br/>=> 指令级的 3 遍/6 遍**没有落到 DRAM**<br/>（L2 吸收了冗余）=> 做它收益约 0<br/>配方仍留档于 §3.6（issue #28761 约束 ncols<=32）"]:::no
+    N8T["N8T TILE ncols2 2->3/6 —— **R165 实测否定 + R371 复证**<br/>同源斜率 0.070/0.094 us/ctx-token<br/>= 等价于 KV 只读 1 遍 @435 GB/s<br/>=> 指令级的 3 遍/6 遍**没有落到 DRAM**<br/>（L2 吸收了冗余）=> 做它收益约 0<br/>**R371 已实现并复测**（专用阶梯 24/12/6/3 + 4 配置 + env LLAMA_FA_TILE_GQA3）：<br/>256K verify 57.197（关）vs 57.177（开）= 零收益 ✓；贪心 sha 逐位相同 = 数值正确<br/>配方仍留档于 §3.6（issue #28761 约束 ncols<=32）"]:::no
     N9["N9 prefill 尾块 split-KV<br/>外测 9.45x"]:::todo
     N10["[RT] 7 处 fprintf 探针规整为 env 门控"]:::todo
     N11["整轮单图 / 静态形状（1cat fullgraph 路线）"]:::todo
@@ -612,7 +612,7 @@ flowchart LR
   SM3 --> N9
   SM3 -.->|prefill 缺口| G
   subgraph RQP["★ qwen38-v100-serve（R148 联网新发现，单卡 V100-32G + Qwen3.8-27B，同题！）"]
-    QP1["ncols2=3 GQA 打包补丁<br/>128K KV 流量 26.37->8.59 GB/token (-67.4%)<br/>decode 16.45->23.83 t/s (+44.86%)<br/>KLD 0.000000, 100% top-1"]:::pending
+    QP1["ncols2=3 GQA 打包补丁<br/>128K KV 流量 26.37->8.59 GB/token (-67.4%)<br/>decode 16.45->23.83 t/s (+44.86%)<br/>KLD 0.000000, 100% top-1<br/>**R370 已落地**（patches/0001-t2-001 入树，fattn-vec.cuh +71/-21）：<br/>256K 纯步 32.59->27.12 ms/token（-17%）、注意力差分 11.59->5.65 ms（-51%）<br/>仅 VEC 路（q=1）生效，需 F16/BF16 KV（q8_0 惰性）"]:::hot
     QP2["现役选择器只打包 2 个 Q 头<br/>= 我们的 KV 冗余是 3x, 不是 6x<br/>（修正 Z1 先验预测）"]:::fact
     QP3["该补丁只对 F16/BF16 KV 开启<br/>（寄存器压力）=> q8_0 不在覆盖范围"]:::cond
     QP4["单卡 V100-32G @128K: 16.49 stock<br/>23.83 no-mtp 补丁 / 42.22 MTP<br/>@8K: MTP 62.41"]:::fact
@@ -1356,8 +1356,25 @@ ncols2 = 6 @ D=256（要 1 遍就必须 ncols=48，occupancy 1；ncols=24 时只
        ㉜ **R217 的归属更正**：那批解码 TP 臂（`tp4-ab.log` 21:04、`tp56.log` 21:57）**不是子代理 37e83355 跑的**（它明确否认，其 ABBA 到 22:56 才完），而是**本会话更早时段**跑的，且**阶段小结里早已记过**（ms/轮 51.86-51.90 / 53.7-53.9 / 56.5-60.5 与之逐项吻合）⇒ R217 的真实增量只有「把 TP4/5/6 的门值列全」。
        ㉝ **污染窗口已核**：子代理那条自动链占机 **23:01:01 – 23:11:27**；我的链条 23:07:55 启动后先等 `pgrep llama-bench` 为空（`IDLE_AFTER_TICKS=15` ⇒ 约 23:11:40 通过）**才开始重建与扫描** ⇒ **R221 全部数据落在窗口之外** ✓（`p0.log` 的 ub=512 点更是 Sep 20 22:10）。
        ㉞ **两条新规矩（子代理自查贡献，已进 §4）**：① **还原源码后必须 `rm -f` 目标 `.o`**，验收看**标记串 + md5**而不是 `BUILD_RC`（mtime 保留会导致 make **漏编**，是 §4.28 的反方向）；② **发现负结论后立刻停掉自动续跑的长链**，长链每阶段前重查「这一阶段还有意义吗」。
-       ㉗ **goal 已按用户直接指示更新到 revision 2**：把「60.8 约等于 dp4a 97% ⇒ 换张量核」这条作废前提从目标里摘掉，改为 R213 的分派链定论 + R215 的负结果与按卡归一缺口，预填充待办改为「长度扫描 / TP 扩展性 / ub 扫描」三条。
+       ㉗ **goal 已按用户直接指示更新到 revision 2（尾段见下方 [R221 尾段]）
+     —— Round 222-225（吐字线大清理：QP1 落地、N8T 实现并判负、verify 成本模型定型；头号杠杆与 R179 合流）：
+        ① 1cat XQA decode 核判死/封存（R366-R368）：运行期 SM70EXEC=0、同源 A/B 27.32 vs 27.06 完全相同 ⇒ 无收益空间；后修 4 处真 ABI bug（头检查 24/4→GQA 6:1、scratch 固定 [80,8,6,256]、block_table/seq_lens 按 query token 逐行、每 KV 头平面偏移）⇒ 131 调用干净后仍 IMA ⇒ 封存，env 默认关零风险。
+        ② QP1 落地（R370）：patches/0001-t2-001-gqa-packing-sm70.patch 入树 ⇒ 256K 纯步 32.59→27.12 ms/token（-17%）、注意力差分 11.59→5.65 ms（-51%）；仅 VEC 路（q=1）生效、需 F16/BF16 KV（q8_0 惰性零风险）。
+        ③ N8T 实现并判负（R371）：专用阶梯 24/12/6/3 + 4 配置 + env LLAMA_FA_TILE_GQA3（踩坑：cols_per_block/ncols2 非整除需专用阶梯；配置被所有 DKQ/DV 实例化；cpw=ncols/nwarps 必须 2 的幂 ⇒ nthreads 96/192/384）。贪心 sha 逐位相同 = 数值正确，但 256K verify 57.197（关）vs 57.177（开）= 零收益 ⇒ R165 判词 256K 复证（TILE 路 GQA 冗余被 L2 吸收）。
+        ④ verify 成本模型定型（R371，5K vs 256K 同源斜率）：verify = 22.3 ms 固定（5K）+ 1.64 ms/token + ctx 部分 14.9 ms（256K）；斜率与 ctx 无关 = 每 token 固定工（非 KV 重读）；截距 ctx 部分 = q8_0→f16 暂存 + KV 读（f16 KV 省 ~7-8 ms 但 spec-on VRAM OOM ⇒ 需核内 q8_0 直读）。draft 块 = 固定 ~12 ms/轮（与 token 数、ctx 都无关，10x 其 1.3 ms 权重地板）。
+        ⑤ 与 R179 结论合流：本轮实测每层 ~30 kernel / ~1550 kernel 每步 = R179「头号杠杆 = 减少每轮启动次数」的解码侧量化 ⇒ fusion 线升为主刀（目标+草稿两处 ~27 ms/轮可收）。
+        ⑥ 新规矩（工装）：rjob.sh/rwait.sh（10 秒 sleep 轮询 + 终止符）成强制（AGENTS.md §1.4.1）；payload 清单新增 p3-fattn-vec.cuh/p3-fattn-tile.cuh（新文件必须进清单，否则假绿）。
+        [R221 尾段] **：把「60.8 约等于 dp4a 97% ⇒ 换张量核」这条作废前提从目标里摘掉，改为 R213 的分派链定论 + R215 的负结果与按卡归一缺口，预填充待办改为「长度扫描 / TP 扩展性 / ub 扫描」三条。
 ```
+
+     —— Round 226-227（**R375 证据链审计 + 口径定案；KV 转换税立项**）：
+        ① **全树哈希对账**（CR 归一化 md5，2066 源文件）：**2061 一致 / 4 差异**；`common/sampling.cpp`（`LLAMA_SPEC_REJ`）**从未进过二进制**（payload 白名单静默缺场）⇒ 该"AL 刀"事实上未测过，从刀序撤下待重立。
+        ② 构建树独有 6 行 `GGML_CUDA_FA_SPLIT_FLOOR` 探针**已回收到本地**（两侧 LF-md5 `68f700aa…`）；`fattn-79t/prefill.cu` 子目录副本陈旧但**不进构建**（CMake 编扁平名 `fattn79t-prefill.cu`，该名两侧一致）⇒ **预填充冻结值未受污染** ✓。
+        ③ 机制换轨：`p3-build.sh`（payload 覆盖）→ **`p4-build.sh`（全树清单门 + manifest，漂移即拒绝构建）**；基准二进制留档 `/root/libdir-gb-bak-20260925-1521`。纪律入 AGENTS.md §1.0.2 与 00-红线 §度量底线 9。
+        ④ **口径定案（用户复核）**：硬指标只锁 **tpot ≤ 8.0 ms** 与 **TTFT ≤ 152.5 s（spec-on）**；`ms/轮 27.2` 降为派生值（其 AL 3.4 是反推，vLLM 不报 AL）。
+        ⑤ **tg 方差定案**：今日 11 次 256K spec-on 实测 tg **26.1–63.6**、AL **2.57–6.03**（同二进制/同 prompt/同采样）⇒ tg 单点不可比，**轮成本 ~83–106 ms 才是物理量**（R366 的 63.6 与 R374 的 31.8 是同一配置的两次抽样，非性能回归）。
+        ⑥ **节点 KVTAX（新，当前头号刀）**：`TILE`/`MMA_F16` **无条件** `need_f16_K/V=true`（`fattn.cu:763-780`）+ q8_0 下 verify 必走 TILE（`:666`：`8×gqa_ratio_eff(2) ≤ 16`）⇒ **每步 16 层 6.8 GB/卡 ≈ 9 ms** 的 q8_0→f16 转换税；上游**已有**原生 q8_0 直读实例（`fattn.cu:413-459`，含 D=256）但 Volta 仅在 `Q->ne[1]×gqa ≤ 2` 选 VEC ⇒ decode verify 拿不到。证伪/验证入口 = `[FAK]`/`[FAKD]` 诊断 + 同源 A/B + 门值。
+        ⑦ **3 处旧判词改判（只改灰不删）**：1cat decode 核"判死"基于 **5K** 口径（5K 解码注意力仅 0.2-1 ms）⇒ 对 256K 不适用，改判"形态错、非无收益"；`LLAMA_SPEC_REJ` 需重立实验；N8T 判负是**单 rep**（差 −0.02 ms）⇒ 复核须 ≥2 rep。
 
 ## 5. 作业纪律（血泪）
 
