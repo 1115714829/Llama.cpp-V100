@@ -9,6 +9,12 @@ namespace flash_v100 {
 constexpr int KV_CACHE_DTYPE_FP16 = 0;
 constexpr int KV_CACHE_DTYPE_FP8_E4M3 = 1;
 constexpr int KV_CACHE_DTYPE_FP8_E5M2 = 2;
+// R387: llama.cpp q8_0 KV. Blocks are 34 bytes (half scale + 32 int8), 8 blocks per
+// 256-element row. The index contract is: index = row * 256 + d, where a row is one
+// (token, kv head) pair in the caller's layout. The caller passes strides that make
+// this hold (for llama.cpp's [d][t][h] cache: stride_t = 1024 = 4 heads * 256, stride_h = 256).
+constexpr int KV_CACHE_DTYPE_Q8_0 = 3;
+constexpr int KV_Q8_0_ROW_BYTES = 8 * 34;   // 272
 
 __device__ __forceinline__ float quiet_nan_f() {
   return __int_as_float(0x7fffffff);
@@ -69,12 +75,25 @@ __device__ __forceinline__ float fp8_e5m2_to_float(uint8_t raw) {
   return __half2float(fp8_e5m2_to_half(raw));
 }
 
+// R387: q8_0 element read. index = row * 256 + d (see the row/index contract above).
+__device__ __forceinline__ float q8_0_to_float(const void* __restrict__ cache, const int64_t index) {
+  const int64_t  row = index >> 8;
+  const int      d   = static_cast<int>(index & 255);
+  const uint8_t* p   = reinterpret_cast<const uint8_t*>(cache) +
+                       row * KV_Q8_0_ROW_BYTES + (d >> 5) * 34;
+  const __half   s   = __ushort_as_half(*reinterpret_cast<const unsigned short*>(p));
+  const int8_t   q   = reinterpret_cast<const int8_t*>(p + 2)[d & 31];
+  return __half2float(s) * static_cast<float>(q);
+}
+
 template <int KV_DTYPE>
 __device__ __forceinline__ float load_kv_cache_float_unscaled(
     const void* __restrict__ cache, const int64_t index) {
   if constexpr (KV_DTYPE == KV_CACHE_DTYPE_FP16) {
     const __half* cache_h = reinterpret_cast<const __half*>(cache);
     return __half2float(cache_h[index]);
+  } else if constexpr (KV_DTYPE == KV_CACHE_DTYPE_Q8_0) {
+    return q8_0_to_float(cache, index);
   } else {
     const uint8_t* cache_u8 = reinterpret_cast<const uint8_t*>(cache);
     const uint8_t raw = cache_u8[index];
