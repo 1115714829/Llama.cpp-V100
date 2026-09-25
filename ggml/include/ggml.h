@@ -430,7 +430,11 @@ extern "C" {
         GGML_TYPE_NVFP4   = 40, // NVFP4 (4 blocks, E4M3 scale)
         GGML_TYPE_Q1_0    = 41,
         GGML_TYPE_Q2_0    = 42,
-        GGML_TYPE_COUNT   = 43,
+        // R399: 8-bit floats stored one byte per element with an external scale,
+        // matching the FP8 KV caches used by 1cat-vLLM (and by BL1's fp8_e5m2).
+        GGML_TYPE_F8_E4M3 = 43,
+        GGML_TYPE_F8_E5M2 = 44,
+        GGML_TYPE_COUNT   = 45,
     };
 
     // [TAG_GGML_PREC]

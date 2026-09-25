@@ -5067,6 +5067,11 @@ using sm70_long_q8_0_vector_loader =
     decltype(&load_xqa_tc_kv_vector<4, false, flash_v100::KV_CACHE_DTYPE_Q8_0>);
 }  // namespace
 
+// R396/R400: NOT compiled by default. The grouped verify family hard-requires the
+// compensated path, which is asserted to be FP8 E4M3 only, so a q8_0 instantiation
+// cannot build. Route B (adopt the vendor's fp8 KV) supersedes this entry; the block
+// is kept compiled-out as a verified construction for a future q8_0 KV cache.
+#if defined(SM70_LONG_Q8_0_ENTRY)
 // R396: zero-copy q8_0 entry for llama.cpp's flat [d][t][h] KV cache.
 //
 // The page table granularity is ours because the panel loader's unspecialized
@@ -5144,6 +5149,7 @@ extern "C" void sm70_long_decode_q8_0(
           (float *) partial, (float *) lse, (const int *) row_lengths,
           reinterpret_cast<__half*>(out), q_rows, (const int *) row_lengths);
 }
+#endif  // SM70_LONG_Q8_0_ENTRY
 
 extern "C" void sm70_long_decode_f16(
     const void * q, const void * k_cache, const void * v_cache, void * out,
