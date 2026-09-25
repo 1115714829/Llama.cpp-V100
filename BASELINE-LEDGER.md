@@ -984,6 +984,24 @@ grouped-verify 核尾段**无条件**要求 `COMPENSATE_P`（`:2507`/`:3140`）�
 
 **下一步（第 3 步）**：① 放行 `--cache-type-k/v f8_e4m3`（llama.cpp 侧类型校验 + 名称解析）② decode 接线：raw entry 传 `KV_DTYPE=FP8_E4M3` + `COMPENSATE_P=true` + 我方 strides + `k_scale`（R395 规格已定稿）③ 数值实验 2（合成数据 vs CPU 参考）④ 上机 A/B（判据 `[OP]` FA 时间）。
 
+### R402 ★★ 路线 B 第 3 步侦察：**`--cache-type f8_e4m3` 无需改校验**；只剩三处接线（2026-09-26）
+
+**一、类型校验链路（读 `llama-context.cpp:3840-3876`，结论：零改动）**
+- 校验是**通用**的，没有类型白名单：① 仅 MLA/DS4 要求 `type_k == type_v`（不涉及我们）② `ggml_is_quantized(type_v)` ⇒ 强制开 FA ③ `ggml_is_quantized(type_k)` ⇒ 要求 `blck_size` 整除 `n_embd_head_k`。
+- 我方 FP8 类型 `is_quantized = false`（R399 设定）⇒ **②③ 两条门都跳过**（且 `blck_size = 1` 本就整除一切）⇒ **`f8_e4m3` 可直接被接受** ✓
+- 名称解析走 `type_traits[]`（已含 `"f8_e4m3"`）⇒ `--cache-type-k/v f8_e4m3` 能被解析 ✓
+
+**二、剩余三处接线（第 3 步的全部工作）**
+| # | 位置 | 内容 |
+|---|---|---|
+| 1 | `sm70-long/grouped-attention.cu`（`SM70_LONG_RAW` 块） | 新增 `sm70_long_decode_fp8` raw entry：与 R396 的 q8_0 版同构，但 `KV_DTYPE = KV_CACHE_DTYPE_FP8_E4M3`、**`COMPENSATE_P = true`**（此刻合法）、并接收 `k_scale`/`v_scale`；KV 张量描述用 `at::kByte`（1 字节/元素）+ 我方 strides（`262144/1024/256`、页 256 token、恒等页表 1024 项） |
+| 2 | `fattn-sm70-long.cu`（我方适配层） | 放开 K/V 类型检查（现为"neither f16 nor q8_0"），加 fp8 分支；**删掉 `sm70_long_stage_kv` 的 O(kv) 拷贝**（零拷贝直指我方 KV；这是 W1 收益的关键） |
+| 3 | `fattn.cu` 分发 | `K->type == GGML_TYPE_F8_E4M3` 时路由到 `BEST_FATTN_KERNEL_SM70_LONG`（env 门控仍默认关） |
+
+**三、约束复述（防遗忘）**：FP8 KV **必须 E4M3**（核尾段要求 `COMPENSATE_P`，而其断言限定 E4M3）；E5M2 进不去该核。scale 由调用方给（首版 1.0）。
+
+**下一步**：写 1→2→3，然后 `nvcc -DSM70_LONG_RAW` 编译 → 数值实验 2（合成数据 vs CPU 参考）→ 上机 A/B。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
