@@ -269,6 +269,14 @@
 - **教训**：TP 下"每卡本地"假设必须逐层核实 backend/device，不能假设单一设备。
 - **转向**：接用户授权的 `scalar-attention.cu`（1cat decode 长注意力核，P7 正确形态）到 ggml FA 分发 —— 预期收益大于 P-D3'，且是 1cat 已验证的形态。
 
+- **R356 ★★★ 1cat 注意力核接入方案定案 + 256K 新基线（F16 draft）：E4M3 无对应 ⇒ 用核的原生 FP16 路径（我方 f16 K/V 已现成）；256K spec-on 口径 tg 35.18、TTFT 175.2 s、85.7 ms/轮、AL 3.05**（2026-09-25）
+
+- **E4M3 问题（用户问，已查证）**：我方 llama.cpp **无 E4M3 类型**（`ggml.h` 仅 NVFP4 提及 E4M3 scale；KV 支持 f16/q8_0 等）⇒ 按用户指示"找等价替换"：**1cat 核原生支持 `KV_CACHE_DTYPE_FP16`（模板参数 0）**，而我方 `fattn-sm70-d256` launcher **本来就产出 f16 K/V**（native f16 或 dequant 镜像 `f16_extra.K/V`，见 `fattn-sm70-d256.cu:801-803`）⇒ **等价替换 = 直接喂 f16，零解码改写**（比把 q8_0 移植进模板便宜得多）✓。
+- **接入面**：核入口 `private_grouped_e4m3_fp32_paged(q,k,v,out,block_table,row_lengths,partial,lse,scale,k_scale,v_scale)` 需 **(a)** 剥 ATen 壳（裸指针）**(b)** f16 KV 的**分页表**（我方镜像是连续 scratch，需 identity 页表或改用连续路径）**(c)** 接 ggml FA 的 decode 分发。
+- **256K 新基线（F16 draft 对齐后，spec-on，1 rep 有效）**：TTFT **175.2 s** / pp 1348.7 t/s；tg **35.18 t/s**；**85.7 ms/轮**（3599/42）；**AL 3.05**；rep2 = `ERROR no tokens`（服务级偶发，待复测确认）。
+- **⚠️ 新发现（口径纠正）**：**预填充必须按 spec-on 口径比**（BL1 = FP8+DFlash2 spec-on）⇒ 我方 spec-on TTFT **175.2 s vs BL1 152.5 s = 1.15x 劣** ✗（此前 R326 的 151.9 s 是 **spec-off** 口径，不能直接对 BL1）⇒ 预填充线需补 spec-on 口径的收口工作（draft 注入的 prefill 附加成本）。
+- **对比基线更新**：采纳 R349 的 F16 draft 后，256K 采用链 = tg 35.18 / 85.7 ms/轮 / AL 3.05（spec-on）。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
