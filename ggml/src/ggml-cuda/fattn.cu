@@ -496,12 +496,18 @@ enum best_fattn_kernel {
     BEST_FATTN_KERNEL_VEC     = 100,
     BEST_FATTN_KERNEL_MMA_F16 = 400,
     BEST_FATTN_KERNEL_SM70_D256 = 500,
+    BEST_FATTN_KERNEL_SM70_LONG = 501, // vendored 1cat decode attention (R362)
 };
 
 // sm70-attn plugin: SM70 D256 prefill Split-D kernel (fattn-sm70-d256.cu).
 bool ggml_cuda_sm70_d256_supported(int cc, const ggml_tensor * dst);
 size_t ggml_cuda_sm70_d256_alloc_size(const ggml_tensor * dst);
 void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+
+// R362: vendored 1cat decode attention (fattn-sm70-long.cu), env-gated.
+bool ggml_cuda_sm70_long_decode_supported(int cc, const ggml_tensor * dst);
+size_t ggml_cuda_sm70_long_decode_alloc_size(const ggml_tensor * dst);
+void ggml_cuda_sm70_long_decode(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
 
 // K/V types for which there is a vector kernel template instance, other kernels convert these to f16:
 static bool ggml_cuda_fattn_kv_type_supported(const ggml_type type) {
@@ -648,6 +654,9 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     if (volta_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
+        if (ggml_cuda_sm70_long_decode_supported(cc, dst)) {
+            return BEST_FATTN_KERNEL_SM70_LONG;
+        }
         if (ggml_cuda_sm70_d256_supported(cc, dst)) {
             return BEST_FATTN_KERNEL_SM70_D256;
         }
@@ -727,6 +736,7 @@ static void ggml_cuda_fattn_kernel_debug(const best_fattn_kernel kernel, const g
     }
 
     const char * name = kernel == BEST_FATTN_KERNEL_SM70_D256 ? "SM70_D256" :
+                        kernel == BEST_FATTN_KERNEL_SM70_LONG ? "SM70_LONG" :
                         kernel == BEST_FATTN_KERNEL_MMA_F16 ? "MMA_F16" :
                         kernel == BEST_FATTN_KERNEL_TILE    ? "TILE"    :
                         kernel == BEST_FATTN_KERNEL_VEC     ? "VEC"     : "NONE";
@@ -753,6 +763,8 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
     switch (kernel) {
         case BEST_FATTN_KERNEL_SM70_D256:
             return ggml_cuda_sm70_d256_alloc_size(dst);
+        case BEST_FATTN_KERNEL_SM70_LONG:
+            return ggml_cuda_sm70_long_decode_alloc_size(dst);
         case BEST_FATTN_KERNEL_TILE:
         case BEST_FATTN_KERNEL_MMA_F16:
             need_f16_K = true;
@@ -791,6 +803,9 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
             break;
         case BEST_FATTN_KERNEL_SM70_D256:
             ggml_cuda_flash_attn_ext_sm70_d256(ctx, dst);
+            break;
+        case BEST_FATTN_KERNEL_SM70_LONG:
+            ggml_cuda_sm70_long_decode(ctx, dst);
             break;
     }
 }
