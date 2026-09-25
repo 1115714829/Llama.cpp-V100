@@ -1,7 +1,7 @@
 #!/bin/bash
 # rwait.sh <name> [timeout_s] [tail_lines]
 #
-# Blocking wait for a job started with rjob.sh: a 10 s sleep loop until the
+# Blocking wait for a job started with rjob.sh: a 5 s sleep loop until the
 # "JOB_DONE_<name>" terminator shows up in /root/llm/test/<name>.log, then print
 # the terminator line plus the tail. One SSH call, zero polling, zero context.
 #
@@ -17,8 +17,8 @@ MARK="JOB_DONE_$NAME"
 
 waited=0
 while ! grep -q "$MARK" "$LOG" 2>/dev/null; do
-  sleep 10
-  waited=$((waited + 10))
+  sleep 5
+  waited=$((waited + 5))
   if [ "$waited" -ge "$TMO" ]; then
     echo "WAIT_TIMEOUT name=$NAME waited=${waited}s (job may still run: tmux ls)"
     tail -n "$TAILN" "$LOG" 2>/dev/null
