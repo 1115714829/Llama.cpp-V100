@@ -836,6 +836,52 @@ logical_block = token_offset >> 2;   block_offset = token_offset & 3;
 - **资产**：`1cat-vllm-v100-study/p0-scripts/q8_0_codec_test.cu`（可重复执行的验证器）。
 - **下一步（数值实验 2）**：给 `load_xqa_tc_kv_vector` 加一个 dump 型 probe，用小规模合成页表判定 **H1（按 4-token 微块索引）vs H2（按页内 token 数索引）**——这决定页表长度与 `stride(0)` 的取值。通过后再写 raw entry（参考 R392 启动配方 + R393 常量）。
 
+### R395 ★★★★ W1 执行规格**完全确定**（模板表全取得）：H1/H2 问题消失——**页表粒度由我们定**（`PAGE_BLOCK_SIZE=0` ⇒ 运行期 `page_block_size`）（2026-09-26）
+
+**一、H1/H2 之争由代码直接解决（无需实验）**：装载器
+```cpp
+if constexpr (BLOCK_SIZE == 4) {...} else if (BLOCK_SIZE == 16) {...} ... /* 特化分支 */
+else { logical_block = token_offset / block_size;   // ← 运行期 block_size
+       block_offset  = token_offset % block_size; }
+const int physical_block = page_ids[logical_block];
+```
+⇒ **给非特化值（`PAGE_BLOCK_SIZE = 0`）即走 `else`，页表粒度 = 运行期 `page_block_size`（= launcher 传的 `k.size(1)`）** ⇒ 粒度**由我们选**，页表长度 = `ceil(total_kv / granularity)`。`CONTIGUOUS_HKV1_LAYOUT=false` ⇒ 不受 `static_assert` 的 BLOCK_SIZE 集合限制 ✓
+
+**二、grouped verify partial 核的完整模板表（`:2071-2076`）**
+```cpp
+template <int MAX_QUERY_TOKENS, bool TWO_PASS, int PAGE_BLOCK_SIZE = 0,
+          bool SINGLE_QUERY = false, bool CONTIGUOUS_HKV1_LAYOUT = false,
+          bool STAGE_PARTITION_PAGE_IDS = false,
+          int KV_DTYPE = KV_CACHE_DTYPE_FP8_E5M2,
+          bool SPARSE_PAGE4 = false, typename PARTIAL_T = __half,
+          bool ROW_SEQLENS = false, bool COMPENSATE_P = false, bool PAIR_E4M3 = false>
+```
+**★ 硬约束**：`COMPENSATE_P`（他们的 compensated-P 精度特性）被 `static_assert` **限定为 FP8 E4M3** ⇒ Q8_0 必须 `COMPENSATE_P=false`（**这是 Q8_0 相对 E4M3 的精度让步，需在数值验证时留意**）。
+
+**三、我方 Q8_0 实例化（定稿）**
+```cpp
+flash_attention_grouped_verify_e5m2_partial_kernel<
+    8,      // MAX_QUERY_TOKENS = 8（verify）
+    false,  // TWO_PASS
+    0,      // PAGE_BLOCK_SIZE = 0 ⇒ 运行期粒度
+    false,  // SINGLE_QUERY
+    false,  // CONTIGUOUS_HKV1_LAYOUT
+    false,  // STAGE_PARTITION_PAGE_IDS
+    flash_v100::KV_CACHE_DTYPE_Q8_0,
+    false,  // SPARSE_PAGE4
+    float,  // PARTIAL_T
+    true,   // ROW_SEQLENS
+    false,  // ★ COMPENSATE_P = false（E4M3 专用）
+    paired> // PAIR_E4M3 ← 按 strides 的 16 对齐二选一，两者都实例化
+```
+**运行期参数**：`page_block_size = 256`（我方粒度）、`block_table[1][1024]` 恒等 0..1023（int32）、`row_lengths[1] = kv 长度`、strides（虚拟 256 元素行单位）= `block/token/head = 262144 / 1024 / 256`、grid `dim3(1, 80)`、threads 512、smem `sizeof(GroupedVerifySmem) + 48*32*2 + 32*264*2`；combine 核 `<8,false,float,true>` grid `dim3(q_rows,6)`。
+**地址自证**：`physical_offset = (t/256)*262144 + (t%256)*1024 + h*256 + d = t*1024 + h*256 + d = row*256 + d`，`row = t*4+h` = 我方 `[d][t][h]` 物理行序 ✓（与 R390 的 codec 契约逐字一致）
+
+**四、剩余活单（下轮一次写完）**
+1. 写 `sm70_long_decode_q8_0` raw entry（`#if defined(SM70_LONG_RAW)` 块内）：建 at::Tensor 描述（q/k/v/out/partial/lse/block_table/row_lengths）→ 选 kernel → set smem attr ×2 → launch → combine。
+2. 删 `fattn-sm70-long.cu` 的 `sm70_long_stage_q/kv/out`（**零拷贝**）。
+3. `nvcc -DSM70_LONG_RAW` 编译 → 数值实验 2（小规模合成页表跑 partial 核 vs CPU 参考）→ sanitizer → 门值 → `[OP]` FA A/B。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
