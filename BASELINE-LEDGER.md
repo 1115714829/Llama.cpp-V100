@@ -882,6 +882,34 @@ flash_attention_grouped_verify_e5m2_partial_kernel<
 2. 删 `fattn-sm70-long.cu` 的 `sm70_long_stage_q/kv/out`（**零拷贝**）。
 3. `nvcc -DSM70_LONG_RAW` 编译 → 数值实验 2（小规模合成页表跑 partial 核 vs CPU 参考）→ sanitizer → 门值 → `[OP]` FA A/B。
 
+### R397 ★★★★ W1 战略转折（证据驱动）：**1cat grouped-verify 族与 E4M3 咬死** ⇒ 正解是"抄他们的 KV 格式"（加 FP8 KV），不是"把 q8_0 塞进他们的核"（2026-09-26）
+
+**证据（全文件只有 4 处 dtype 硬约束，两两咬合）**
+| 行 | 断言 | 含义 |
+|---|---|---|
+| 837 | `KV_DTYPE ∈ {E4M3, E5M2}` | 向量装载器（**R390 已加 Q8_0 分支绕过** ✓） |
+| **870** | 同款，在 **`load_xqa_tc_kv_panel`** | grouped-verify 核真正调用的装载器 ⇒ 仍拦 Q8_0 |
+| **2507** | `static_assert(COMPENSATE_P && warps==16, "PV reuse is isolated to six-head compensated E4M3")` | partial 核**无条件段** |
+| **3140** | 同款 | full_q8 核 |
+配合 `:2092` 的反向断言（`COMPENSATE_P ⇒ KV_DTYPE==E4M3`）⇒ **两核都要求 `COMPENSATE_P=true` ⇒ 都要求 E4M3**。
+
+**编译实证**：Q8_0 实例化（`COMPENSATE_P=false`）在 `:2507` 与 `:3140` 触发断言（两个 `paired` 分支都触发 ⇒ 该段**不在 `if constexpr(COMPENSATE_P)` 内**，无条件执行）；此前 5 处仅是**指针类型不匹配**（已修），说明**模板本身接受 Q8_0，是那段代码路径不接受**。
+
+**两条路的诚实对比**
+| | (A) 把 q8_0 塞进他们的核 | **(B) 抄他们的 KV 格式（加 FP8 KV）** |
+|---|---|---|
+| 要做的 | ① panel 装载器加 Q8_0 分支 + 放宽 870 ② **在 2507/3140 处凭空写出"非 compensated PV"尾段路径**（发明代码，非抄） | ① llama.cpp 加 FP8（E4M3/E5M2）KV 类型（含量化/写路径/`--cache-type` 管线）② **抄** 1cat 的 KV 写与读（其 `sm70_79t/prefill.cu` 与 decode 核**原生支持** E4M3/E5M2，`fp8_kv_utils.cuh` 已在手）③ 预填充 79T 的 KV 读同步换（env 门控 + 门值重过） |
+| 性质 | **发明**（在别人的优化核里写新路径） | **抄**（整条格式与核一起搬） |
+| 风险 | 高（精度机制被绕过，后果未知） | 中（面更广，但每步都是抄现成） |
+| 与 BL1 口径 | 我们独有 q8_0 KV | **与 BL1 一致（fp8_e5m2）** ⇒ 同口径更硬 |
+| 连带收益 | — | KV 流量 8.6 GB/卡（比 q8_0 的 9.1 更小）⇒ 地板 11.5 ms |
+
+**⇒ 采用 (B)**（符合 §1.6④"能抄就抄"、不发明不将就）：**给 llama.cpp 加 FP8 KV，然后 1cat 的核零改动即用**（`COMPENSATE_P=true` 的 compensated 精度也一并拿到）。R387/R390 已完成的 q8_0 codec/loader 分支**保留为已证资产**（若将来还要 q8_0 KV 可用），但不再是 W1 的主路径。
+
+**代价与纪律**：新增 ggml 类型属"公共组件"改动 ⇒ 必须 ① 默认行为不变（env/类型门控，默认仍 q8_0）② 预填充门值重过（spec-off 151.7 s、门 `bcda0092…`）③ 验收标准不变（Q8_0 权重、4×V100、256K）。
+
+**下轮**：① 摸清 1cat 的 FP8 KV **量化/写路径**（`cache_kernels*.cu` 里的 fp8 量化 + `nvfp4_kv_cache_kernels.cu` 参考）② 评估 ggml 新增 FP8 KV 类型的最小面 ③ 再决定"新类型"还是"借用现有 8-bit 类型位"。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
