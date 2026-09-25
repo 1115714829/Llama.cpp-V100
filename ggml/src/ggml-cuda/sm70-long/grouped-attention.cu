@@ -5015,4 +5015,53 @@ TORCH_LIBRARY_FRAGMENT(_vllm_fa2_C, ops) {
 TORCH_LIBRARY_IMPL(_vllm_fa2_C, CUDA, ops) {
   ops.impl("sm70_grouped_long_fwd", &sm70_grouped_long_entry);
 }
+#else
+// ---------------------------------------------------------------------------
+// ggml-cuda raw entry (R360): called by llama.cpp's FA dispatch for decode.
+// Q is [n_q, 6, 256] f16 for one KV head; K/V are the f16 mirror presented as a
+// paged cache (page_size tokens per page, identity block table); the scratch
+// shapes follow 1cat's caller (partial [parts, n_q, 6, 256] f16, lse
+// [parts, n_q, 6] f32, online_rescales [n_q, 6, parts] f32).
+// ---------------------------------------------------------------------------
+extern "C" void sm70_long_decode_f16(
+    const void * q, const void * k_cache, const void * v_cache, void * out,
+    const void * block_table, const void * seq_lens,
+    void * partial, void * max_logits, void * exp_sums, void * online_rescales,
+    const void * active_num_partitions,
+    int n_q, int n_kv_heads, int page_size, int n_pages, int n_parts,
+    int n_q_heads_per_kv, float softmax_scale, cudaStream_t stream) {
+  const int n_q_heads = n_kv_heads * n_q_heads_per_kv;
+  const int n_q_pad = n_q < 2 ? 2 : n_q;   // the staged kernels assume q >= 2
+
+  const std::vector<int64_t> q_sz   = {n_q_pad, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> q_st   = {n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> kv_sz  = {n_pages, page_size, n_kv_heads, 256};
+  const std::vector<int64_t> kv_st  = {(int64_t) page_size * 256, 256, (int64_t) page_size * n_pages, 1};
+  const std::vector<int64_t> o_sz   = q_sz;
+  const std::vector<int64_t> o_st   = q_st;
+  const std::vector<int64_t> po_sz  = {n_parts, n_q_pad, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> po_st  = {n_q_pad * n_q_heads_per_kv * 256, n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> pl_sz  = {n_parts, n_q_pad, n_q_heads_per_kv};
+  const std::vector<int64_t> pl_st  = {n_q_pad * n_q_heads_per_kv, n_q_heads_per_kv, 1};
+  const std::vector<int64_t> or_sz  = {n_q_pad, n_q_heads_per_kv, n_parts};
+  const std::vector<int64_t> or_st  = {n_q_heads_per_kv * n_parts, n_parts, 1};
+
+  at::Tensor tq((void *) q,           at::kHalf,  q_sz,  q_st,  0);
+  at::Tensor tk((void *) k_cache,     at::kHalf,  kv_sz, kv_st, 0);
+  at::Tensor tv((void *) v_cache,     at::kHalf,  kv_sz, kv_st, 0);
+  at::Tensor to((void *) out,         at::kHalf,  o_sz,  o_st,  0);
+  at::Tensor tp((void *) partial,     at::kHalf,  po_sz, po_st, 0);
+  at::Tensor tml((void *) max_logits, at::kFloat, pl_sz, pl_st, 0);
+  at::Tensor tes((void *) exp_sums,   at::kFloat, pl_sz, pl_st, 0);
+  at::Tensor tor((void *) online_rescales, at::kFloat, or_sz, or_st, 0);
+  at::Tensor tbt((void *) block_table,     at::kInt, {1, n_pages}, {(int64_t) n_pages, 1}, 0);
+  at::Tensor tsl((void *) seq_lens,        at::kInt, {1, 1}, {1, 1}, 0);
+  at::Tensor tan((void *) active_num_partitions, at::kInt, {1}, {1}, 0);
+
+  (void) tk; (void) tv; (void) tsl;
+  launch_flash_attention_decode_paged_xqa_tc_256_staged(
+      tq, tk, tv, to, tbt, tsl, tp, tml, tes, tor, tan,
+      softmax_scale, n_parts, /*use_split_reduce=*/true, /*split_reduce_dim_tile=*/256,
+      stream);
+}
 #endif
