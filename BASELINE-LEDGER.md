@@ -773,6 +773,38 @@ flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
 
 **数据背书**：`benchmark_sm70_dflash2_grouped_verify.py`、`test_sm70_flash_v100_dflash2_swa.py` 是这一族的微基准/测试，可作正确性对照。
 
+### R392 ★★★ W1 执行规格完备：**不需要新页步长常量**（`PAGE=0` = 运行期 strides）；Q8_0 raw entry 的完整启动配方已确定（2026-09-26）
+
+**关键简化**：真实实例化里第一个部分核的**第 3 模板参数取 `0`**，而 `1648`/`3296` 只是为 1cat 自家 paged 布局做的特化（`page_size` = 3296 token ⇒ 256K/3296 ≈ 80 页 ⇒ 与 `dim3(1, 80)` 的 80 对上）。⇒ **我方扁平 q8_0 布局直接用 `PAGE=0` + 我方运行期 strides 即可，无需新常量** ✓
+
+**启动配方（照抄 `private_grouped_e4m3_fp32_paged` 的 :4985-5011，只换 dtype/stride 描述）**
+```cpp
+constexpr int kGroupedVerifyThreads = <见 :1820 附近>;
+constexpr int kCompensatedSmemBytes =
+    sizeof(GroupedVerifySmem) +
+    kGroupedVerifyRows * kGroupedVerifyProbStride * sizeof(__half) +
+    kGroupedVerifyBlockN  * kGroupedVerifyKVStride   * sizeof(__half);
+cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kCompensatedSmemBytes);
+cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+kernel<<<dim3(1, 80), kGroupedVerifyThreads, kCompensatedSmemBytes, stream>>>(
+    q_half, k_ptr, v_ptr, block_table_int, row_lengths_int,
+    partial_f32, lse_f32,
+    q_rows,                      // q.size(0) = 8（verify）
+    block_table.size(1),         // max_num_blocks = n_pages
+    k.size(1),                   // ★ 我方传 256（页内 token 数）⇒ 不命中 1648/3296 ⇒ 走 PAGE=0 运行期变体
+    k.s0, k.s1, k.s2,            // ★ 262144 / 1024 / 256（虚拟元素单位）
+    v.s0, v.s1, v.s2,
+    scale * k_scale, v_scale, nullptr, 1, row_lengths_int);
+flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
+    <<<dim3(q_rows, 6), kGroupedVerifyThreads, 0, stream>>>(
+        partial_f32, lse_f32, row_lengths_int, out_half, q_rows, row_lengths_int);
+```
+- **Q8_0 实例化**：`..._e5m2_partial_kernel<8, false, 0, false, false, false, KV_CACHE_DTYPE_Q8_0, false, float, true, true, {true|false}>`，q==8 时用 `..._e4m3_full_q8_kernel<同上>`；`paired` 由 strides 的 16 对齐决定，两者都实例化最稳。
+- **我方 strides 的推导**（已在 R387/R390 论证）：虚拟行 = 一个 (token, kv head) 的 256 元素；`token_stride = 4 头 × 256 = 1024`、`head_stride = 256` ⇒ `physical_offset = t*1024 + h*256 + d = row*256 + d`，`row = t*4 + h` 正是我方 `[d][t][h]` 缓存的物理行序；页取 256 token ⇒ `page_stride = 256*1024 = 262144`。
+- **恒等页表**：`block_table[1][1024]` = 0..1023（int32），`row_lengths[1]` = kv 长度；`partial[80,8,6,256] f16`、`lse[80,8,6] f32`、`online_rescales` 不再需要（改用 partial/lse 组合路径）。
+- **删除**：`fattn-sm70-long.cu` 的 `sm70_long_stage_kv`/`sm70_long_stage_q`/`sm70_long_scatter_out` 与 O(kv) 拷贝（零拷贝直指我方 KV）。
+- **下一步**：写入 `sm70_long_decode_q8_0` raw entry（放在 `#if defined(SM70_LONG_RAW)` 块）⇒ `nvcc -DSM70_LONG_RAW` 编译 ⇒ 若 `PAGE=0` 与运行期 strides 不兼容（断言/错值），再按 R391 的退路给核加"任意页步长"实例 ⇒ sanitizer ⇒ 门值 ⇒ `[OP]` FA A/B。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
