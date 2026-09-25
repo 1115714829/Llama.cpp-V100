@@ -970,6 +970,20 @@ grouped-verify 核尾段**无条件**要求 `COMPENSATE_P`（`:2507`/`:3140`）�
 2. 默认**不启用**（只有显式 `--cache-type-k/v f8_e4m3` 才走到）⇒ 门值/预填充零回归。
 3. 然后第 3 步 decode 接线（`KV_DTYPE=FP8_E4M3` + `COMPENSATE_P=true` + 我方 strides）。
 
+### R401 ★★★ 路线 B 第 2 步完成：**FP8 KV 写路径已入 `set_rows`**（行为中立，门值全等）（2026-09-26）
+
+**实现（零改动复用基核的巧法）**
+- 新增 `struct fp8_e4m3_t { uint8_t v; fp8_e4m3_t(float x) : v(__nv_cvt_float_to_fp8(x, __NV_SATFINITE, __NV_E4M3)) {} }`（`set-rows.cu`）。
+  ⇒ 基核 `k_set_rows<src_t,idx_t,dst_t>` 的元素步长来自 `sizeof(dst_t)` 与写入语句 `dst_row_ptr[i00] = ggml_cuda_cast<dst_t>(src0_row[i00])` ⇒ **1 字节结构 + float 转换构造即可直接实例化，4D 索引逻辑零改动** ✓
+- `set_rows_cuda<float,int32_t>`（张量级特化）新增 `else if (dst->type == GGML_TYPE_F8_E4M3)` 分支，调用形式**照抄同函数既有分支**（靠模板推导，不写显式实参）。
+- 踩坑记录：① `__nv_cvt_float_to_fp8` 返回 `__nv_fp8_storage_t`（= `unsigned char` 别名）**没有 `.__x`**；② 构造函数**必须非 explicit**（`convert.cuh:64` 的 `ggml_cuda_cast` 走隐式转换）；③ 显式模板实参反而导致 "no instance matches" ⇒ 用推导。
+
+**验证**：`MANIFEST_DIFFS=0`、`BUILD_RC=0`、`ERROR_LINES=0`；`libggml-cuda.so` = `2cf1588a0027b5f2380da2b7e378b059`；**门值两臂 `bcda0092…` 逐位一致** ⇒ 行为中立（尚无 cache type 会选到 f8_e4m3）。
+
+**scale 现状**：写路径只做 `f32 → E4M3`（饱和 RN），**scale 由调用方给**——与 1cat 的 `CopyWithScaleOp`（外部标定 scale）契约一致，首版取 1.0。
+
+**下一步（第 3 步）**：① 放行 `--cache-type-k/v f8_e4m3`（llama.cpp 侧类型校验 + 名称解析）② decode 接线：raw entry 传 `KV_DTYPE=FP8_E4M3` + `COMPENSATE_P=true` + 我方 strides + `k_scale`（R395 规格已定稿）③ 数值实验 2（合成数据 vs CPU 参考）④ 上机 A/B（判据 `[OP]` FA 时间）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
