@@ -5067,6 +5067,84 @@ using sm70_long_q8_0_vector_loader =
     decltype(&load_xqa_tc_kv_vector<4, false, flash_v100::KV_CACHE_DTYPE_Q8_0>);
 }  // namespace
 
+// R396: zero-copy q8_0 entry for llama.cpp's flat [d][t][h] KV cache.
+//
+// The page table granularity is ours because the panel loader's unspecialized
+// branch divides by the runtime block size: page_tokens tokens per page, and the
+// strides are expressed in virtual 256-element rows so that the loader's
+// physical_offset reduces to row*256+d with row = t*n_kv_heads + h, which is the
+// row order of the flat cache. Nothing is copied.
+//
+// grid = (n_kv_heads head groups, 80 splits); each CTA covers kGroupedVerifyRows
+// rows = 8 query tokens x 6 heads, i.e. one KV head's query group.
+extern "C" void sm70_long_decode_q8_0(
+    const void * q, const void * k_cache, const void * v_cache, void * out,
+    const void * block_table, const void * row_lengths,
+    void * partial, void * lse,
+    int q_rows, int n_kv_heads, int n_q_heads_per_kv,
+    int page_tokens, int n_pages, float softmax_scale, cudaStream_t stream) {
+  constexpr int kSplits = 80;
+  constexpr int kMaxQ   = 8;
+  const int  n_q_pad = q_rows < 2 ? 2 : q_rows;
+  const bool paired  = true;  // our q8_0 rows are 272 bytes = 16 mod 8, and bases are 256-byte aligned
+
+  const int64_t token_stride = (int64_t) n_kv_heads * 256;          // 1024 for 4 KV heads
+  const int64_t block_stride = (int64_t) page_tokens * token_stride; // 262144 for 256-token pages
+  const int64_t head_stride  = 256;
+
+  const std::vector<int64_t> q_sz  = {n_q_pad, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> q_st  = {n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> kv_sz = {n_pages, page_tokens, n_kv_heads, 256};
+  const std::vector<int64_t> kv_st = {block_stride, token_stride, head_stride, 1};
+  const std::vector<int64_t> po_sz = {kSplits, kMaxQ, n_q_heads_per_kv, 256};
+  const std::vector<int64_t> po_st = {kMaxQ * n_q_heads_per_kv * 256, n_q_heads_per_kv * 256, 256, 1};
+  const std::vector<int64_t> pl_sz = {kSplits, kMaxQ, n_q_heads_per_kv};
+  const std::vector<int64_t> pl_st = {kMaxQ * n_q_heads_per_kv, n_q_heads_per_kv, 1};
+
+  at::Tensor tq((void *) q,           at::kHalf,  q_sz,  q_st,  0);
+  at::Tensor tk((void *) k_cache,     at::kByte,  kv_sz, kv_st, 0);
+  at::Tensor tv((void *) v_cache,     at::kByte,  kv_sz, kv_st, 0);
+  at::Tensor to((void *) out,         at::kHalf,  q_sz,  q_st,  0);
+  at::Tensor tp((void *) partial,     at::kFloat, po_sz, po_st, 0);
+  at::Tensor tl((void *) lse,         at::kFloat, pl_sz, pl_st, 0);
+  at::Tensor tbt((void *) block_table, at::kInt,  {n_q_pad, n_pages}, {(int64_t) n_pages, 1}, 0);
+  at::Tensor trl((void *) row_lengths, at::kInt,  {n_q_pad, 1}, {1, 1}, 0);
+
+  auto kernel = paired
+      ? flash_attention_grouped_verify_e5m2_partial_kernel<
+            8, false, 0, false, false, false, flash_v100::KV_CACHE_DTYPE_Q8_0,
+            false, float, true, false, true>
+      : flash_attention_grouped_verify_e5m2_partial_kernel<
+            8, false, 0, false, false, false, flash_v100::KV_CACHE_DTYPE_Q8_0,
+            false, float, true, false, false>;
+  (void) tk; (void) tv;
+
+  constexpr int kCompensatedSmemBytes =
+      sizeof(GroupedVerifySmem) +
+      kGroupedVerifyRows * kGroupedVerifyProbStride * sizeof(__half) +
+      kGroupedVerifyBlockN * kGroupedVerifyKVStride * sizeof(__half);
+  static_assert(kCompensatedSmemBytes <= 96 * 1024,
+                "compensated P and prefetched V must fit the SM70 budget");
+  (void) cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                              kCompensatedSmemBytes);
+  (void) cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+
+  kernel<<<dim3(n_kv_heads, kSplits), kGroupedVerifyThreads, kCompensatedSmemBytes, stream>>>(
+      reinterpret_cast<const __half*>(q), k_cache, v_cache,
+      (const int *) block_table, (const int *) row_lengths,
+      (float *) partial, (float *) lse,
+      q_rows, n_pages, page_tokens,
+      block_stride, token_stride, head_stride,
+      block_stride, token_stride, head_stride,
+      softmax_scale, 1.0f, nullptr, 1, (const int *) row_lengths);
+  (void) to; (void) tp; (void) tl; (void) tbt; (void) trl;
+
+  flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
+      <<<dim3(q_rows, n_q_heads_per_kv), kGroupedVerifyThreads, 0, stream>>>(
+          (float *) partial, (float *) lse, (const int *) row_lengths,
+          reinterpret_cast<__half*>(out), q_rows, (const int *) row_lengths);
+}
+
 extern "C" void sm70_long_decode_f16(
     const void * q, const void * k_cache, const void * v_cache, void * out,
     const void * block_table, const void * seq_lens,
