@@ -13,7 +13,10 @@ extern "C" int ggml_cuda_copy2d(void * dst, size_t dst_pitch,
     return (int) err;
 }
 
-extern "C" void * ggml_cuda_alloc_bytes(size_t bytes) {
+extern "C" void * ggml_cuda_alloc_bytes(size_t bytes, int device) {
+    if (device >= 0) {
+        cudaSetDevice(device);
+    }
     void * p = nullptr;
     if (cudaMalloc(&p, bytes) != cudaSuccess) {
         return nullptr;
@@ -21,10 +24,14 @@ extern "C" void * ggml_cuda_alloc_bytes(size_t bytes) {
     return p;
 }
 
-extern "C" void ggml_cuda_free_bytes(void * p) {
-    if (p != nullptr) {
-        cudaFree(p);
+extern "C" void ggml_cuda_free_bytes(void * p, int device) {
+    if (p == nullptr) {
+        return;
     }
+    if (device >= 0) {
+        cudaSetDevice(device);
+    }
+    cudaFree(p);
 }
 
 extern "C" int ggml_cuda_stream_sync() {

@@ -25,8 +25,8 @@
 // R350: device-side feature path (LLAMA_SPEC_DEVFEAT=1): 2D D2D interleave into the
 // injection buffer, no host memcpy, no llama_synchronize.
 extern "C" int  ggml_cuda_copy2d(void * dst, size_t dst_pitch, const void * src, size_t src_pitch, size_t width_bytes, size_t rows);
-extern "C" void * ggml_cuda_alloc_bytes(size_t bytes);
-extern "C" void ggml_cuda_free_bytes(void * p);
+extern "C" void * ggml_cuda_alloc_bytes(size_t bytes, int device);
+extern "C" void ggml_cuda_free_bytes(void * p, int device);
 
 #define SPC_DBG(fmt, ...) LOG_DBG("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
 #define SPC_TRC(fmt, ...) LOG_TRC("spec %12.*s: " fmt, 12, __func__, __VA_ARGS__)
@@ -1516,7 +1516,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 static const bool devfeat = getenv("LLAMA_SPEC_DEVFEAT") != nullptr && atoi(getenv("LLAMA_SPEC_DEVFEAT")) != 0;
                 static void * dev_inj_buf = nullptr;
                 if (devfeat && dev_inj_buf == nullptr) {
-                    dev_inj_buf = ggml_cuda_alloc_bytes((size_t) llama_n_ubatch(ctx_dft) * (size_t) n_embd_enc * sizeof(float));
+                    // NOTE: under tensor parallelism the extract tensors are spread over
+                    // several devices, so a single device buffer is not sufficient; the
+                    // device path is experimental and off by default (see ledger R355).
+                    dev_inj_buf = ggml_cuda_alloc_bytes((size_t) llama_n_ubatch(ctx_dft) * (size_t) n_embd_enc * sizeof(float), 0);
                 }
                 const int64_t ph_sync_t0 = inj_enabled ? ggml_time_us() : 0;
                 if (!devfeat) {

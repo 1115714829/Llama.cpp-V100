@@ -774,7 +774,11 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
             udata->token[i] = batch.token[idxs[i]];
         }
 
-        if (batch.embd) {
+        // R354: LLAMA_SPEC_DEVFEAT=1 passes a device embd pointer straight through:
+        // the DFlash injection fills an interleaved device buffer and the rows are in
+        // order, so the host gather memcpy is skipped entirely.
+        static const bool devfeat = getenv("LLAMA_SPEC_DEVFEAT") != nullptr && atoi(getenv("LLAMA_SPEC_DEVFEAT")) != 0;
+        if (batch.embd && !devfeat) {
             memcpy(udata->embd.data() + i*n_embd, batch.embd + (int64_t) idxs[i]*n_embd, n_embd*sizeof(float));
         }
 
@@ -824,7 +828,7 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
         /*.n_pos        =*/ n_pos_per_embd,
 
         /*.token        =*/ batch.token ? udata->token.data() : nullptr,
-        /*.embd         =*/ batch.embd ? udata->embd.data() : nullptr,
+        /*.embd         =*/ batch.embd ? ((getenv("LLAMA_SPEC_DEVFEAT") != nullptr && atoi(getenv("LLAMA_SPEC_DEVFEAT")) != 0) ? batch.embd : udata->embd.data()) : nullptr,
         /*.pos          =*/ udata->pos.data(),
         /*.n_seq_id     =*/ udata->n_seq_id.data(),
         /*.seq_id       =*/ udata->seq_id.data(),
