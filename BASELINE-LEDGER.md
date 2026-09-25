@@ -262,6 +262,13 @@
 - **修法（下一轮）**：`ggml_cuda_alloc_bytes(bytes, device)`/`free_bytes(p, device)` 加 `cudaSetDevice`；或用 backend buffer API（`ggml_backend_buft_alloc_buffer`）避开裸 cudaMalloc；或回退 host 路径（净收益 0）。
 - **⚠️ 多卡教训**：任何裸 CUDA API（cudaMalloc/cudaFree/cudaMemcpy2DAsync）在 TP 多卡下**必须显式 `cudaSetDevice`**，否则 alloc/free/copy 落到不同 device ⇒ 崩（本次 device 3 vs 其他）。
 
+- **R355 ★★★ P-D3' 判定：架构性阻塞（TP4 下 extract 张量分散在多卡）⇒ 设备特征路径 env 默认关、入灰；转投用户授权的 `scalar-attention.cu` 集成**（2026-09-25）
+
+- **阻塞根因（架构级，非 bug）**：`extract_layer_inputs` 的 `t = res->get_layer_inp(il)` 逐层可能落在**不同 device**（`ggml_backend_sched_get_tensor_backend(sched, t)` 逐层不同）；而 batch 的 embd 在 llama.cpp 里是 **host 缓冲、各 device 各自取自己的分片** ⇒ 单个设备缓冲不足以承载交错后的全行数据，正确实现需要**每卡 embd 分片**（复刻 split-input 逻辑）⇒ 工程量远大于 ~10 ms/轮收益。
+- **处置**：设备路径（`LLAMA_SPEC_DEVFEAT`）**默认关** ✓（生产零影响）；相关代码保留为实验资产（`ggml-cuda-d2d.cu` + llama-batch/llama-context 的 env 分支），本轮已把 build 修绿（`llama_get_device` 不存在 ⇒ 改传 0 并注释架构限制）。
+- **教训**：TP 下"每卡本地"假设必须逐层核实 backend/device，不能假设单一设备。
+- **转向**：接用户授权的 `scalar-attention.cu`（1cat decode 长注意力核，P7 正确形态）到 ggml FA 分发 —— 预期收益大于 P-D3'，且是 1cat 已验证的形态。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
