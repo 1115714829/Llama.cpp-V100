@@ -139,6 +139,20 @@ if (CUDAToolkit_FOUND)
         target_link_libraries(ggml-cuda PRIVATE $<TARGET_OBJECTS:ggml-cuda-fattn79t>)
     endif()
 
+    # 1cat sm70 grouped long attention (vendored, BSD-3-Clause). Optional isolated
+    # OBJECT target: 5k lines of heavy templates build only when requested.
+    if (GGML_CUDA_SM70_LONG AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sm70-long/grouped-attention.cu")
+        add_library(ggml-cuda-sm70long OBJECT "${CMAKE_CURRENT_SOURCE_DIR}/sm70-long/grouped-attention.cu")
+        target_include_directories(ggml-cuda-sm70long PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/sm70-long"
+            "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_compile_definitions(ggml-cuda-sm70long PRIVATE SM70_LONG_RAW)
+        target_compile_options(ggml-cuda-sm70long PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:--std=c++17;-O3;--use_fast_math;--expt-relaxed-constexpr;--expt-extended-lambda>)
+        set_target_properties(ggml-cuda-sm70long PROPERTIES CUDA_ARCHITECTURES "70")
+        target_link_libraries(ggml-cuda PRIVATE $<TARGET_OBJECTS:ggml-cuda-sm70long>)
+    endif()
+
     if (GGML_CUDA_GRAPHS)
         add_compile_definitions(GGML_CUDA_USE_GRAPHS)
     endif()
