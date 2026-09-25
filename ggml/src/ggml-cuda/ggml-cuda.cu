@@ -4668,9 +4668,14 @@ struct ggml_cuda_op_timing {
     std::vector<int64_t> graphs;
     std::vector<int64_t> nodes;
     bool    ev_bad = false; // set when the driver rejects the event query
+    int     skip_graphs = 0; // skip the first N graph computes (prefill) before accumulating
 
     ggml_cuda_op_timing() {
         enabled = getenv("GGML_CUDA_OP_TIMING") != nullptr;
+        const char * skip = getenv("GGML_CUDA_OP_TIMING_SKIP");
+        if (skip != nullptr) {
+            skip_graphs = atoi(skip);
+        }
     }
 
     void ensure(int device, size_t n) {
@@ -4734,6 +4739,14 @@ struct ggml_cuda_op_timing {
             fprintf(stderr, "[OP] %-22s calls=%-7lld total=%9.3f ms %5.1f%% avg=%7.3f ms\n",
                     ggml_op_name((ggml_op) i), (long long) calls_sum[i], ms_sum[i],
                     100.0 * ms_sum[i] / total, ms_sum[i] / calls_sum[i]);
+        }
+        // Reset so the next report is an incremental window (lets a run separate
+        // prefill from decode instead of one lifetime total).
+        for (size_t d = 0; d < ms.size(); d++) {
+            std::fill(ms[d].begin(), ms[d].end(), 0.0);
+            std::fill(calls[d].begin(), calls[d].end(), (int64_t) 0);
+            graphs[d] = 0;
+            nodes[d]  = 0;
         }
     }
 
@@ -4858,6 +4871,10 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                     CUDA_CHECK(cudaEventRecord(opt.ev_stop[cuda_ctx->device][i - 1], cuda_ctx->stream()));
                 }
                 ggml_tensor * node = cgraph->nodes[i];
+                // Nodes between a multi-stream fork and its join record events on the
+                // main stream while their kernels run elsewhere: their elapsed time is
+                // not meaningful, so those slots stay unflagged and are skipped on read.
+                const bool node_in_cstream = is_concurrent_event_active;
                 if (opt_on) {
                     CUDA_CHECK(cudaEventRecord(opt.ev_start[cuda_ctx->device][i], cuda_ctx->stream()));
                 }
@@ -4933,7 +4950,9 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                 bool ok = ggml_cuda_compute_forward(*cuda_ctx, node);
                 if (opt_on) {
                     CUDA_CHECK(cudaEventRecord(opt.ev_stop[cuda_ctx->device][i], cuda_ctx->stream()));
-                    opt.rec_flag[cuda_ctx->device][i] = 1;
+                    if (!node_in_cstream) {
+                        opt.rec_flag[cuda_ctx->device][i] = 1;
+                    }
                     opt.n_rec[cuda_ctx->device] = i + 1; // only recorded nodes may be elapsed-time queried
                 }
                 if (!ok) {
@@ -5122,11 +5141,14 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     ggml_cuda_op_timing & opt = ggml_cuda_op_timing_get();
     const int dev = cuda_ctx->device;
     if (opt.enabled && !use_cuda_graph && (size_t) dev < opt.n_rec.size() && !ggml_cuda_stream_is_capturing(cuda_ctx->stream())) {
-        CUDA_CHECK(cudaDeviceSynchronize());
+        // Per-thread stream sync: cudaDeviceSynchronize is process-global and TP
+        // threads racing on it interleave timestamps (source of the garbage values).
+        CUDA_CHECK(cudaStreamSynchronize(cuda_ctx->stream()));
         const int n_rec = (int) opt.n_rec[dev];
+        const bool skip = opt.graphs[dev] < opt.skip_graphs;
         for (int i = 0; i < n_rec; i++) {
             if (!opt.rec_flag[dev][i]) {
-                continue; // node skipped by fusion: no event pair recorded
+                continue; // node skipped by fusion or run on a forked stream: no usable event pair
             }
             float t_ms = 0.0f;
             const cudaError_t ev_err = cudaEventElapsedTime(&t_ms, opt.ev_start[dev][i], opt.ev_stop[dev][i]);
@@ -5137,16 +5159,20 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
                 break;
             }
             const int op = (int) cgraph->nodes[i]->op;
-            if (op >= 0 && op < GGML_OP_COUNT) {
+            if (!skip && op >= 0 && op < GGML_OP_COUNT) {
                 opt.ms[dev][op] += t_ms;
                 opt.calls[dev][op]++;
             }
         }
         opt.graphs[dev]++;
         opt.nodes[dev] += cgraph->n_nodes;
-        if (opt.graphs[dev] % 256 == 0) {
+        if (!skip && (opt.graphs[dev] - opt.skip_graphs) % 256 == 0) {
             opt.report();
         }
+        // The event pool is reused across graph computes. Clear the recorded flags
+        // so the next pass cannot query timestamps from an earlier pass (a stale
+        // pair yields a negative elapsed time).
+        std::fill(opt.rec_flag[dev].begin(), opt.rec_flag[dev].end(), (uint8_t) 0);
     }
 
     return GGML_STATUS_SUCCESS;
@@ -5426,7 +5452,9 @@ static void ggml_backend_cuda_graph_optimize(ggml_backend_t backend, ggml_cgraph
                 }
             }
 
-            if (join_node) {
+            // GGML_CUDA_NO_CONCURRENT=1 disables the branch-concurrency fork/join
+            // (diagnostics only: per-node GPU timing needs single-stream execution).
+            if (join_node && getenv("GGML_CUDA_NO_CONCURRENT") == nullptr) {
                 //Create ggml_cuda_concurrent_event
                 ggml_cuda_concurrent_event concurrent_event(nodes_per_branch.size());
                 concurrent_event.join_node = join_node;
