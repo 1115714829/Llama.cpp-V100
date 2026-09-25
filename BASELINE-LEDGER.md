@@ -463,6 +463,34 @@
 - **新采用值（256K spec-on）**：轮成本 **78.75 ms**、tpot 26.8–27.3 ms、AL 2.87–2.95、tg 36.6–37.3；对 BL1（tpot 8.0）= **3.35x**（此前 3.4–3.9x）。tg 判据仍以轮成本+AL 并列（AL 方差未归因）。
 - **遗留**：① q8_0 直读未加 env 门控（默认生效）——预填充走 79T 引擎不受影响、门值/TTFT 双绿，符合冻结条款；如需回退可用留档二进制。② MMA_F16 路径仍硬编码 f16（q>16 形状）。③ 预期收益缺口待归因。
 
+### R377 ★★★ 刀序②交付：逐算子 GPU 账表打通（5 个 bug 修复），256K decode 每步 GPU ≈68 ms + host ~10 ms = 实测轮 78.75 ms ✓ 账目闭合；verify"未归因 15 ms"与 draft 12 ms 双双定案（2026-09-25）
+
+- **工具**：`GGML_CUDA_OP_TIMING=1`（逐节点 CUDA event）经 5 轮修复后**数据干净**：
+  ① 捕获态 `cudaDeviceSynchronize` 崩溃（meta 子图捕获中）→ `cudaStreamIsCapturing` 守卫
+  ② fuse 跳过节点的 event 被查询（R333"越界"）→ `rec_flag` 标记实际 record 的槽
+  ③ TP4 四线程共享累加器竞争 → per-device 累加
+  ④ 多流分支并发（`concurrent_events`）污染时间戳 → `GGML_CUDA_NO_CONCURRENT=1` 诊断开关（默认关）
+  ⑤ **真根因：`rec_flag` 跨图不重置**（event 池复用，旧标志让新图查到未重新 record 的 event ⇒ elapsed 为负、求和被污染）→ 查询后清零
+  门值 `bcda0092…` 每轮绿（诊断默认关）；libggml-cuda.so `d598efd2→3c3697b4→…→最终版`。
+- **测量条件**：256K spec-on、`GGML_CUDA_OP_TIMING=1 GGML_CUDA_DISABLE_GRAPHS=1 GGML_META_SUBGRAPH_CAPTURE=0 GGML_CUDA_NO_CONCURRENT=1`（禁捕获/多流以保证 event 语义；kernel GPU 时间不受影响）。
+- **每步每设备 GPU 账（decode 段，256K spec-on）**：
+  | 算子 | ms/步 | 占比 | 备注 |
+  |---|---|---|---|
+  | **FLASH_ATTN_EXT** | **25.4** | 37.6% | verify 16 层 + draft 5 层，avg 1.21 ms/call（21 calls/步） |
+  | **MUL_MAT** | **25.2** | 37.4% | 权重 GEMM，665 calls/步，avg 38 µs |
+  | CPY | 4.7 | 6.9% | |
+  | ADD | 2.5 | 3.7% | |
+  | RMS_NORM / GET_ROWS / SCALE / UNARY | 1.0–1.4 | ~7% | |
+  | MUL / GLU / CONCAT / SET_ROWS / CONT / ROPE | 0.4–1.1 | ~7% | |
+  | VIEW/RESHAPE/PERMUTE/TRANSPOSE | ~0.5 | <1% | R373"小算子 5.3 ms/步"复证 |
+  | **GPU 合计** | **≈68** | | **+ host/gap ~10 ms = 实测轮 78.75 ms ✓ 闭合** |
+- **三谜团定案**：
+  ① **verify"未归因 15 ms" = MUL_MAT 超出静态地板**：R373 静态账"权重 9 ms"（27 GB ÷ 751 GB/s）vs **实测 25.2 ms** ⇒ **+16 ms** 即未归因真身（M=8 小 batch GEMM 效率、465 GEMM 的 launch/调度、GDN 小 GEMM）。
+  ② **draft 12 ms = 它自己的 GPU 工时**（推翻 R372"等 target 尾巴"猜测）：MUL_MAT ~5 + FA ~6 + 小算子 ~2 = **13 ms ✓**。
+  ③ **q8_0 收益缺口（预期 −12 vs 实测 −5.2）**：转换的读被 L2/重叠部分吸收 + dequant ALU 抵消；精确归因需 A/B 两臂 `[OP]` 差分（下一步）。
+- **刀序影响（更新）**：三大件 = **MUL_MAT + FLASH_ATTN_EXT + CPY = 55 ms/步（82%）**。后续刀的预期收益可直接对账：MUL_MAT 线（融合/大批量/M=8 专用 GEMV）、FA 线（q8_0 直读已做、KV 重读、融合）、CPY 线（消除拷贝/视图）。
+- **遗留**：`GGML_CUDA_OP_TIMING` 需 4 个 env 才干净（`DISABLE_GRAPHS` + `META_SUBGRAPH_CAPTURE=0` + `NO_CONCURRENT` + 本工具）⇒ 只用于诊断，不进生产。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
