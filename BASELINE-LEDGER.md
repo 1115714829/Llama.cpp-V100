@@ -711,6 +711,29 @@
 
 **五、铁的纪律提醒**：`_staged` 的残余 IMA（R368 修完 4 处 ABI 后仍崩）最可能源 = **按错误布局喂 KV**；改 codec + 我方 stride 后此因消失，若仍崩再用 compute-sanitizer 定位，**不得回退到 staging**（staging 在 256K 注定输）。
 
+### R388 ★★★ W1 施工图细化：**目标核族 = grouped verify（80 splits × q≤8 × 6 heads）**；剩余活单已精确到行（2026-09-26）
+
+**一、已确认（读码，逐条可复核）**
+1. `dot_qk_cache<D, KV_DTYPE>`（`grouped-attention.cu:1003-1037`）的 **else 分支走通用标量路径** `load_kv_cache_float_unscaled<KV_DTYPE>` ⇒ **R387 加的 q8_0 codec 已自动接上，此函数无需改** ✓
+2. KV 装载器（`:780-827`）按 dtype 分流：FP16 用 `uint4`、FP8 用 `uint64`+`fp8_*_vector_to_half8`，且 `:810-812` 有 `static_assert(只允许 FP16/E4M3/E5M2)` ⇒ **实例化 Q8_0 时需扩展该 assert 并加 Q8_0 分支**（8 元素 = 1 个 uint64 内的 8 int8？注意 q8_0 每 32 元素 34 字节，故 32-块内每 8 元素连续，需按 `chunk = (row*256+d)/8`、`row = chunk>>5`、块内 `(chunk&3)` 取 uint64 + 同块 scale）。
+3. **寻址契约已验证成立**：传 `block_stride = page_size*1024`、`token_stride = 1024`、`head_stride = 256` ⇒ `physical_offset = t*1024 + h*256 + d = row*256 + d`（row = t*4+h = 我方 KV 行序）✓ 与 codec 契约逐字吻合。
+4. **两个核族分清（关键）**：
+   | 族 | 入口 | 形状 | 归属 |
+   |---|---|---|---|
+   | **grouped verify** | `flash_attention_grouped_verify_*`（`:4971` grid `dim3(1,80)`；combine 核 `:4978`） | **80 logical splits × q≤8 × 6 heads**；workspace `partial[80,8,6,256] f16` / `lse[80,8,6] f32` / `online_rescales[8,6,80] f32` | **我方 verify q=8（旧 raw entry 用的就是这族）** |
+   | partition | `launch_flash_attention_decode_paged_xqa_tc_256_wide`（`:4257`，模板 `:4250-4256`）| 256 partitions | 我方 q=1 步 |
+5. 与 1cat 文档互证：`sm70_dflash2_tail_graphs_20260911.md` 的"**80 logical splits、K16 compensated QK、N32 online updates、完整 FP32 workspace**"= grouped verify 族 ✓；"**256 partitions of 1024 tokens**"= partition 族 ✓。
+
+**二、剩余活单（下轮机械执行）**
+1. `fp8_kv_utils.cuh`：加 `q8_0_vector_to_half8(uint64 raw, __half scale)`（镜像 `fp8_e5m2_vector_to_half8`）。
+2. `grouped-attention.cu` KV 装载器：`static_assert` 放行 Q8_0；加 Q8_0 的 uint64 分支（按上述 chunk/row/块内偏移取 8 int8 + 同块 half scale）。
+3. **grouped verify 族**加 Q8_0 实例化（`:2047` 与 `:2623` 两个 kernel 定义的 KV_DTYPE 参数处 + 其调用点）；`FP8_PAIR_LOAD=false`、`E4M3_SHARED_LUT=false` 走通用路。
+4. raw entry 改为 **Q8_0 + 我方 stride、零拷贝**（删 `sm70_long_stage_kv` O(kv) 拷贝；block_table 用恒等页表 page_size=256、n_pages=1024）。
+5. 编译验证：**standalone `nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW`**（R358 先例，不动 cmake 缓存、不影响 p4-build 基线）⇒ 让编译器枚举剩余 static_assert/特化障碍。
+6. 通过后：compute-sanitizer 定位残余 IMA → 门值 `bcda0092` → `[OP]` FA 时间 A/B（`LLAMA_SM70_LONG_DECODE=1`）。
+
+**三、收益不变**：KV 流量 9.1 GB/卡 ⇒ 地板 12.1 ms；该核 ~700 GB/s ⇒ **FA 25.4 → ~13–15 ms（−10~−12 ms/轮）**。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
