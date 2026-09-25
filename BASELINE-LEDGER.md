@@ -910,6 +910,34 @@ flash_attention_grouped_verify_e5m2_partial_kernel<
 
 **下轮**：① 摸清 1cat 的 FP8 KV **量化/写路径**（`cache_kernels*.cu` 里的 fp8 量化 + `nvfp4_kv_cache_kernels.cu` 参考）② 评估 ggml 新增 FP8 KV 类型的最小面 ③ 再决定"新类型"还是"借用现有 8-bit 类型位"。
 
+### R398 ★★★★ W1(B) 落地路线（比预想更简单）：**FP8 KV = uint8 + 一个 scale（非块量化）**；核零改动；**预填充冻结面可完全避开**（2026-09-26）
+
+**一、格式本质（读 1cat `csrc/libtorch_stable/cache_kernels.cu`）**
+- FP8 KV = **uint8 存储 + 一个 float scale**（`k_scale`/`v_scale`，形状 `[1]` 或 `[num_heads]`）—— **不是块量化**，比 q8_0（每 32 元素一个 half scale）**更简单**。他们服务里 `kv_cache_dtype: fp8_e5m2` 即此（`reshape_and_cache_flash`，`:346`）。
+- 另有块量化变体（`quant_block_size` + `dst_scale[num_tokens, head_dim/qbs*4]`，`:1562+`，DS-MLA 用）—— **我们不需要**。
+- ⚠️ 他们 **E5M2 不用 PTX cvt**：自写 `fp16_bits_to_e5m2_satfinite_rn`（`:250`，饱和 + RN）—— 抄这个才能逐位一致。
+
+**二、已具备的抄件（许可 BSD-3）**
+| 件 | 位置 | 用途 |
+|---|---|---|
+| `fp8::scaled_convert<OutT,InT,kv_dt>` | `quantization/w8a8/fp8/nvidia/quant_utils.cuh` | 量化/反量化原语 |
+| `CopyWithScaleOp` | `cache_kernels.cu:238-244` | 逐元素转换 + scale |
+| `fp16_bits_to_e5m2_satfinite_rn` | `cache_kernels.cu:250` | E5M2 逐位一致量化 |
+| `reshape_and_cache_flash` | `cache_kernels.cu:346` | KV 写核（NHD/HND、按头 scale） |
+| `cp_gather_and_upconvert_fp8_kv_cache` | `cache_kernels.cu:1265+` | **fp8→bf16 上转**（读侧兜底） |
+| 注意力核的 E4M3/E5M2 路径 + `k_scale`/`v_scale` 入参 | 已在手（`sm70-long/`） | **核零改动** ✓ |
+
+**三、★ 关键洞察：预填充冻结面可完全避开**
+`O(kv)` 上转在 **decode 致命**（每步一次），但在 **prefill 只发生一次**：9.1 GB 上转 ≈ **12–24 ms**，对 **152,500 ms** 的预算是 **0.016%** ⇒ **不必动被冻结的 79T 预填充**（可先用"fp8→f16 一次性上转 + 现有 79T"；后续若有余力再抄他们的 fp8-aware prefill）。
+
+**四、施工四步（下轮起）**
+1. **ggml 新增 FP8 KV 类型**：8-bit、无块结构（1 字节/元素）+ 独立的 `k_scale`/`v_scale` 张量；管线（类型定义 / `ggml_row_size` / `--cache-type-k|v` 接受 / 量化-反量化桩）。默认 **不启用**（仍 q8_0）⇒ 门值/预填充零回归。
+2. **KV 写核**：抄 `CopyWithScaleOp` + `fp16_bits_to_e5m2_satfinite_rn` 接到 llama.cpp 的 KV 写路径（含 scale 计算策略：先用单一 amax scale，后续可抄按头/按块）。
+3. **decode 接线**：raw entry 传 `KV_DTYPE=E5M2` 或 `E4M3` + `k_scale/v_scale` + 我方 strides（R395 规格已定；`COMPENSATE_P=true` 此刻**合法**）。
+4. **prefill**：先走"一次性上转"，跑门值（spec-off 151.7 s + `bcda0092`）确认零回归。
+
+**五、收益不变且更硬**：KV 流量 8.6 GB/卡（vs q8_0 9.1）⇒ 地板 11.5 ms；FA 25.4 → **~12–14 ms**；且 **KV 格式与 BL1 一致** ⇒ 同口径验收更硬。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
