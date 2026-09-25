@@ -734,6 +734,14 @@
 
 **三、收益不变**：KV 流量 9.1 GB/卡 ⇒ 地板 12.1 ms；该核 ~700 GB/s ⇒ **FA 25.4 → ~13–15 ms（−10~−12 ms/轮）**。
 
+### R389 ★ W1 首个可验证增量：**q8_0 codec 在 vendored 核内编译通过**（`NVCC_RC=0`，1.15 MB `.o`）（2026-09-26）
+
+- **改动**：`fp8_kv_utils.cuh` 加 `KV_CACHE_DTYPE_Q8_0` + `q8_0_to_float` + loader 分支（R387）；`grouped-attention.cu` 的 `SM70_LONG_RAW` 区加冒烟核 `sm70_long_q8_0_probe`（强制实例化 codec，兼作"解量化值 vs CPU 参考"的校验核）。
+- **验证方法**（R358 先例，不动 cmake 缓存、不碰 p4-build 基线）：`export PATH=/usr/local/cuda-12.4/bin:$PATH; nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW -I sm70-long -I . -O1 -c sm70-long/grouped-attention.cu` ⇒ **`NVCC_RC=0`**、`/tmp/sm70long-q8.o` = **1154328 字节**；输出仅 6 条 `#177-D declared but never referenced` 告警（含 1cat 自带的未用函数），**零 error** ✓
+- **意义**：q8_0 读路径（块寻址 + scale 乘法）在真实核内可用；**默认构建（未开 `GGML_CUDA_SM70_LONG`）零影响**，故当前基线/门值不受牵连。
+- **注意（工具路径）**：服务器 `nvcc` 不在 PATH，须用 `/usr/local/cuda-12.4/bin/nvcc`。
+- **下一步**：按 R388 活单继续——装载器 `static_assert` 放行 Q8_0 + uint64 分支；grouped verify 族 Q8_0 实例化；raw entry 改 Q8_0 + 我方 stride 零拷贝；然后 sanitizer → 门值 → `[OP]` FA 时间 A/B。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
