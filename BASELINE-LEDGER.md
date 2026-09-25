@@ -750,6 +750,29 @@
 - **基线影响**：零（该目录不进默认 glob）。
 - **下一步**：grouped verify 族的 Q8_0 实例化（`:2047`/`:2623` 两处 kernel 的 KV_DTYPE）+ raw entry 改 Q8_0/我方 stride 零拷贝 ⇒ 再 nvcc ⇒ sanitizer ⇒ 门值 ⇒ `[OP]` FA A/B。
 
+### R391 ★★★ W1 坐标确定：**grouped verify 核族模板参数表 + Q8_0 实例化的确切插入点**（2026-09-26）
+
+**核族真身（`grouped-attention.cu`）**
+```cpp
+// partial：QK+softmax 分区阶段
+flash_attention_grouped_verify_e5m2_partial_kernel<
+    8, false, /*页步长*/ 1648 | 3296, false, false, false,
+    /*KV_DTYPE = 第 7 个模板参数*/ flash_v100::KV_CACHE_DTYPE_FP8_E4M3,
+    false, float, true, true, false>
+// full_q8：整 q8 一次过
+flash_attention_grouped_verify_e4m3_full_q8_kernel<8, false, 3296, …, KV_DTYPE, …>
+// combine：不含 dtype（在 partial 的 fp32 结果上归并）
+flash_attention_grouped_verify_e5m2_combine_kernel<8, false, float, true>
+```
+**三条关键事实**
+1. **KV_DTYPE = 第 7 个模板参数** ⇒ Q8_0 实例化 = 派发链加一条（名字里的 `e5m2`/`e4m3` 是历史标签：同一个核分别被 E4M3/E5M2 实例化，证明名字不绑 dtype）✓
+2. **第 3 个参数 = KV 页步长编译期常量**（`1648`/`3296` = 文档里的 `page3296`），且绑定 kernel 的 smem tiling；运行期 `k.stride(0..2)` 另由 launcher 传入。
+3. 派发点 `:4966-4983`，按 `k.size(1)`（KV 步长）选择 kernel + `paired` 变体。
+
+**⇒ Q8_0 的实际植入方案（下轮执行）**：新增一条实例化，参数 = `KV_DTYPE_Q8_0` + **我方页步长 262144**（= 页 256 token × `token_stride` 1024 虚拟元素）+ 恒等页表（`page_size=256`、`n_pages=1024`），运行期传我方 strides（`block/token/head = 262144 / 1024 / 256`）。**若该核的 tiling 要求页步长落在 {1648,3296}，则退化为"给核加一个能接受任意页步长的实例"——仍是内核级改法，不做 staging。**
+
+**数据背书**：`benchmark_sm70_dflash2_grouped_verify.py`、`test_sm70_flash_v100_dflash2_swa.py` 是这一族的微基准/测试，可作正确性对照。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
