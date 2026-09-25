@@ -766,6 +766,10 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
         case BEST_FATTN_KERNEL_SM70_LONG:
             return ggml_cuda_sm70_long_decode_alloc_size(dst);
         case BEST_FATTN_KERNEL_TILE:
+            // q8_0 K/V are dequantized in-kernel (fattn-tile.cuh) - no f16 mirror.
+            need_f16_K = !(K->type == GGML_TYPE_Q8_0 && V->type == GGML_TYPE_Q8_0);
+            need_f16_V = need_f16_K;
+            break;
         case BEST_FATTN_KERNEL_MMA_F16:
             need_f16_K = true;
             need_f16_V = true;
@@ -789,7 +793,22 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
 
 void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     ggml_cuda_set_device(ctx.device);
-    switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst)) {
+    const best_fattn_kernel best = ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst);
+    // R366: which kernel serves the decode-shaped calls (q <= 8) at run time?
+    {
+        static int n_print = 0;
+        const ggml_tensor * Q = dst->src[0];
+        const ggml_tensor * K = dst->src[1];
+        if (getenv("GGML_CUDA_FA_KERNEL_DEBUG") != nullptr && Q != nullptr && K != nullptr &&
+                Q->ne[1] <= 8 && n_print < 60) {
+            n_print++;
+            fprintf(stderr, "[FAKD] n=%d dev=%d kernel=%d q=%lld kv=%lld Ktype=%d hq=%lld hkv=%lld Knb2=%zu\n",
+                    n_print, ctx.device, (int) best,
+                    (long long) Q->ne[1], (long long) K->ne[1], (int) K->type,
+                    (long long) Q->ne[2], (long long) K->ne[2], K->nb[2]);
+        }
+    }
+    switch (best) {
         case BEST_FATTN_KERNEL_NONE:
             GGML_ABORT("fatal error");
         case BEST_FATTN_KERNEL_TILE:
