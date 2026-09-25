@@ -36,6 +36,16 @@ env:
 jobs:
 # TODO: this build is disabled to save Github Actions resources (https://github.com/ggml-org/llama.cpp/pull/23705)
 #       in order to enable it again, we have to provision dedicated runners  to run it
+#
+# Placeholder job: a workflow with no runnable jobs is reported as a failed run,
+# which made every push to this fork show a red check for a build that is
+# intentionally disabled. Keep the triggers and the disabled job below, but let
+# the run finish green until the CANN runners exist.
+  cann-disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CANN build is disabled
+        run: echo "CANN build disabled: dedicated runners are not provisioned (see the TODO above)."
 #  openEuler-latest-cann:
 #    defaults:
 #      run:
