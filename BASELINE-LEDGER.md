@@ -491,6 +491,70 @@
 - **刀序影响（更新）**：三大件 = **MUL_MAT + FLASH_ATTN_EXT + CPY = 55 ms/步（82%）**。后续刀的预期收益可直接对账：MUL_MAT 线（融合/大批量/M=8 专用 GEMV）、FA 线（q8_0 直读已做、KV 重读、融合）、CPY 线（消除拷贝/视图）。
 - **遗留**：`GGML_CUDA_OP_TIMING` 需 4 个 env 才干净（`DISABLE_GRAPHS` + `META_SUBGRAPH_CAPTURE=0` + `NO_CONCURRENT` + 本工具）⇒ 只用于诊断，不进生产。
 
+### R378 ★★ FA split floor 刀判负（E6 扫描 + E8 GPU 时间复核）+ **重要方法论发现：墙钟 A/B 噪声 ±9 ms**（2026-09-25）
+
+- **刀**：`GGML_CUDA_FA_SPLIT_FLOOR`（R375 回收的探针）——decode FA 并行度不足（q=8 + 长 KV 串行），E6 扫描 floor=0/1/2/4/8/16。
+- **E6 墙钟**：floor=2 轮 64.9 ms vs floor=0 基线 70.3 ms ⇒ 看似 −5.4 ms。
+- **E8 GPU 时间复核（`[OP]` 表，判据）**：`FLASH_ATTN_EXT avg` floor=2 **1.207 ms/call** vs floor=0（E3 对照）**1.21 ms/call** ⇒ **GPU 时间无差异** ⇒ **split floor 无效**（KV 重读被 L2 吸收，R371 判词复现）。
+- **⚠️ 方法论发现（必须记住）**：**墙钟 A/B 的噪声是 ±9 ms/轮**——e8d（floor=0）61.7 ms vs e6f0（floor=0）70.3 ms，**同配置同时段内差 8.6 ms**。⇒ ① 单 rep 墙钟 A/B 的 ±5 ms 级结论不可信；② **判据必须用 `[OP]` 表的 GPU 时间**（或 ≥3 rep 取中位）；③ E2 的 q8_0（−5.2 ms）有 `[OP]` GPU 时间支撑（FA avg −0.2 ms/call）⇒ 可信 ✓。
+- **处置**：fattn-common.cuh 的固化**已回退**（默认 off，探针保留）；门值 `bcda0092…` 绿、`BUILD_RC=0`。
+- **②③④ 全景（截至本轮）**：
+  | 刀 | 状态 | 收益 |
+  |---|---|---|
+  | TILE q8_0 直读（①） | ✅ 采纳 | **−5.2 ms/轮**（`[OP]` FA avg −0.2 ms/call） |
+  | 2b' lm_head 切分粒度（②） | ✅ 已做 | −0~1 ms |
+  | 2a GEMM/小算子融合（②） | 探明空间有限（mmid 形状不适用、CUDA fusion 已覆盖） | −1~2 ms |
+  | 2c M=8 GEMV（②） | 探明 MMQ 已是 V100 最优（上游实测注释） | −0~1 ms |
+  | ③ FA split floor | ❌ 判负（GPU 时间无差异） | 0 |
+  | ④ GPU selector | 待做 | −2~3 ms |
+- **结构性判断（待复核）**：距 BL1（tpot 8.0）的 3x 差距中，MUL_MAT 25 ms + FA 25 ms 是权重/KV 读的物理下限 + 内核质量差距；`②③④` 合计再收 ~5-8 ms 后仍差 ~2.5x ⇒ 需要 1cat 级内核（marlin FP4/FP8 GEMM、XQA FA）或结构性方案，而非调优。
+
+### R379 ★★★ 1cat-vLLM 启动参数全量分析（用户指示"参数可照抄"）：**tpot 8.0 的结构性来源 = inductor 编译 + combo 内核 + 小 q CUDA graph**；`draft_sample_method: probabilistic` = AL 钥匙；`enable_prefix_caching` 我方未对齐（2026-09-25）
+
+- **方法**：读 `/root/llm/systemd/vllm-1cat.service`（只读）+ vLLM 启动日志的 `compilation_config`；BL1 纯解码基线用 `/mnt/3.84t/Qwen3.8-27B-FP8`（红线 4：模型只从 /mnt/3.84t 加载）起测试实例（端口 8001，不碰正式环境/8000）。
+- **参数对齐表**：TP4/tensor-split ✓、f16 激活 ✓、256K ctx ✓、max-num-seqs 1 ✓、chunked-prefill 2048（=ub 2048）✓、kv-cache fp8_e5m2 ≈ 我方 q8_0（8-bit 同级）✓、reasoning on ✓ ⇒ **配置基本对齐**。
+- **★ 三个结构性发现（1cat 的 tpot 8.0 从哪来）**：
+  | 1cat 机制 | 配置证据 | 我方现状 | 差距 |
+  |---|---|---|---|
+  | **combo_kernels + benchmark_combo_kernel**（inductor 组合内核，小算子合并 + 自动基准选优） | `inductor_compile_config: {combo_kernels: True, benchmark_combo_kernel: True}` | 无（CUDA fusion 只覆盖固定模式） | 小算子 17 ms 的解药 |
+  | **fuse_norm_quant**（norm+quant 融合） | `pass_config: {fuse_norm_quant: True}` | 无 | RMS_NORM 8.6 ms + CPY 29 ms 部分 |
+  | **小 q CUDA graph**（`cudagraph_capture_sizes: [1,2]`、`max_cudagraph_capture_size: 2`）| decode/draft 走 graph，verify(q=8) 走 eager | meta 后端 126 子图/ubatch | 调度结构差异（host/gap 10 ms） |
+  | kernel_config: `rms_norm: ['vllm_c','native']`（自定义核优先） | `kernel_config` | 上游核 | 内核质量 |
+- **AL 钥匙确认**：`--speculative-config '{"method":"dflash",...,"draft_sample_method":"probabilistic"}'` ⇒ 1cat 用 **exact probabilistic rejection sampling**（`min(1,p_t/p_d)`）——这正是 AL 2.7→3.4 的来源，阶段 A 已照抄（`sampling.cpp` REJ + `speculative.h` result_probs + walk 概率 + accept 传参，待构建验证）。
+- **可照抄清单（按 ROI）**：① `probabilistic` 拒绝采样（阶段 A，在做）② `enable_prefix_caching`（**我方 t1c-run.sh 只有 slot-save，无前缀复用 ⇒ 可能是 TTFT 175 vs 152.5 的第二来源**，待验证）③ `fuse_norm_quant` + `combo_kernels`（阶段 C 的小算子融合，参考 inductor 的组合内核思路）④ `cudagraph_capture_sizes=[1,2]`（只捕小 q，verify 走 eager ⇒ 我方 FULLGRAPH 判负的旁证）。
+- **⚠ 口径提醒**：1cat 是 FP8 权重（`quantization=fp8`）+ fp8_e5m2 KV；我方 Q8_0 权重 + q8_0 KV（同级 8-bit）⇒ 权重流地板同级，**差距在内核/编译层而非格式**（R375 已证）。
+- **遗留**：BL1 纯解码基线（vLLM 无 DFlash2）跑到一半因路径红线重启，完成后填入"纯解码 tg"实测值（替代 36.7 的推算）。
+
+### R380 ★★★ 差距分解修正（纯解码基线实测）：**纯解码只差 1.25x，投机轮开销才是病灶（2.9x）**；追平公式重写（2026-09-25）
+
+- **三基线实测（256K，同 prompt/采样）**：
+  | 指标 | BL1 纯解码（vLLM 无 DFlash2，`/mnt/3.84t` FP8） | BL1 投机（账本 152.5） | 我们纯解码（Q8_0 spec-off） | 我们投机（Q8_0 spec-on） |
+  |---|---|---|---|---|
+  | tg t/s | **37.14 / 40.88** | **124.6** | **29.76 / 30.27** | 32–46（E10 中位 37） |
+  | tpot ms | 24.4–27.0 | **8.0** | **33.0–33.6** | 22–31（中位 27） |
+  | AL | — | 3.4 | — | 2.84–2.99 |
+  | 轮开销 ms | — | **27.2** | — | **65–87（中位 78.6）** |
+  | TTFT s | 163.4–165.0 | 152.5 | 178.9 | 174.0–175.1 |
+- **★ 三个决定性数字**：
+  1. **纯解码差距只有 1.25x**（33.3 vs 24.4–27.0 ms/token）⇒ **内核质量差距远小于 R378 的"2.9x"估计**（那是把轮成本当纯解码 tpot 的推算错误，本次实测修正）。
+  2. **投机轮开销差 2.9x**（78.6 vs 27.2 ms/轮）⇒ **真正的病灶**：verify 57 ms（BL1 ~15）+ draft 12 ms（~5）+ CPU selector 2.3 + 注入 3 + 间隙 10。
+  3. **AL 差 0.8x**（2.9 vs 3.4）⇒ 拒绝采样是放大器。
+- **追平公式（重写）**：
+  ```
+  tg = 1000 / (轮开销 / AL)   ⇒  达标 124.6  ⇒  轮开销 ≤ 27 ms @ AL 3.4
+                                   或 轮开销 ≤ 40 ms @ AL 4.6
+  ```
+  ⇒ **主攻 = 轮开销（78.6 → 30 ms）**（内核融合 + GPU selector + 重叠），**放大器 = AL（2.9 → 3.4+）**（拒绝采样）。组合后 tg 113–126 = **边缘达标区间**。
+- **E10 噪声确认**：干净配置 3 rep，tg 32–46、轮 65–87 ⇒ **墙钟噪声 ±11 ms/轮**（R378 的 ±9 ms 复证）⇒ 判据一律 `[OP]` GPU 时间。
+- **对策（阶段重排）**：
+  | 阶段 | 目标 | 手段 | 预期 |
+  |---|---|---|---|
+  | A 拒绝采样 | AL 2.9 → 3.4+ | `sampling.cpp` REJ（已接通，待构建） | tg 37 → 45 |
+  | B-1 内核（verify/draft） | 轮 78.6 → 45 ms | v100-skinny MT=2（M=8 GEMM）、sm70-attn Split-D 修 small-prefill | tg 45 → 75 |
+  | B-2 GPU selector | 轮 45 → 40 | 1cat `TP4_M1_FAST_SELECTOR` | tg 75 → 85 |
+  | C 重叠/融合 | 轮 40 → 30 | combo_kernels（1cat inductor 思路）、注入重叠 | tg 85 → 113 |
+  | D 验收 | ≥124.6 | 同口径 + 显存 ≤ 64 GB | — |
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
