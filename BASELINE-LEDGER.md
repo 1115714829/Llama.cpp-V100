@@ -285,6 +285,12 @@
 - **启动参数未动**（已核对 `t1c-run.sh`）：`--ctx-size 262144 --ubatch-size 2048 --tensor-split 1,1,1,1 --cache-type-k/v q8_0 --flash-attn on` ✓；唯一变更 = draft 换 F16（用户指示）✓。
 - **vendored 隔离**：`sm70-long/` 为**子目录**，CMake `file(GLOB GGML_SOURCES_CUDA "*.cu")` 只收根目录 ⇒ **不进构建、零影响** ✓。
 
+- **R358 ★★★ 1cat `grouped-attention.cu` 剥壳成功并编译通过（影子头方案，零 torch）**：写 `sm70-long-atenshim.h`（假 `at::Tensor` 带 size/stride/data_ptr/clone + `IntArrayRef`/`ScalarType`/`CUDAGuard`/`getCurrentCUDAStream`/`getCurrentDeviceProperties` + `TORCH_CHECK`/`TORCH_WARN`/`C10_CUDA_CHECK`/`C10_CUDA_KERNEL_LAUNCH_CHECK` 宏），文件头用 `#if defined(SM70_LONG_RAW)` 条件化 ATen 头、文件尾条件化 TORCH_LIBRARY 注册 ⇒ **`nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW` 单文件编译通过（1.1 MB .o，零 error）** ✓（2026-09-25）
+
+- **编译迭代记录（缺口清单）**：① `IntArrayRef` 缺 `std::vector` 构造 ② 缺 `TORCH_WARN` ③ 需 `-std=c++17`（`std::is_same_v`）④ 缺 `C10_CUDA_CHECK`/`C10_CUDA_KERNEL_LAUNCH_CHECK` ⑤ 未用入口里的 `Tensor::clone()` 用别名顶替。
+- **下一步（集成）**：写我方裸指针入口调用 `launch_flash_attention_decode_paged(...)`（模板于 D/PARTITION_SIZE/KV_DTYPE/SEQ_LEN_ROUTE）——喂 **f16 KV 镜像 + 恒等页表**（页=256 token，stride(0)=65536/stride(1)=256/stride(2)=kv_len ⇒ 零数据搬运），再接 ggml FA 的 decode 分发；随后门值 + 每轮 A/B。
+- **资产**：`sm70-long/`（`grouped-attention.cu` 5011 行 + `scalar-attention.cu` + 依赖 + 影子头 + LICENSE）✓ 均已入库。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
