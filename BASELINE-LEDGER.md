@@ -291,6 +291,12 @@
 - **下一步（集成）**：写我方裸指针入口调用 `launch_flash_attention_decode_paged(...)`（模板于 D/PARTITION_SIZE/KV_DTYPE/SEQ_LEN_ROUTE）——喂 **f16 KV 镜像 + 恒等页表**（页=256 token，stride(0)=65536/stride(1)=256/stride(2)=kv_len ⇒ 零数据搬运），再接 ggml FA 的 decode 分发；随后门值 + 每轮 A/B。
 - **资产**：`sm70-long/`（`grouped-attention.cu` 5011 行 + `scalar-attention.cu` + 依赖 + 影子头 + LICENSE）✓ 均已入库。
 
+- **R359 ★★★ 集成入口锁定：`launch_flash_attention_decode_paged_xqa_tc_256_staged`（张量核 XQA、GQA 6:1、D=256、fp16 KV）与我方每卡形态完美同构（1 KV 头 : 6 Q 头、d=256）；KV 呈现方案确认**（2026-09-25）
+
+- **入口签名**：`launch_flash_attention_decode_paged_xqa_tc_256_staged(q, k_cache, v_cache, out, block_table, seq_lens, tmp_out, max_logits, exp_sums, online_rescales, active_num_partitions, softmax_scale, launch_num_partitions, use_split_reduce, split_reduce_dim_tile, stream)`；内部 `kGroupSize=6`、`D=256`、走 `flash_attention_decode_xqa_tc_{qk,pv}_..._256_wide` 核 + `launch_flash_attention_decode_xqa_split_reduce<256>`；grid = (batch, num_heads_kv, partitions) ⇒ **按 KV 头调用** ✓。
+- **KV 呈现（零搬运）**：核按 `k_index = phys_block*k_block_stride + block_offset*k_token_stride + kv_head*k_head_stride` 寻址且 head 维连续 ⇒ 我方 f16 镜像（`[256, kv_len]`、dims 连续、token 步长 256）可表示为**页=256 token 的分页缓存**：`stride(0)=65536`、`stride(1)=256`、`stride(2)=kv_len` + **恒等页表** `[1, ceil(kv/256)]` ✓。
+- **下一步（写裸入口）**：`extern "C" sm70_long_decode_f16(...)` 构造影子 Tensor → 调该启动器；scratch（tmp_out [parts, n_q, 6, 256] f16 / max_logits+exp_sums [parts, n_q, 6] f32 / online_rescales）用 `ggml` 侧缓冲；然后接 ggml FA 的 decode 分发 + 门值 + A/B。
+
 - **查证（官方 + 互联网）**：PR #24554（stepfun/laguna 的 4-10 卡支持 ✓ 已合并）；PR #19378（backend-agnostic TP 基建）；PR #23912（TP 下 KV 量化）。⇒ llama.cpp `--split-mode tensor` **支持非整除卡数**（KV 头分布处理），6 卡 Qwen3.8 可行 ✓。
 - **误判根因**：把 vLLM 时代的 TP 整除约束（E 系列"4 个 KV 头无法 6 分"）误套到 llama.cpp ✗；E 系列该条目**限定为 vLLM 语境**（TP3/TP6 sweep），不再外推到 llama.cpp。
 - **红线不变**：验收包络 ≤ 4×V100-16GB（>4 卡 = 不合格、更少卡 = 优）⇒ 6 卡机制可行但不在合格区；目标 = **3-4 卡达标**。
