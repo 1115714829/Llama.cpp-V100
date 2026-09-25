@@ -1055,6 +1055,31 @@ sm70_long_decode_fp8(q_staged_f16, K->data, V->data, ws.o,
 
 **六、为什么本轮不动手**：单改 `supported()` 会把 FP8 路由到不支持的 staging 路径（危险）；而完整分支涉及 workspace 容量、页表缓存、早分支与 scatter 四处联动，需连续性——**留作下一轮一次写完并 nvcc 验证**，避免半截改动污染构建。
 
+### R405 ★★ 适配层结构读通 + 一处必须用数值实验定案的语义（下轮的入口）（2026-09-26）
+
+**一、`decode()` 结构（`fattn-sm70-long.cu:206-392`）**
+| 段 | 内容 |
+|---|---|
+| :229-241 | 维度与 `n_pages = ceil(kv_len/256)`、`n_parts`（R367 已修过 512 上限截断 ⇒ 256K 需 1024 页） |
+| :246-267 | 持久工作区分配（按 `ws.kv_cap`/`ws.q_cap` 缓存，容量不足才 `cudaFree/cudaMalloc`）——**图捕获内禁止 per-call malloc（R368）** |
+| :268-273 | 指针绑定 + memset |
+| **:282-285** | **已有的 `k_direct` 快路径**：条件 `!k_q8 && hkv == 1 && K->nb[1] == D*sizeof(half)` ⇒ 直接传 `K->data` **免 staging** |
+| :287-300 | 其余情况走 `sm70_long_stage_kv`（**O(kv)，就是它**） |
+| :301-309 | Q staging（按 KV 组，`[n_q][gqa][256]` 平面，O(q×h×D) 微小） |
+
+**★ 发现**：我方 KV 是 `hkv = 4`、`nb[1] = 1024`（FP8）/`1088`（q8_0）⇒ **恰好不满足 `k_direct` 的 `hkv == 1` 条件** ⇒ 必然走 staging ⇒ 9.1 GB/卡/轮的搬运。**这就是 W1 收益的全部来路**（也解释了 R366 在 5K 下"无收益空间"的观测：5K 时 O(kv) 只有 0.2 ms）。
+
+**二、已定的部分**（FP8 分支可直接用）
+- 工作区复用：`bt`（恒等页表 int32[n_pages]）、`sl`（int32[1] = kv_len）、`part`（f32[80·8·6·256]）、`lse`（f32[80·8·6]）、`q`/`o`（f16）；`mxl/exs/ors/act` 在 FP8 路径不再需要。
+- Q staging 与输出 scatter **保留**（O(q×h×D)，微小；核的布局契约需要）。
+
+**三、★ 必须用数值实验定案的语义（不要猜）**：`head_group` / combine 网格的索引语义。
+- 我 R403 的 raw entry 把 `q` 声明为 `[n_q_pad, n_q_heads_per_kv, 256]` 单组布局，并让 `grid.x = n_kv_heads`（4）；但适配层的 `sm70_long_stage_q` **把各组写成拼接平面**（`Q_f16 + j*total_g`，平面步长 `total_g = D*n_q_pad*gqa`）。
+- 二者是否等价，取决于核内 `head_group`（`blockIdx.x`）到底如何偏移头轴、以及 combine 核网格该取 `(q_rows, 6)` 还是 `(q_rows, hq)`——**这只能由数值实验回答**。
+- **解决工具（下一轮第一件事）**：扩展 R394 的 standalone 数值测试→**数值实验 2**：小规模合成（如 `hkv=4`、`hq=24`、`kv=512`、`q=8`）跑 partial+combine，与 CPU 参考逐元素比对 ⇒ 一次同时定案（a）q/头索引语义、（b）页表语义、（c）q8/fp8 解量化、（d）有无 IMA。
+
+**四、纪律**：不做半截改动——`supported()` 白名单与 decode 早分支必须同时落地，且**先过数值实验 2 再上机**（避免 R368 的"131 次干净调用后 IMA"）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
