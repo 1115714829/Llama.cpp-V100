@@ -742,6 +742,14 @@
 - **注意（工具路径）**：服务器 `nvcc` 不在 PATH，须用 `/usr/local/cuda-12.4/bin/nvcc`。
 - **下一步**：按 R388 活单继续——装载器 `static_assert` 放行 Q8_0 + uint64 分支；grouped verify 族 Q8_0 实例化；raw entry 改 Q8_0 + 我方 stride 零拷贝；然后 sanitizer → 门值 → `[OP]` FA 时间 A/B。
 
+### R390 ★★ W1 第二增量：**Q8_0 向量装载器分支编译通过**（K16/QK 装载路径已就位）（2026-09-26）
+
+- **改动**：`grouped-attention.cu` 加 `q8_0_vector_to_half8(raw8, scale)`（沿用 `fp8_e5m2_vector_to_half8` 的 `uint4`=4×half2 位模式约定）；KV 装载器 `else` 链插入 **Q8_0 分支**（`chunk = physical_offset/8 + vec_col`；`row = chunk>>5`；`sub = chunk&31`；字节基址 `row*272 + (sub>>2)*34`；块内 `uint64` 取 8 个 int8 + 同块 half scale ⇒ `q8_0_vector_to_half8`）；并用 `decltype(&load_xqa_tc_kv_vector<4,false,Q8_0>)` **取地址强制实例化**（odr-use）。
+- **块内安全性论证**：`physical_offset` 8 对齐 ⇒ 每个 8 元素 chunk 必落在单个 32-元素 q8_0 块内，**不会跨块**。
+- **验证**：`nvcc -std=c++17 -arch=sm_70 -DSM70_LONG_RAW -O1 -c` ⇒ **`NVCC_RC=0`、零 error**（仅 `#177-D` 未引用告警）；`nm /tmp/sm70long-q8b.o` ⇒ **`T sm70_long_q8_0_probe` 在 `.text`（含 `__device_stub__`）**，180 个符号 ⇒ codec 真实例化（非静默跳过）✓
+- **基线影响**：零（该目录不进默认 glob）。
+- **下一步**：grouped verify 族的 Q8_0 实例化（`:2047`/`:2623` 两处 kernel 的 KV_DTYPE）+ raw entry 改 Q8_0/我方 stride 零拷贝 ⇒ 再 nvcc ⇒ sanitizer ⇒ 门值 ⇒ `[OP]` FA A/B。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
