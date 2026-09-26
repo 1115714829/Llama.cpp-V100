@@ -1322,6 +1322,28 @@ ggml/src/ggml-backend-meta.cpp:580: generic split states:
 **本轮无任何速度数字**（首次解码即崩，`[OP]` 无法采集）。
 **欠账（下一轮与该修复一并做）**：默认关（fp8 env 未开）时用本二进制 `LIBGGML_CUDA_MD5=28452b0ee575a5efb9224eea21a74f64` 复测**零回归门**（gate `bcda0092…` + `[OP]` 不变）。
 
+### R418 (2026-09-26) 三臂分离锁定 fp8 KV 为唯一病因 + 根因假设（短 KV 无核可读）
+
+**三臂（干净机、每次跑后 pkill 清场，`pgrep` 均 0）**
+| 臂 | env（其余同 256K 口径 spec-on） | 结果 |
+|---|---|---|
+| v3 | 仅 `LLAMA_SM70_LONG_DECODE=1` | **正常**：`listening on :8082` |
+| v1 | `LLAMA_KV_FP8=1` + `LLAMA_SM70_LONG_DECODE=1` | **rc=134**，`ggml-backend-meta.cpp:580 generic split states`（两次独立复现：`fp8ab`/`v1` 同一 node/同一行） |
+| v2 | 都不开（基线） | **正常**：`listening on :8082` |
+
+⇒ **病因 = `LLAMA_KV_FP8`（fp8 KV 缓存）本身**；FA 新路（`LLAMA_SM70_LONG_DECODE`）单独开**无副作用** ✓ 这是一条重要的正向证据（W1 路由本身不破坏启动）。
+
+**根因假设（强，待证实）**：启动 warmup 的第一个 decode 是 **`n_tokens=2`** ⇒ `K->ne[1] = 2` ⇒ 我方 `ggml_cuda_sm70_long_decode_supported` 的 **`K->ne[1] >= SM70_LONG_PAGE_TOKENS*2`（512）门槛拒绝**（`:179`，为"长上下文专用"而设）⇒ fp8 缓存**没有任何备用核能读**（TILE 路需把 KV 转 f16，而 `GGML_TYPE_F8_E4M3` 的 `type_traits` **没有 `to_float`/`from_float`** ⇒ 转换路径无从下手）⇒ **FA 节点在 CUDA 上不可用** ⇒ meta 后端兜底把 FA 输出 `attn_pregate` 切成 `Meta(CUDA0..3)`，而消费它的 `attn_gated` MUL 的 src1 未切分 ⇒ 落入 `:580` 的不支持分支 ⇒ abort。与"崩在图分配阶段、未进任何 attention 计算"完全吻合。
+（旁证：R375 记录的旧路 `-ctk q8_0` 能跑，是因为 q8_0 有 `to_float`，TILE 兜底可用；fp8 缺的正是这条兜底。）
+
+**记账缺口（已自证，属日志瑕疵）**：`KV cache type overridden to E4M3` 这行 INFO **未出现在日志**（`grep -c 'I cmn' v1.log` = 2，llama_context 阶段 INFO 未被记录）——**但不影响因果**：行为差异已由三臂分离证明（只有 `LLAMA_KV_FP8` 能触发）。下一轮把该行改成 `fprintf(stderr, ...)`（与 `[T1C]` 探针同法，日志里可靠可见）。
+
+**下一轮四点（全部"从内核/后端根上解决"，不用开关绕过）**
+1. `ggml-cuda.cu` 的 `type_traits` 给 `F8_E4M3` 补 **`to_float`/`from_float`**（`__nv_cvt_fp8_to_halfraw`/`__nv_cvt_float_to_fp8`）⇒ 恢复通用转换兜底（修掉"无兜底 ⇒ 整个后端不可用"这一类根因，不是绕路）。
+2. **放开 `:179` 的 `kv_len >= 512` 门槛**（内核侧让 vendored 核服务短 KV：需先查明 512 的由来 = `SM70_LONG_PAGE_TOKENS*2`，确认 1 页是否已足够；这是"短 KV 无核可读"的直接根因）。
+3. INFO → `fprintf(stderr)` 让覆盖自证。
+4. 复跑三臂；门值绿后再按 `[OP]` 判 FA（25.4 → 目标 12.1）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
