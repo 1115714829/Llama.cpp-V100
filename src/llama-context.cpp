@@ -399,7 +399,7 @@ llama_context::llama_context(
             }
             type_k_mem = GGML_TYPE_F8_E4M3;
             type_v_mem = GGML_TYPE_F8_E4M3;
-            LLAMA_LOG_INFO("%s: KV cache type overridden to E4M3\n", __func__);
+            fprintf(stderr, "%s: KV cache type overridden to E4M3\n", __func__);
         }
         llama_memory_params params_mem = {
             /*.type_k    =*/ type_k_mem,
