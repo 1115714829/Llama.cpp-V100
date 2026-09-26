@@ -392,14 +392,23 @@ llama_context::llama_context(
         ggml_type type_k_mem = params.type_k;
         ggml_type type_v_mem = params.type_v;
         if (const char * kv_fp8 = getenv("LLAMA_KV_FP8"); kv_fp8 != nullptr && atoi(kv_fp8) != 0) {
-            const char * rt = getenv("LLAMA_SM70_LONG_DECODE");
-            if (rt == nullptr || atoi(rt) == 0) {
-                LLAMA_LOG_WARN("%s: LLAMA_KV_FP8 is set without LLAMA_SM70_LONG_DECODE, "
-                               "E4M3 flash attention may not be selectable\n", __func__);
+            // The E4M3 kernels are instantiated for D=256 and GQA 6:1 only. Other
+            // attention geometries (draft models) keep the requested cache type.
+            const bool geom_ok = hparams.n_embd_head_k(0) == 256 &&
+                hparams.n_head_kv(0) > 0 && hparams.n_head(0) == 6 * hparams.n_head_kv(0);
+            if (!geom_ok) {
+                fprintf(stderr, "%s: LLAMA_KV_FP8 skipped: n_embd_head_k=%u n_head=%u n_head_kv=%u\n",
+                        __func__, hparams.n_embd_head_k(0), hparams.n_head(0), hparams.n_head_kv(0));
+            } else {
+                const char * rt = getenv("LLAMA_SM70_LONG_DECODE");
+                if (rt == nullptr || atoi(rt) == 0) {
+                    LLAMA_LOG_WARN("%s: LLAMA_KV_FP8 is set without LLAMA_SM70_LONG_DECODE, "
+                                   "E4M3 flash attention may not be selectable\n", __func__);
+                }
+                type_k_mem = GGML_TYPE_F8_E4M3;
+                type_v_mem = GGML_TYPE_F8_E4M3;
+                fprintf(stderr, "%s: KV cache type overridden to E4M3\n", __func__);
             }
-            type_k_mem = GGML_TYPE_F8_E4M3;
-            type_v_mem = GGML_TYPE_F8_E4M3;
-            fprintf(stderr, "%s: KV cache type overridden to E4M3\n", __func__);
         }
         llama_memory_params params_mem = {
             /*.type_k    =*/ type_k_mem,
