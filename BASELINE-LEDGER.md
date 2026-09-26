@@ -1237,6 +1237,20 @@ FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
 
 **新的唯一风险点（须先查清再动手）**：XQA/预填充族按 dtype 分派（`:4295/:4345-4359` `LAUNCH_XQA_PARTITION(...)` 已含 `KV_CACHE_DTYPE_FP8_E4M3`）⇒ 冻结的 79T 预填充路**是否已能传 dtype=1**。这属 §1.0.1「公共组件例外」：① 默认行为不变（KV 非 fp8 时逐字节同旧）② 改后预填充门值重过（151.7 s ≤ 152.5 s + 门 `bcda0092…`）③ 验收标准不变。
 
+### R413 (2026-09-26) 预填充侧风险点查清：79T 本就做 KV 反量化，fp8 只需加一对变体
+
+R412 标记的唯一风险点（改 KV 类型是否要动冻结的预填充路）已查清：
+
+- `fattn79t-prefill.cu:3165-3181` 定义 `t1c_k_q8_0_to_half_t`（K：q8_0 `[kv][256]` 带 8*34 B token stride → half 转置）与 `t1c_v_q8_0_to_half`（V：q8_0 → half token-major），`:3442-3444` 调用。**即：冻结的 79T 预填充路本来每次预填充就把 q8_0 KV 反量化成 half**（一次性，故预填充仍快：169.5 s）。
+- ⇒ KV 改 E4M3 只需**增补一对 E4M3→half 反量化核**（比 q8_0 更简单：无 32 元素块、单字节一次转换），**q8_0 分支逐字节不动**。三条 §1.0.1 例外条件均满足：默认行为不变（缓存非 fp8 时同旧）、改后重过预填充门值、验收标准不变。
+- 预填充侧成本不增：该 pass 本来就存在（dequant 已在付），只是换 dtype 读。
+
+**KV dtype 切换的完整 3 点位（已定，下一步执行）**
+1. `src/llama-context.cpp:391-392`（`llama_memory_params` 字面量处）——**内部**按 env 门把 `type_k/type_v` 覆盖为 `GGML_TYPE_F8_E4M3`；**不经 `-ctk/-ctv`**（§1.6 用户端调参禁碰）。
+2. `fattn79t-prefill.cu:3165-3181,3442-3444`——加 E4M3 反量化变体，按缓存类型分派，q8_0 路径不变。
+3. 解码侧零改动：R410 的 fp8 零拷贝分支 + 既有路由（env 门 `LLAMA_SM70_LONG_DECODE` + `supported()` 白名单）已就位并构建绿。
+另需核对 `set_rows`/KV 写入路径对 `F8_E4M3` 的 `supports_op` 放行（写入侧 R? 已实现 `set_rows` fp8 分支）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
