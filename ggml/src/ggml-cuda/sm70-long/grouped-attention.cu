@@ -831,7 +831,14 @@ __device__ __forceinline__ uint4 load_xqa_tc_kv_vector(
     const uint8_t* p     = reinterpret_cast<const uint8_t*>(kv_cache) +
                            row * flash_v100::KV_Q8_0_ROW_BYTES + (sub >> 2) * 34;
     const __half   s     = *reinterpret_cast<const __half*>(p);
-    const uint64_t raw   = __ldg(reinterpret_cast<const uint64_t*>(p + 2 + (sub & 3) * 8));
+    // 34 byte blocks leave the payload at arbitrary 8 byte alignment, so read the
+    // eight code bytes individually instead of a possibly misaligned uint64 load.
+    const uint8_t* q8    = p + 2 + (sub & 3) * 8;
+    uint64_t raw = 0;
+#pragma unroll
+    for (int b = 0; b < 8; ++b) {
+      raw |= (uint64_t) q8[b] << (8 * b);
+    }
     return q8_0_vector_to_half8(raw, s);
   } else {
     static_assert(KV_DTYPE == flash_v100::KV_CACHE_DTYPE_FP8_E4M3 ||
@@ -5186,9 +5193,11 @@ extern "C" void sm70_long_decode_q8_0(
   const int  n_q_pad = q_rows < 2 ? 2 : q_rows;
   const bool paired  = true;  // our q8_0 rows are 272 bytes = 16 mod 8, and bases are 256-byte aligned
 
-  const int64_t token_stride = (int64_t) n_kv_heads * 272;          // q8_0: 272 bytes per 256-value row
-  const int64_t block_stride = (int64_t) page_tokens * token_stride; // 256-token pages, contiguous
-  const int64_t head_stride  = 272;
+  // The loader indexes virtual 256-element rows and maps the row index to the real
+  // 272 byte q8_0 rows itself, so these strides stay 256 based.
+  const int64_t token_stride = (int64_t) n_kv_heads * 256;
+  const int64_t block_stride = (int64_t) page_tokens * token_stride;
+  const int64_t head_stride  = 256;
 
   const std::vector<int64_t> q_sz  = {n_q_pad, n_q_heads_per_kv, 256};
   const std::vector<int64_t> q_st  = {n_q_heads_per_kv * 256, 256, 1};
