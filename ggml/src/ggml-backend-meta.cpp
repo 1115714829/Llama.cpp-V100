@@ -3074,7 +3074,16 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                 enum ggml_status st = GGML_STATUS_SUCCESS;
                 const int64_t fg_r0 = mt_enabled ? ggml_time_us() : 0;
                 if (ok) {
+                    static int64_t mt_sub2_us = 0; static int mt_n2 = 0;
+                    const int64_t mt_t2 = ggml_time_us();
                     st = run_subgraphs();
+                    if (getenv("GGML_META_TIMING") != nullptr) {
+                        mt_sub2_us += ggml_time_us() - mt_t2; mt_n2++;
+                        if (mt_n2 % 256 == 0) {
+                            fprintf(stderr, "[MT] run_subgraphs(fg) %.2f us/call n=%d\n", (double) mt_sub2_us / mt_n2, mt_n2);
+                            mt_sub2_us = 0; mt_n2 = 0;
+                        }
+                    }
                 }
                 if (mt_enabled) {
                     t_mt_fgrun_us += ggml_time_us() - fg_r0;
@@ -3135,7 +3144,16 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
     }
 
     if (!fg_done) {
+        static int64_t mt_sub_us = 0; static int mt_n = 0;
+        const int64_t mt_t0 = ggml_time_us();
         fg_status = run_subgraphs();
+        if (getenv("GGML_META_TIMING") != nullptr) {
+            mt_sub_us += ggml_time_us() - mt_t0; mt_n++;
+            if (mt_n % 256 == 0) {
+                fprintf(stderr, "[MT] run_subgraphs %.2f us/call n=%d\n", (double) mt_sub_us / mt_n, mt_n);
+                mt_sub_us = 0; mt_n = 0;
+            }
+        }
     }
     // GGML_META_HOST_SPIN_US: burn a known amount of host time at the end of every call, to probe
     // whether host-side time sits on the critical path of a speculative round. 0 = no change.

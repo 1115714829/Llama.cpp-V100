@@ -1198,8 +1198,8 @@ void launch_fattn(
             }
         }
 
-        // The scan above keeps the split at one wave, so for long contexts each block still
-        // walks a long serial KV loop. GGML_CUDA_FA_SPLIT_FLOOR raises the split to probe this.
+        // R378 (E6/E8): a split floor of 2 changed nothing on V100 - the KV re-reads
+        // are L2-absorbed (same verdict as R371). Env probe kept, default off.
         if (const char * env = getenv("GGML_CUDA_FA_SPLIT_FLOOR")) {
             parallel_blocks = std::max(parallel_blocks, std::min(atoi(env), ntiles_KV));
         }

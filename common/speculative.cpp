@@ -1703,6 +1703,11 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
             auto & result = *dp.result;
 
+            // keep the draft probabilities in lockstep with the draft tokens
+            if (dp.result_probs != nullptr) {
+                dp.result_probs->clear();
+            }
+
             if (is_dflash2) {
                 if (is_dflash2_cpu) {
                     // block walk over the CPU-computed candidates: the transition scores for the

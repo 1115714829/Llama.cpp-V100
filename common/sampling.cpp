@@ -708,12 +708,14 @@ std::vector<llama_token> common_sampler_sample_and_accept_n(struct common_sample
     // token and stop. Greedy requests are unaffected (the ratio is 1 on a match).
     // No caller passes draft_p yet, so this is a no-op until the draft side is wired.
     static const bool prob_rej = getenv("LLAMA_SPEC_REJ") != nullptr && atoi(getenv("LLAMA_SPEC_REJ")) != 0;
+    // guard against a draft_p that is shorter than the draft (stale or mismatched)
+    const size_t n_prob = std::min<size_t>(draft.size(), draft_p.size());
 
     size_t i = 0;
     for (; i < draft.size(); i++) {
         const llama_token id = common_sampler_sample(gsmpl, ctx, idxs[i], grammar_first);
 
-        if (prob_rej && i < draft_p.size() && draft_p[i] > 0.0f && draft[i] != id) {
+        if (prob_rej && i < (int) n_prob && draft_p[i] > 0.0f && draft[i] != id) {
             float p_t = 0.0f;
             if (gsmpl->cur_p.size > 0) {
                 for (size_t c = 0; c < gsmpl->cur_p.size; ++c) {

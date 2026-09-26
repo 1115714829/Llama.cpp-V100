@@ -805,6 +805,13 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
             return {blck_size_perf};
         }
 
+        // lm_head splits on n_embd (AXIS_1): keep the boundary on a quant block so
+        // no q8_0 block straddles two devices.
+        if (std::regex_match(tensor_name, pattern_output_weight)) {
+            GGML_ASSERT(segments.size() == 1);
+            return {std::lcm(blck_size, 128)};
+        }
+
         // everything else
         GGML_ASSERT(segments.size() == 1);
         return {1};
