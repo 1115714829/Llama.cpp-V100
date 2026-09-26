@@ -1370,6 +1370,20 @@ ggml/src/ggml-backend-meta.cpp:580: generic split states:
 
 **本轮无速度数字**（仍在图分配阶段崩，`[OP]` 无法采集）。
 
+### R420 (2026-09-26) 几何判定未能解除崩溃 ⇒ 按预定规则切换到路 B：手写 q8_0 非补偿 PV
+
+**本轮实测（构建已确认成功：`MANIFEST_DIFFS=0 / BUILD_RC=0 / ERROR_LINES=0`，`b35 rc=0`）**
+- v9 = `LLAMA_KV_FP8=1 LLAMA_SM70_LONG_DECODE=1` + 几何判定（`n_embd_head_k(0)==256 && n_head(0)==6*n_head_kv(0)`）→ **仍 `:580` 同 node 崩**；日志**只有 1 行 `overridden`、无 `skipped` 行** ⇒ 崩溃图的注意力几何**通过了**我们的判据 ⇒ **几何不是判别条件**，该假设判定不成立。
+- （过程纠错：`rwait` 输出的第一行是 `== JOB_DONE ==`，用它做 `rc=0` 判据会误判 —— b34 因而"看起来失败"但结论（编译错）恰好正确；b35 实际构建成功却被误判为失败。**后续判据一律 `grep -o 'rc=[0-9]*'` 取真值。**）
+
+**路由裁决（执行既定决策规则）**：fp8 E4M3 路的内核侧**已齐且数值逐位一致**，但它的**外溢面**（KV 缓存类型进入整图 ⇒ meta 规划器的 FA 输出 × gate 切分状态冲突）不是内核问题，三轮调测仍未解除。⇒ **切换到路 B（q8_0 零拷贝）**：
+- **图谱与基线逐字节相同**（KV 缓存类型不变）⇒ **零规划器交互、零预填充/草稿/状态存取牵连**，外溢面收敛到**一个内核文件**。
+- 唯一缺口 = 必须在 vendored 核里**手写非补偿 PV 阶段**（`:2507` 断言处；本内核 PV 只实现了"六头补偿 E4M3"）。**这正是"挪不动就得自己写"的那块内核代码**。
+- 已备齐的条件：q8_0 codec（`fp8_kv_utils.cuh:16` + q8_0 分支，**codec 自检 768/768 逐位一致**）、`sm70_long_decode_q8_0` 入口与实例化（现被 `#if` 编掉）、`load_xqa_tc_kv_vector` 的 q8_0 分支、以及同文件内**非补偿 rescale 已存在**（`:2493 if constexpr (!COMPENSATE_P)`）与补偿版 PV 可作对照、f16 参考路径可作数值基准、`p0-scripts/fp8_verify_test.cu` 可直接改造成 q8_0 版验证器。
+- 精度红利：q8_0（8 位 + 每 32 元素 f16 scale）**优于** E4M3（3 位尾数），同速更准。
+
+**fp8 资产处置**：**不删**（ggml 类型、`set_rows` fp8、适配层 fp8 分支、预填充 E4M3 反量化、`LLAMA_KV_FP8` 门、几何判定）—— 全部保留，作为路 B 若数值不过关时的备用线；§1.6「判负 ≠ 关闭」。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
