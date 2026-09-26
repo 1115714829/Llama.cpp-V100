@@ -30,6 +30,14 @@ extern "C" void sm70_long_decode_fp8(
     int page_tokens, int n_pages,
     float k_scale, float v_scale, float softmax_scale, cudaStream_t stream);
 
+// R421: same kernel, q8_0 cache read in place (272 byte rows, no staging).
+extern "C" void sm70_long_decode_q8_0(
+    const void * q, const void * k_cache, const void * v_cache, void * out,
+    const void * block_table, const void * row_lengths,
+    void * partial, void * lse,
+    int q_rows, int n_kv_heads, int n_q_heads_per_kv,
+    int page_tokens, int n_pages, float softmax_scale, cudaStream_t stream);
+
 static constexpr int SM70_LONG_PAGE_TOKENS = 256;
 static constexpr int SM70_LONG_D           = 256;
 // R367: the vendored grouped verifier's compile-time workspace
@@ -297,8 +305,15 @@ void ggml_cuda_sm70_long_decode(ggml_backend_cuda_context & ctx, ggml_tensor * d
     if (k_direct) { K_f16 = (half *) K->data; }
     if (v_direct) { V_f16 = (half *) V->data; }
 
+    // R421: the grouped-verify kernel can also read the q8_0 cache in place.
+    static const bool q8_inplace = []() {
+        const char * e = getenv("LLAMA_SM70_Q8_0_INPLACE");
+        return e != nullptr && atoi(e) != 0;
+    }();
+    const bool kv_inplace = K->type == GGML_TYPE_F8_E4M3 ||
+                           (K->type == GGML_TYPE_Q8_0 && q8_inplace);
     // R410: E4M3 KV is read in place by the grouped-verify kernel, so no KV staging.
-    if ((!k_direct || !v_direct) && K->type != GGML_TYPE_F8_E4M3) {
+    if ((!k_direct || !v_direct) && !kv_inplace) {
         for (int64_t j = 0; j < hkv; ++j) {
             if (!k_direct) {
                 sm70_long_stage_kv<<<(int) ((kv_elems + threads - 1) / threads), threads, 0, stream>>>(
@@ -387,6 +402,36 @@ void ggml_cuda_sm70_long_decode(ggml_backend_cuda_context & ctx, ggml_tensor * d
                 (void *) ws.partf, (void *) ws.lsef,
                 (int) n_q, (int) hkv, (int) gqa, SM70_LONG_PAGE_TOKENS, (int) n_pages,
                 1.0f, 1.0f, scale, stream);
+        }
+        for (int64_t j = 0; j < hkv; ++j) {
+            sm70_long_scatter_out<<<(int) ((total_g + threads - 1) / threads), threads, 0, stream>>>(
+                out_f16 + (size_t) j * total_g, (char *) dst->data,
+                n_q, gqa, j, dst->nb[1], dst->nb[2], dst->type == GGML_TYPE_F16);
+        }
+        CUDA_CHECK(cudaGetLastError());
+        return;
+    }
+
+    if (K->type == GGML_TYPE_Q8_0 && q8_inplace) {
+        // R421: zero copy. The entry derives its rows from n_kv_heads, so only the
+        // per KV head base offset is passed here (272 byte rows).
+        if (ws.partf == nullptr) {
+            CUDA_CHECK(cudaMalloc(&ws.partf, (size_t) SM70_LONG_WS_SPLITS * SM70_LONG_WS_MAXQ * gqa * SM70_LONG_D * sizeof(float)));
+        }
+        if (ws.lsef == nullptr) {
+            CUDA_CHECK(cudaMalloc(&ws.lsef, (size_t) SM70_LONG_WS_SPLITS * SM70_LONG_WS_MAXQ * gqa * 2 * sizeof(float)));
+        }
+        const int64_t total_g = (int64_t) SM70_LONG_D * n_q_pad * gqa;
+        for (int64_t j = 0; j < hkv; ++j) {
+            sm70_long_decode_q8_0(
+                (const void *) (Q_f16 + (size_t) j * total_g),
+                (const void *) ((const char *) K->data + j * 272),
+                (const void *) ((const char *) V->data + j * 272),
+                (void *)       (out_f16 + (size_t) j * total_g),
+                (const void *) bt, (const void *) sl,
+                (void *) ws.partf, (void *) ws.lsef,
+                (int) n_q, (int) hkv, (int) gqa, SM70_LONG_PAGE_TOKENS, (int) n_pages,
+                scale, stream);
         }
         for (int64_t j = 0; j < hkv; ++j) {
             sm70_long_scatter_out<<<(int) ((total_g + threads - 1) / threads), threads, 0, stream>>>(
