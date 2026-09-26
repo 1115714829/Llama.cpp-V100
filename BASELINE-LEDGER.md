@@ -1508,6 +1508,29 @@ CUDA error: misaligned address
 1. **读 `n_parts` / `act` / `ws.sl` 的推导与分配**（`:295-330` 一带）：已知 `ws.sl` 在 `if (!ws.stats_ok)` 里**只按首次调用的 `n_q_pad` 分配一次**（q=1 ⇒ 2 个 int），后续 n_q=8 时**必然越界写**（本轮跑全是 q=1，故不是本次崩因，但**是必须修的潜伏 bug**）。同时确认 `n_parts` 在单卡（kv=8192、hkv=4）下的取值是否超限。
 2. 在适配层加**逐次 launch 探针**（j、指针、`n_parts`、`n_pages`、`gqa`、`total_g`）打印前 N 次，与 TP4 侧对照 ⇒ 精确定位越界的那一次。
 
+### R428 (2026-09-26) 单卡崩因锁定：适配层有「捕获不合法」调用（图关掉即全好）
+
+**三臂对照（单卡 IQ1_S、`NO_SPEC=1 CTX=8192 CARDS=0 TS=1`）**
+| 臂 | 图捕获 | 路由 | 结果 |
+|---|---|---|---|
+| s3 | 开 | **关** | 正常 ✓（tg 37.25 t/s / tpot 26.84 ms ⇒ 单卡基线尺子） |
+| s2/s4 | 开 | 开 | `rc=134` `illegal memory access`，浮出 `cudaGraphInstantiate`（`ggml_cuda_graph_evaluate_and_capture`，`:5046`） |
+| **s5** | **关**（`GGML_CUDA_DISABLE_GRAPHS=1`） | 开 | **完全正常** ✓ `[SM70EXEC] dev=0 q=2 kv=256 hq=24 hkv=4 Ktype=8`、`model loaded`、无报错 |
+
+⇒ **崩因 = 我方适配层里的「图捕获不合法」调用**（不是内核数学、不是显存、不是量化、不是 hkv=4 的地址算术）。
+**为何 TP4 从未暴露**：TP4 走 **meta 后端子图捕获**（`ggml-backend-meta.cpp` 自有机制），单卡走**普通** `ggml_cuda_graph_evaluate_and_capture` ⇒ 两者对"捕获期合法调用"的要求不同。
+
+**两个嫌疑（都在我写的代码里，按可能性排序）**
+1. **`cudaMemcpyAsync` 拷源是 pageable 主机内存**（`:373` 一带的 `h_bt`/`h_sl` 是 `std::vector<int>`）—— 捕获期要求 H2D 源必须是 **pinned** 内存 ⇒ 非法。
+2. 工作区增长（`if (ws.kv_cap < kv_need) cudaFree+cudaMalloc`）若发生在捕获内 ⇒ 同样非法（warmup kv=256 先分配 512 KB，随后 reserve kv=8192 需涨到 16.8 MB，正好在捕获期）。
+
+**修法（下一轮，在我这层根上修）**
+- `bt`/`sl`/`act` 改 **`cudaMallocHost` pinned 缓冲**（随工作区一次性分配）⇒ `cudaMemcpyAsync` 捕获合法。
+- 工作区容量**按最大需求预留**（并用 `cudaStreamIsCapturing` 自检：捕获期绝不做 alloc/free）。
+- 顺带修**潜伏 bug**：`ws.sl` 只在 `if (!ws.stats_ok)` 里按首次 `n_q_pad` 分配（q=1 ⇒ 2 个 int），n_q 升 8 时越界 ⇒ 改为按需扩容。
+
+**过程纪律自纠**：本轮我出现过 `sleep 50/55` 的长睡单发，违反 §1.4.1（终止符 + 5 秒轮询）；已改回循环轮询。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
