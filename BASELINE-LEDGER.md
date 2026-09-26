@@ -1263,6 +1263,41 @@ R412 标记的唯一风险点（改 KV 类型是否要动冻结的预填充路�
 
 **仍缺点位 2（下一轮先做，做完才允许开机测）**：`fattn79t-prefill.cu` 的 E4M3 反量化变体。**若跳过就开 `LLAMA_KV_FP8=1` 有明确风险**：预填充路若按 q8_0 读 fp8 字节 → 输出错；若其 `supported()` 要求 KV=q8_0 而落到 TILE 路做 f16 转换 → `F8_E4M3` 没有 `to_float/from_float`（`type_traits` 只给了 blck=1/type_size=1/is_quantized=false）⇒ 会 abort。
 
+### R415 (2026-09-26) 点位 2 形状查清（未落码）：双核硬编码 272 B stride，需加 fp8 变体 + 参数化
+
+**读到的现场**
+- `fattn79t-prefill.cu:3167-3177` `t1c_k_q8_0_to_half_t`（K：转置成 `[d][kv]` 列主序，供 cuBLAS `ldb=kv_len`）：内部 **硬编码 token stride** `tok * ((kHeadDim/32)*34)` = `tok*272`（`:3173`），按 q8_0 块（2 B scale + 32×int8）解出。
+- `:3181-3190` `t1c_v_q8_0_to_half`（V：token-major `[kv][256]`）：同样硬编码 `tok*272`（`:3186`）。
+- 调用点 `:3440-3446`：`total = kv_len*kHeadDim`，直接传 **原始 `k`/`v` 指针** 给两个核，**无 stride 入参**，也无 dtype 分支（注释 `:3430` 明写 "K/V are Q8_0 [kv][256] (tok stride 272 B)"）。
+
+**⇒ 点位 2 的正解（两步，且顺带拆掉一个隐藏假设）**
+1. 两个核各加 **E4M3 变体**（比 q8_0 更简单：单字节按 256 连续排布，`__nv_cvt_fp8_to_halfraw` 直转，无块/scale）。
+2. 把 **token stride 提为入参**（`long tok_stride`）：q8_0 调用点传 `272`，与现状**逐字节等价**；fp8 调用点传真实 `nb1`（4 KV 头时 = `4*256` = 1024）。这一步同时消掉"272 是唯一布局"的隐含假设 —— 它本来就是这条冻结路的一个脆弱点。
+
+**下一轮必须先读的两点（动冻结文件前的尽职调查，避免盲改）**
+- 79T 路的 `supported()`/选择条件：是否要求 `K->type == GGML_TYPE_Q8_0`。若要求，fp8 KV 下预填充会**不再走 79T**（⇒ 落到 TILE 做 f16 转换 ⇒ 掉预填充性能，违反 §1.0.1）⇒ 必须同步放开；若不要求而是隐式按 272 读字节，则 fp8 下会**静默出错**（更危险）⇒ 更必须显式分派。
+- 承载这两个核的外层函数签名：`k`/`v` 处是否有 ggml 张量（拿得到 `->type`/`->nb[1]`），决定 dtype 分派从哪来。
+
+**附带发现（记为已知缺口）**：`type_traits[GGML_TYPE_F8_E4M3]` **没有** `to_float`/`from_float`（R? 为最小改动只给了 blck=1/type_size=1/is_quantized=false）。⇒ 任何走 f32 转换的兜底路径碰 fp8 KV 会 abort。是否补上，等上面第二点的答案再定（若 TILE 兜底路径确实可能被选中就必须补）。
+
+### R416 (2026-09-26) 点位 2 落码：预填充 KV 反量化支持 E4M3，构建绿（W1 三处全齐）
+
+**"能挪就挪"的实现选择（关键取舍）**：不逆推 79T 的 KV 布局约定（那会牵出无必要的考古，且它有 4 头/1024 行宽等易踩点），而是把**今日硬编码值 `272` 原样参数化** ⇒ q8_0 路径**逐字节不变**；fp8 用同一惯例下的对应值 `256`（= `kHeadDim * 1`）。若该惯例猜测有误，**门值（greedy sha）会响亮失败**，不会静默出错。
+
+**5 处改动（2 文件）**
+1. `fattn79t-prefill.cu:3167-3210`：`t1c_k_q8_0_to_half_t` / `t1c_v_q8_0_to_half` 加 `long row_bytes` 入参（替换硬编码 `(kHeadDim/32)*34`）。
+2. 同处新增 `t1c_k_fp8_to_half_t` / `t1c_v_fp8_to_half`（E4M3 单字节、无块结构；`__nv_cvt_fp8_to_halfraw(raw, __NV_E4M3)`；`#include <cuda_fp8.h>` 就近加入）。K 变体仍转置成 `[d][kv]` 列主序，V 变体仍 token-major，与 q8_0 版布局一一对应。
+3. `onecat_79t_prefill_q2048` ABI 加 `int kv_fp8`（在 `softmax_scale` 与 `stream` 之间）。
+4. 调用点 `:3440-3457`：`kv_row_bytes = kv_fp8 ? 256 : 272`，按 dtype 二分支选核。
+5. `fattn-sm70-d256.cu:616-620`（本地 extern 声明）+ `:688-691`（调用）：按 `K->type == GGML_TYPE_F8_E4M3` 传 `1`。
+
+**文件定位证据（防改错文件）**：`ggml/src/ggml-cuda/CMakeLists.txt:106` `list(REMOVE_ITEM GGML_SOURCES_CUDA .../fattn79t-prefill.cu)` + `:130-131` 单独 `add_library(ggml-cuda-fattn79t OBJECT ...)` ⇒ **顶层 `fattn79t-prefill.cu` 是活文件**；`fattn-79t/prefill.cu` 是参考副本（同名 `extern "C"` 符号，若被编译即重复符号）**不参与链接**，故不改。
+
+**构建证据**：`MANIFEST_DIFFS=0`；`BUILD_RC=0`（170 s，两文件真重编）；`MANIFEST_SHA256=e9c3f08ba59375bad9c40a4fa3571ca06e622359f908354e9cc69619852d3e20`；`LIBGGML_CUDA_MD5=28452b0ee575a5efb9224eea21a74f64`；`LLAMA_SERVER_MD5=47467cf6f2234cf73c87cbc3fa239433`；`llama-server` mtime 08:06:55。
+**清单口径注**：本次 `/tmp/tree-md5-local.txt` 由**服务器侧** `tree-md5.sh` 生成（`COUNT=2082` = 全树），本地 ps1 清单为 `2066`（排除构建目录）；两者差集全落在门 ALLOW（`^build-nccl/|^common/build-info.h$`）内 ⇒ 不产生 UNALLOWED_DIFFS。
+
+**⇒ W1 三处全齐**：① KV dtype 内部覆盖（R414）② 预填充 E4M3 反量化（R416）③ `set_rows` fp8 + `supports_op` 放行（R414）；解码侧零拷贝分支 + 数值逐位一致在 R409/R410 已备。**下一步 = 首次开机 A/B**。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
