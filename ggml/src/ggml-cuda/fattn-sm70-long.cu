@@ -193,9 +193,9 @@ bool ggml_cuda_sm70_long_decode_supported(int cc, const ggml_tensor * dst) {
     if (Q->ne[1] < 1 || Q->ne[1] > 8) {
         return false; // decode only (prefill is silent: it always fails here)
     }
-    if (K->ne[1] < 1) {
-        sm70_long_note("empty kv", Q, K);
-        return false;
+    if (K->ne[1] < SM70_LONG_PAGE_TOKENS * 2) {
+        sm70_long_note("kv shorter than 512", Q, K);
+        return false; // long context only: short kv belongs to the prefill path
     }
     if (Q->ne[2] % K->ne[2] != 0 || Q->ne[2] / K->ne[2] != 6) {
         sm70_long_note("GQA ratio is not 6:1", Q, K);
