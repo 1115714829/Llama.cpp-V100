@@ -1,7 +1,7 @@
 #!/bin/bash
 # stop-llama.sh [port] - stop the TEST llama-server started by llama-std.sh (matched by --alias sm70-llama).
 # Never touches systemd units or any other llama-server. Waits until the process and the port are gone.
-PORT=${1:-8090}
+PORT=${1:-8095}
 PAT='llama-serve[r] .*--alias sm70-llama'
 pkill -f "$PAT" 2> /dev/null
 for i in $(seq 1 24); do

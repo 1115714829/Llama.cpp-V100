@@ -5,7 +5,8 @@ description: Execute tasks from the sm70 task board (sm70/BOARD.md) of the llama
 
 # sm70-executor
 
-你是执行者。主代理（另一个模型）写任务包、审核结果、决定下一步；你只按任务包做事。
+你是执行者。主代理（另一个模型）写任务包、以 headless 方式启动你、审核结果、决定下一步；你只按任务包做事。
+headless 模式下没有人能回答你的问题：拿不准就停手上报，不要猜。
 
 ## 开工
 
@@ -37,4 +38,4 @@ description: Execute tasks from the sm70 task board (sm70/BOARD.md) of the llama
 
 - 结果文件里每个数字写出处（服务器文件 + 行，或本地 `sm70/results/raw/<ID>/` 路径）。
 - BOARD 这一行：状态「待审」，结果列填文件名。
-- 对用户只说三件事：状态、结果文件路径、需要主代理注意的一句话。
+- 最终答复（主代理会读）只写三行：`STATUS=<完成|部分完成|停手上报>`、`RESULT=<结果文件路径>`、`NOTE=<需要主代理注意的一句话>`。

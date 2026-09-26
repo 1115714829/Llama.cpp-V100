@@ -20,7 +20,8 @@
 1. 同一时刻只允许一个上机作业（构建、测量、服务启停都算）。
 2. **上机前三查**：`nvidia-smi`（目标卡显存 < 500 MiB、无计算进程）、进程（llama-server / vllm / test-backend-ops / cmake）、锁文件（`/root/llm/test/AGENT_LOCK`、`/tmp/LLAMA_BUILD_LOCK`）。任一不空 ⇒ 停手上报，不抢、不等。
 3. **加锁**：三查与加锁合成一步 `bash tools/lock.sh <任务ID> <卡列表>`（输出 `LOCK_OK` 才能继续）；结束（含失败）必须 `bash tools/unlock.sh <任务ID>`。
-4. **卡位**：L3 用卡 0,1,3,4（与 vLLM 相同）；L1 / 单卡 L2 默认 GPU 2。
+4. **卡位与端口**：L3 用卡 0,1,3,4（与 vLLM 相同）；L1 / 单卡 L2 默认 GPU 2。测试 llama-server 固定端口 **8095**；8090 = llmscope、3000 = new-api、8000 = vllm-1cat、8080 = 生产 llama-server，一律不许占用（`llama-std.sh` 遇端口被占会拒绝启动）。
+7. **同一时刻只有一个派发者**：执行者只由主代理通过 `tools/dsh-run.ps1` 启动；不要在 DSH 桌面端手动并行执行看板任务。
 5. **等待**：长活用 `rjob.sh` 发令（立即返回）+ `rwait.sh` 阻塞（5 s 轮询终止符）；短命令末尾 `echo TERM_OK_<名>`；不裸睡、不叠发。
 6. **PowerShell → ssh**：远端命令用单引号串，串内不出现双引号、`$(...)`、`#`；需要给 rjob 传环境变量时用 `rjob.sh <名> env K=V ... bash <脚本>`（不用引号）。逻辑复杂就写进 `sm70/tools/` 的脚本。
 
@@ -38,7 +39,8 @@
 3. **噪声带**：L1 固定 3%；L3 取阶段 0 同臂 rep 离散（(max − min) / median）的 2 倍。差异小于噪声带 = 无差异。
 4. **权威口径**：L1 = `test-backend-ops`（test / perf）；L3 = 客户端 SSE 计时 + 响应 `timings`。`GGML_CUDA_OP_TIMING` 等内置计时探针只能粗筛，不能当判据。
 5. **可追溯**：每个数字必须能追到原始日志行；报数带库目录与 `BUILD_MANIFEST`。
-6. 隔离收益必须在 L3 保住；L1 变快而 L3 不动 = 不采纳（记录原因）。
+6. 采纳分两级：L1 + L2 通过 = **暂采纳**（默认开，成为下一轮开发的基线）；下一个 L3 里程碑 A/B 保住 = **确认**；没保住 = 撤销暂采纳（记录原因）。
+7. 单卡结论带到 4 卡的边界见 BENCH.md「单卡结论能带到 4 卡的边界」；单卡只看相对变化，不外推绝对值。
 
 ## R6 正确性
 

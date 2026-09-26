@@ -12,7 +12,8 @@ MARK="JOB_DONE_$NAME"
 WRAP=/root/llm/test/sm70/logs/rjob-$NAME.sh
 
 mkdir -p "$(dirname "$LOG")"
-if tmux has-session -t "$NAME" 2>/dev/null; then echo "RJOB_REFUSED session $NAME exists"; exit 2; fi
+# "=" makes tmux match the session name exactly (a bare -t also matches prefixes: s004a would hit s004asrv)
+if tmux has-session -t "=$NAME" 2>/dev/null; then echo "RJOB_REFUSED session $NAME exists"; exit 2; fi
 : > "$LOG"
 printf '#!/bin/bash\n%s\nrc=$?\necho "%s rc=$rc" >> %s\n' "$CMD" "$MARK" "$LOG" > "$WRAP"
 tmux new-session -d -s "$NAME" "bash $WRAP >> $LOG 2>&1"

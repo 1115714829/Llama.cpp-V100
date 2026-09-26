@@ -1,6 +1,6 @@
 #!/bin/bash
 # bench-256k.sh - the L3 standard load (sm70/BENCH.md). The server must already be healthy.
-# env: TAG (required), ENGINE (llama|vllm), PORT (8090 llama / 8000 vllm), REPS (3), GEN (128), NMAX (7),
+# env: TAG (required), ENGINE (llama|vllm), PORT (8095 llama / 8000 vllm), REPS (3), GEN (128), NMAX (7),
 #      PROMPT (/root/llm/test/sm70/prompt-256k.txt), OUTDIR (/root/llm/test/sm70/runs/<TAG>)
 # The vLLM API key is read from the (read-only) unit file at run time and is never printed.
 set -u
@@ -18,7 +18,7 @@ if [ "$ENGINE" = "vllm" ]; then
   MODEL=Qwen3.8-27B-FP8
   KEY=$(grep -o -e '--api-key [^ ]*' /root/llm/systemd/vllm-1cat.service | cut -d' ' -f2)
 else
-  PORT=${PORT:-8090}
+  PORT=${PORT:-8095}
   MODEL=sm70-llama
 fi
 [ -f "$PROMPT" ] || { echo "BENCH_REFUSED no prompt file $PROMPT"; exit 2; }

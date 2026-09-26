@@ -15,7 +15,7 @@ import urllib.request
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=8090)
+    ap.add_argument("--port", type=int, default=8095)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--n", type=int, default=128)
     ap.add_argument("--prompts", default="/root/llm/test/sm70/tools/gate-prompts.txt")

@@ -14,11 +14,12 @@
 
 ```
 主代理：写任务包，看板置「待派」
-  → 用户：在 DSH 说「按 sm70-executor 执行看板下一个任务」
-  → 执行者：做完写 results/<ID>-*.md，看板置「待审」
-  → 用户：告诉主代理「<ID> 待审」
-  → 主代理：审核 → 通过 / 驳回；更新 STATE、LEDGER；派下一批
+  → 主代理：powershell -File sm70\tools\dsh-run.ps1 -Name <ID> -Task "按 sm70-executor 技能执行 <ID>"
+  → 执行者（DSH headless）：做完写 results/<ID>-*.md，看板置「待审」，进程退出
+  → 主代理：读结果与 results/raw/dsh/<ID>.{out,err}.txt 审核 → 通过 / 驳回；更新 STATE、LEDGER；派下一个
 ```
+
+执行者的推理过程在 `results/raw/dsh/<ID>.err.txt`，最终答复在 `<ID>.out.txt`。
 
 ## 服务器上的目录
 

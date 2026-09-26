@@ -18,9 +18,9 @@
 
 | 角色 | 负责 |
 |---|---|
-| 主代理（Cursor） | 定序、写任务包、审核、内核设计与关键实现、构建、`git commit`；维护 STATE / BOARD / LEDGER |
+| 主代理（Cursor） | 定序、写任务包、**用 `sm70/tools/dsh-run.ps1` 以 headless 方式驱动 DSH 执行**、审核、内核设计与关键实现、构建、`git commit`；维护 STATE / BOARD / LEDGER |
 | 执行者（DSH 模型） | 按任务包执行测量、跑标准脚本、只读调研；只改任务包点名的文件；结果写 `sm70/results/` |
-| 用户 | 在 DSH 派发看板任务；授权服务启停和标准变更 |
+| 用户 | 授权服务启停和标准变更；不需要手动操作 DSH |
 
 ## 硬规则（摘要；全文见 RULES.md，冲突以 RULES.md 为准）
 

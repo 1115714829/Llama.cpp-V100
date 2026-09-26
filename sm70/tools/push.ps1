@@ -2,7 +2,8 @@
 # Usage: powershell -ExecutionPolicy Bypass -File F:\vllm+llama.cpp\sm70\tools\push.ps1
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$tmp = Join-Path $env:TEMP 'sm70-push'
+# staging stays inside the workspace: the executor's sandbox only writes there
+$tmp = Join-Path (Split-Path -Parent $here) 'results\raw\push-tmp'
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 New-Item -ItemType Directory $tmp | Out-Null
 $utf8 = New-Object Text.UTF8Encoding($false)

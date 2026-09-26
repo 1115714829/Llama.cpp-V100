@@ -32,9 +32,10 @@ def main():
         with open("%s/rep%d.txt" % (out, r), "w", encoding="utf-8") as f:
             f.write(txt)
         if mode == "test":
-            n_ok = len(re.findall(r"\bOK\b", txt))
+            m = re.search(r"(\d+)/(\d+) tests passed", txt)
+            passed = "%s/%s" % m.groups() if m else "-"
             n_fail = len(re.findall(r"\bFAIL\b", txt))
-            print("OP_TEST arm=%s rep=%d rc=%d ok=%d fail=%d" % (arm, r, p.returncode, n_ok, n_fail))
+            print("OP_TEST arm=%s rep=%d rc=%d passed=%s fail_lines=%d" % (arm, r, p.returncode, passed, n_fail))
             continue
         print("OP_REP arm=%s rep=%d rc=%d" % (arm, r, p.returncode))
         k = 0
