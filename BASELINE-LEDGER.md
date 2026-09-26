@@ -1251,6 +1251,18 @@ R412 标记的唯一风险点（改 KV 类型是否要动冻结的预填充路�
 3. 解码侧零改动：R410 的 fp8 零拷贝分支 + 既有路由（env 门 `LLAMA_SM70_LONG_DECODE` + `supported()` 白名单）已就位并构建绿。
 另需核对 `set_rows`/KV 写入路径对 `F8_E4M3` 的 `supports_op` 放行（写入侧 R? 已实现 `set_rows` fp8 分支）。
 
+### R414 (2026-09-26) KV dtype 点位 1 + 第三处拦路落码，构建绿
+
+**落码两处（均默认关，关闭时逐字节同旧）**
+1. `src/llama-context.cpp:388-405`：`llama_memory_params` 构造处加 env 门 `LLAMA_KV_FP8`（`getenv`+`atoi`，与 `:282/:2298` 既有门同型；`<cstdlib>` 已在 `:19`）。开时把 **内部局部变量** `type_k_mem/type_v_mem` 覆盖为 `GGML_TYPE_F8_E4M3` 后再填入结构体 —— `params.type_k/type_v`（源自 `-ctk/-ctv`）**原样不动**，满足 §1.6「用户端调参禁碰」。同时若 `LLAMA_SM70_LONG_DECODE` 未开则打 WARN（防"fp8 KV 但 FA 无核可选"的静默组合）。加 INFO 一行以便实机确认覆盖生效。
+2. `ggml/src/ggml-cuda/ggml-cuda.cu:6045-6048`：**发现第三处拦路** —— `GGML_OP_SET_ROWS` 的 `supports_op` 白名单（F32/F16/BF16/Q4_0/Q4_1/Q5_0/Q5_1/Q8_0/IQ4_NL）**不含 F8_E4M3** ⇒ fp8 KV 下 KV 写入会被判为后端不支持。已把 `GGML_TYPE_F8_E4M3` 加入该白名单（与 `set_rows.cu` 的 fp8 分支配套）。
+
+**旁证（KV 写入路径确认）**：`src/llama-kv-cache.cpp:1354/:1389/:1410` 三处写入都是 `ggml_set_rows`（非 `ggml_cpy`）⇒ 我们已实现的 fp8 `set_rows` 分支正好覆盖；`ggml_cpy` 仅出现在 `:1967`（另一路径，本负载未触发）。
+
+**构建证据**：`MANIFEST_DIFFS=0`；`BUILD_RC=0`；`MANIFEST_SHA256=ab4a30745d09c9ec56c0addc79ec2551e69499e1f480f8bfe59abcc09ca6c63d`；`LIBGGML_CUDA_MD5=b5af6434e4408ce213a593dd3b59276a`；`libllama.so=796635be6b47274f33f5cec366216614`；`LLAMA_SERVER_MD5=47467cf6f2234cf73c87cbc3fa239433`（未变 = 动态链接 `libllama`，二进制确定性，非未重编；三个产物 mtime 均刷新至 08:01:30-40）。
+
+**仍缺点位 2（下一轮先做，做完才允许开机测）**：`fattn79t-prefill.cu` 的 E4M3 反量化变体。**若跳过就开 `LLAMA_KV_FP8=1` 有明确风险**：预填充路若按 q8_0 读 fp8 字节 → 输出错；若其 `supported()` 要求 KV=q8_0 而落到 TILE 路做 f16 转换 → `F8_E4M3` 没有 `to_float/from_float`（`type_traits` 只给了 blck=1/type_size=1/is_quantized=false）⇒ 会 abort。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
