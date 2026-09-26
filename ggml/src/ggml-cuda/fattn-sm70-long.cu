@@ -155,7 +155,16 @@ struct sm70_long_ws {
     size_t kv_cap = 0;    // elements per K/V plane (D * kv_len)
     size_t q_cap  = 0;    // elements per Q/O buffer (D * n_q_pad * hq)
     size_t bt_cap = 0;    // ints (n_q_pad * n_pages)
+    size_t sl_cap = 0;    // ints (n_q_pad)
     bool   stats_ok = false;
+    // R429: pinned host staging. A device copy whose source is pageable memory is
+    // not allowed while the stream is capturing, so the block table and the row
+    // lengths are filled in pinned buffers.
+    int  * h_bt = nullptr;
+    int  * h_sl = nullptr;
+    int  * h_act = nullptr;
+    size_t h_bt_cap = 0;
+    size_t h_sl_cap = 0;
 };
 
 static sm70_long_ws & sm70_long_ws_for(int dev) {
@@ -340,14 +349,44 @@ void ggml_cuda_sm70_long_decode(ggml_backend_cuda_context & ctx, ggml_tensor * d
 
     // R368: scratch lives in the persistent workspace (see sm70_long_ws).
     const size_t bt_need  = (size_t) n_q_pad * n_pages;
+    const size_t sl_need  = (size_t) n_q_pad;
     const size_t stat_need = (size_t) SM70_LONG_WS_SPLITS * SM70_LONG_WS_MAXQ * gqa;
-    if (ws.bt_cap < bt_need) {
-        if (ws.bt != nullptr) { CUDA_CHECK(cudaFree(ws.bt)); ws.bt = nullptr; }
-        CUDA_CHECK(cudaMalloc(&ws.bt, bt_need * sizeof(int)));
-        ws.bt_cap = bt_need;
+    // R429: growing a buffer while the stream captures is not allowed. Report the
+    // case instead of corrupting the graph, and keep growth out of capture.
+    cudaStreamCaptureStatus cap_st = cudaStreamCaptureStatusNone;
+    (void) cudaStreamIsCapturing(stream, &cap_st);
+    const bool capturing = cap_st != cudaStreamCaptureStatusNone;
+    if (ws.bt_cap < bt_need || ws.sl_cap < sl_need) {
+        if (capturing) {
+            fprintf(stderr, "[SM70LONG] device scratch grown while capturing\n");
+        }
+        if (ws.bt_cap < bt_need) {
+            if (ws.bt != nullptr) { CUDA_CHECK(cudaFree(ws.bt)); ws.bt = nullptr; }
+            CUDA_CHECK(cudaMalloc(&ws.bt, bt_need * sizeof(int)));
+            ws.bt_cap = bt_need;
+        }
+        if (ws.sl_cap < sl_need) {
+            if (ws.sl != nullptr) { CUDA_CHECK(cudaFree(ws.sl)); ws.sl = nullptr; }
+            CUDA_CHECK(cudaMalloc(&ws.sl, sl_need * sizeof(int)));
+            ws.sl_cap = sl_need;
+        }
+    }
+    if (ws.h_bt_cap < bt_need || ws.h_sl_cap < sl_need) {
+        if (ws.h_bt_cap < bt_need) {
+            if (ws.h_bt != nullptr) { CUDA_CHECK(cudaFreeHost(ws.h_bt)); ws.h_bt = nullptr; }
+            CUDA_CHECK(cudaMallocHost((void **) &ws.h_bt, bt_need * sizeof(int)));
+            ws.h_bt_cap = bt_need;
+        }
+        if (ws.h_sl_cap < sl_need) {
+            if (ws.h_sl != nullptr) { CUDA_CHECK(cudaFreeHost(ws.h_sl)); ws.h_sl = nullptr; }
+            CUDA_CHECK(cudaMallocHost((void **) &ws.h_sl, sl_need * sizeof(int)));
+            ws.h_sl_cap = sl_need;
+        }
+    }
+    if (ws.h_act == nullptr) {
+        CUDA_CHECK(cudaMallocHost((void **) &ws.h_act, sizeof(int)));
     }
     if (!ws.stats_ok) {
-        CUDA_CHECK(cudaMalloc(&ws.sl,  (size_t) n_q_pad * sizeof(int)));
         CUDA_CHECK(cudaMalloc(&ws.act, sizeof(int)));
         CUDA_CHECK(cudaMalloc(&ws.mxl, stat_need * sizeof(float)));
         CUDA_CHECK(cudaMalloc(&ws.exs, stat_need * sizeof(float)));
@@ -366,17 +405,17 @@ void ggml_cuda_sm70_long_decode(ggml_backend_cuda_context & ctx, ggml_tensor * d
     {
         // R367: the kernel indexes block_table/seq_lens by query token (batch_idx = q row),
         // so both need one row per query token, not one row per request.
-        std::vector<int> h_bt(bt_need);
+        // R429: filled in pinned memory so the copies stay legal during capture.
         for (int64_t r = 0; r < n_q_pad; ++r) {
             for (int64_t i = 0; i < n_pages; ++i) {
-                h_bt[(size_t) r * n_pages + i] = (int) i;
+                ws.h_bt[(size_t) r * n_pages + i] = (int) i;
             }
+            ws.h_sl[r] = (int) kv_len;
         }
-        std::vector<int> h_sl((size_t) n_q_pad, (int) kv_len);
-        const int h_act = n_parts < SM70_LONG_WS_SPLITS ? n_parts : SM70_LONG_WS_SPLITS;
-        CUDA_CHECK(cudaMemcpyAsync(bt, h_bt.data(), h_bt.size() * sizeof(int), cudaMemcpyHostToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(sl, h_sl.data(), h_sl.size() * sizeof(int), cudaMemcpyHostToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(act, &h_act, sizeof(int), cudaMemcpyHostToDevice, stream));
+        *ws.h_act = n_parts < SM70_LONG_WS_SPLITS ? n_parts : SM70_LONG_WS_SPLITS;
+        CUDA_CHECK(cudaMemcpyAsync(bt,  ws.h_bt,  bt_need * sizeof(int), cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(sl,  ws.h_sl,  sl_need * sizeof(int), cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(act, ws.h_act, sizeof(int),             cudaMemcpyHostToDevice, stream));
     }
 
     const float scale = 1.0f / sqrtf((float) SM70_LONG_D);
