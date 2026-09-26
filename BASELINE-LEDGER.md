@@ -1531,6 +1531,25 @@ CUDA error: misaligned address
 
 **过程纪律自纠**：本轮我出现过 `sleep 50/55` 的长睡单发，违反 §1.4.1（终止符 + 5 秒轮询）；已改回循环轮询。
 
+### R429 (2026-09-26) 捕获不合法调用已修：单卡图捕获开也跑通；首份单卡同长 A/B（路由开/关）
+
+**修复（3 处，都在我适配层）**
+1. `bt`/`sl`/`act` 改 **`cudaMallocHost` pinned 缓冲**（随工作区按需扩容，`cudaFreeHost` 释放）⇒ 捕获期 H2D 拷贝合法。
+2. `ws.sl` **改为按 `n_q_pad` 扩容**（原实现只在 `if (!ws.stats_ok)` 里按首次调用分配一次 ⇒ n_q 从 1 升到 8 时越界，**潜伏 bug 已除**）。
+3. 加**捕获期自检**：`cudaStreamIsCapturing()` 检测到正在捕获且需要增长时打印 `[SM70LONG] device scratch grown while capturing`（不再静默），使"增长落在捕获内"这种情形可被立刻发现。
+
+**验证**：`BUILD_RC=0`；单卡 `NO_SPEC=1 CTX=8192 CARDS=0` **图捕获开** + 路由开 ⇒ `health=200` ✓，**无 `illegal memory access`、无 `CUDA error`、无 `grown` 告警**（此前必崩的配置）。
+
+**首份单卡同长 A/B（8K、无草稿、IQ1_S、prompt 6955 / gen 200）**
+| 臂 | tg | tpot | TTFT | pp |
+|---|---|---|---|---|
+| 路由**关**（默认 TILE 路） | **37.25 t/s** | **26.84 ms** | 6.82 s | 1019.8 |
+| 路由**开**（sm70_long 暂存 f16 路） | **28.00 t/s** | **35.71 ms** | 6.81 s | 1021.1 |
+
+**解读（关键，不许误用）**：预填充**完全不受影响**（TTFT/pp 一致）✓。解码上我方路由慢 1.33x，但 8K 下每层 KV 仅 17.8 MB（q8_0）、64 层合计 ≈1.4 ms/轮 ⇒ **KV 不是瓶颈**，此时凸显的是我方路由的**固定开销**（80 splits × 64 层 × 多次 launch + combine + scatter）。
+⇒ **8K 尺子的适用范围**：只判**同一路由内的改动**（如 inplace vs 暂存：两臂固定开销相同，差值即装载路径的净效果 ✓）；**不可**用于判"路由 vs TILE"（那是 256K 带宽域的事）。
+⇒ 下一步把尺子升到 **32K**（KV 每层 71 MB、64 层 ≈5.6 ms/轮，开始进入 KV 敏感区）做同一 A/B 的第二点。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
