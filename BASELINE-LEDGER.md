@@ -1492,6 +1492,22 @@ CUDA error: misaligned address
 
 **判据提醒（R425 已裁定）**：跨臂比 `[OP]` 无效；A/B 一律以 **stress-256k 墙钟 ms/轮 + tg** 为准，`[OP]` 仅同臂内归因。
 
+### R427 (2026-09-26) 单卡二分定案：崩在**我方路由的 hkv=4 形状**；同时立起单卡小基线尺子
+
+**对照实验（同配置、只差一个 env）——单卡 IQ1_S、`NO_SPEC=1 CTX=8192 CARDS=0 TS=1 UB=2048`**
+| 臂 | 结果 |
+|---|---|
+| **路由关**（不带 `LLAMA_SM70_LONG_DECODE`） | **完全正常** ✓ `health=200`；`ttft=6.82 s`、`pp=1019.8 t/s`、**`tg=37.25 t/s`、`tpot=26.84 ms`**（prompt 6955、gen 200） |
+| 路由开 | `rc=134`：`CUDA error: an illegal memory access`，浮出点 `cudaGraphInstantiate`（`ggml_cuda_graph_evaluate_and_capture`，**捕获期**，异步 fault） |
+
+⇒ **定案：崩因 = 我方 sm70_long 路由在单卡形状下的 bug**，与 IQ1_S 量化、非统一 KV 缓存（`kv_unified=false`）、显存、草稿**全部无关**（这三者被本对照一次排除）。
+**同时收益**：**单卡小基线尺子立起来了**（tg 37.25 t/s / tpot 26.84 ms / pp 1019.8 t/s @7K、spec-off）—— 按 ①§1.0 调测许可，用户提议的"小模型+小上下文做增速尺子"已可落地。
+**形状对照**：单卡 SELECTED = `q=1 kv=8192 hq=24 hkv=4 Ktype=8 nb1=1088 nb2=272`；TP4 运行时 = `q=2 kv=256 hq=6 hkv=1`。**差异只有 hq/hkv 的头数分布**（24/4 vs 6/1）⇒ 嫌疑集中在适配层的**逐 KV 头循环（`for j < hkv`）**与工作区/stat 缓冲的**一次性分配**。
+
+**下一轮（两步，先读后改）**
+1. **读 `n_parts` / `act` / `ws.sl` 的推导与分配**（`:295-330` 一带）：已知 `ws.sl` 在 `if (!ws.stats_ok)` 里**只按首次调用的 `n_q_pad` 分配一次**（q=1 ⇒ 2 个 int），后续 n_q=8 时**必然越界写**（本轮跑全是 q=1，故不是本次崩因，但**是必须修的潜伏 bug**）。同时确认 `n_parts` 在单卡（kv=8192、hkv=4）下的取值是否超限。
+2. 在适配层加**逐次 launch 探针**（j、指针、`n_parts`、`n_pages`、`gqa`、`total_g`）打印前 N 次，与 TP4 侧对照 ⇒ 精确定位越界的那一次。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
