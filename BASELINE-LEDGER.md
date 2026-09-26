@@ -1604,6 +1604,29 @@ CUDA error: misaligned address
 2. 若 (a)：把 `门值` 问题上升给用户裁定（是否接受容差门），同时给出"若必须逐位一致"的改造代价评估。
 3. 遗留未解：图捕获下 SIGSEGV（R431）仍挂着，与本次数值问题**分开**处理。
 
+### R435 (2026-09-26) 官准工具三条路实测：R376 收益复现，但"q8_0 直读"净亏；真头寸是**并行度**不是 dtype
+
+**方法（官准，取代被本文件判不可靠的 `GGML_CUDA_OP_TIMING`）**：`test-export-graph-ops -m <Q8_0> -o /tmp/opsdec_q8.txt -ub 8 -ctk q8_0 -ctv q8_0`（op id **74** = `FLASH_ATTN_EXT`）→ 抽成 `--test-file` 单例 → `test-backend-ops perf --test-file -b CUDA0`。形状为**真实 256K**：Q `[256,q,24,1]`、K/V `[256,262144,4,1] nb[34,1088,272,·]`（q8_0）/ `nb[2,2048,512,·]`（f16）、mask f16 `[262144,q,1,1]`。文本存档：`1cat-vllm-v100-study/measure/`。
+**口径自校验**：F16·q=8 实测 **5209 µs @192.8 GB/s** vs 文档 §0.4 记录 5147 µs @194 GB/s ⇒ **吻合 1.2%** ✓ 工具与形状文件可信。
+
+**q=8（verify 形状，TILE 内核）**
+| 臂 | `[FAK]` | need_f16_K/V | µs/run | GB/s |
+|---|---|---|---|---|
+| ① F16 KV（无镜像） | TILE | 1/1（本就 f16） | **5209** | 192.8 |
+| ①' Q8_0 + **全量镜像**（`GGML_FA_TILE_Q8_DIRECT=0`） | TILE | **1/1** | **7138** | 75.0 |
+| ② Q8_0 **核内直读**（R376 现状，默认） | TILE | **0/0** | **6071** | 88.2 |
+
+**q=1（decode 形状，VEC 内核）**：① F16 **1775** µs @563.6 GB/s；③ Q8_0 **3474** µs @153.1 GB/s（VEC 原生读 q8_0，`FA_TILE_Q8_DIRECT` 对其无效 ⇒ 3474 vs 3447 为噪声）。
+
+**结论（可决策）**
+1. **R376 收益独立复现**：镜像−直读 = 1067 µs/层 ⇒ ×16 层 = 17 ms/轮（单卡 4 头）⇒ 折算 TP4 每卡 1 头 ≈ **4.3 ms/轮**，与 R376 实测 **−5.2** 吻合 ✓
+2. **但"q8_0 直读"本身净亏**：6071 仍比纯 f16 5209 **慢 862 µs/层（+16.5%）** ⇒ 核内解包成本 > 省下的字节 ⇒ 净亏 ≈3.4 ms/轮（TP4 折算）
+3. **两侧都远未到带宽墙**：f16 192.8（21% 峰值）、q8_0 88.2（10%）、VEC 153（17%）⇒ **真头寸 = 并行度**，不是 dtype
+4. **"放宽 VEC 门槛"作废**（R434 我提过）：VEC 无 KV 切分，q=1 只有 153 GB/s ✗
+5. **该抄的是配方**：1cat 的 E4M3 + **80 splits + combine** = **把 KV 切分拉满换并行度**；我方 TILE 在 verify 形状只有 10% 峰值 ⇒ 正解 = **在我们自己的 TILE/MMA 核里加 KV 切分粒度 + combine**（学配方），且项目已立过同款项（`M5-FA-VOLTA-TABLE.md`：给 `fattn-mma-f16.cuh:113-126` 扫 Volta D=256 的 `ncols/nthreads/nbatch_fa` 配置表；量具就是本轮的 `test-backend-ops perf`）。
+
+**路 B（我方可用，无需外来核）**：KV **直接以 f16 存储** ⇒ 免镜像免解包，5209 µs/层 < q8_0 直读 6071，代价显存 +2.28 GB/卡（包络允许）；与"提并行度"可叠加。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
