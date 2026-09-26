@@ -1298,6 +1298,30 @@ R412 标记的唯一风险点（改 KV 类型是否要动冻结的预填充路�
 
 **⇒ W1 三处全齐**：① KV dtype 内部覆盖（R414）② 预填充 E4M3 反量化（R416）③ `set_rows` fp8 + `supports_op` 放行（R414）；解码侧零拷贝分支 + 数值逐位一致在 R409/R410 已备。**下一步 = 首次开机 A/B**。
 
+### R417 (2026-09-26) fp8 KV 首次开机：载入成功，首个 decode 图 abort（meta split 不支持状态）；对照锁定为 fp8 引入
+
+**实机互斥三查**：`vllm-1cat.service` = inactive ✓；无 `llama-server` 进程 ✓；完成后已 `pkill` 清场（`pgrep` 计数 0）✓。
+
+**实验**：`TAG=fp8ab SPEC=1 LLAMA_KV_FP8=1 LLAMA_SM70_LONG_DECODE=1 bash t1c-run.sh`（256K 口径：4 卡 tensor split、ctx 262144、ub 2048、spec-on DFlash2）→ **rc=134（SIGABRT）**。
+
+**崩点（日志原文）**：模型加载启动 → `[RT] llama_decode entered: n_tokens=2`（**首次 warmup decode**）→
+```
+ggml/src/ggml-backend-meta.cpp:580: generic split states:
+  node=attn_gated-3 op=MUL src0=Meta(CUDA0,CUDA1,CUDA2,CUDA3)#attn_pregate-3#0 axis0=10
+  src1=gate_sigmoid-3 axis1=0
+```
+→ `ggml_abort`，栈：`ggml_backend_buffer_init_tensor → ggml_backend_tensor_alloc → ggml_gallocr_alloc_graph_n → ggml_backend_sched_alloc_graph → llama_context::process_ubatch → llama_decode`。即**图分配阶段**就死，未进入任何 attention 计算。
+
+**对照（关键，锁因果）**：同脚本、同参数、**仅去掉 fp8 env** → `model loaded` + `listening on http://0.0.0.0:8082` 正常 ⇒ **此崩由 fp8 KV 引入**，不是既有 D7 问题。
+**两边共有的无害警告（勿误判）**：`common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR` —— `--fit` 默认开、与本次改动无关，基线同样出现且不影响启动。
+
+**机制推断（标为待查证）**：`attn_pregate` 是 FA 节点的输出；fp8 KV 改变了 FA 节点的类型与视图，使 meta 后端对该节点走 **generic split**（把 FA 输出切成 `Meta(CUDA0..3)`），而消费它的 `attn_gated` MUL 的 src1 未切分 ⇒ 落入 `:580` 的不支持分支 ⇒ abort。**与 §1.0 记录的 D7 崩（`:543` 同族）同源**：fp8 KV 暴露了 split 规划器一个未覆盖状态。
+
+**归属与处置（§1.6）**：属"涉及内核/后端 = 难题，**一次性从根上啃下**"。修点候选：① `ggml-backend-meta.cpp:540-590` split 规划器给该状态补可支持切分/回退放置 ② 让 FA 输出保持单设备放置（llama-graph / 后端分配策略）。**禁止**用"关掉 fp8"或改启动参数绕过。
+
+**本轮无任何速度数字**（首次解码即崩，`[OP]` 无法采集）。
+**欠账（下一轮与该修复一并做）**：默认关（fp8 env 未开）时用本二进制 `LIBGGML_CUDA_MD5=28452b0ee575a5efb9224eea21a74f64` 复测**零回归门**（gate `bcda0092…` + `[OP]` 不变）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
