@@ -1399,6 +1399,28 @@ ggml/src/ggml-backend-meta.cpp:580: generic split states:
 2. 适配层补 **q8_0 零拷贝分支**（跳过 `sm70_long_stage_kv` 的 O(kv) f16 化 = R375 算的 ~9 ms/卡税），传真实 stride 1088/272/278528。
 3. 通过后才按 `[OP]` 判 FA（25.4 → 目标 12.9 ms 地板，q8_0 略高于 fp8 的 12.1）。
 
+### R422 (2026-09-26) 路 B 首次上机：形状/布局假设全中，q8_0 向量化 loader 对齐越界（misaligned address）
+
+**实测确认的（全部与我此前的假设逐项吻合）**
+- 路由被选中 **40 次**（每注意力节点一次）：`[SM70LONG] #N SELECTED (all checks passed) | q=1 kv=262144 hq=24 hkv=4 Ktype=8 Qtype=0 nb1=1088 nb2=272` ⇒ **Ktype=8 = Q8_0**（不是 fp8）、`nb1=1088/nb2=272` 与我的 stride 公式一致 ✓、`kv=262144` 全量 256K ✓。
+- 逐设备运行时形状：`[SM70EXEC] #N dev=0/1 q=2 kv=256 hq=6 hkv=1 Ktype=8` ⇒ **每设备 6 Q / 1 KV 头**（头切分）⇒ 适配层传入的 `hkv=1`，入口 `token_stride = n_kv_heads*272 = 272` 与该设备缓存 `nb1` 一致 ✓（公式对两种口径都对，因为 `n_kv_heads` 就是*本设备*的头数）。
+- **没有 meta 规划器崩**（那条 fp8 外溢面在 q8_0 路上不存在 ✓ 符合 R420 的判断）。
+
+**崩点（硬信息）**
+```
+CUDA error: misaligned address
+  current device: 1, in function ggml_cuda_sm70_long_decode at fattn-sm70-long.cu:377
+  cudaMemcpyAsync(bt, h_bt.data(), ...)
+```
+异步 fault ⇒ **真正出错的是我的 q8_0 内核 launch**（在下一次 API 调用处才浮出）。原因：q8_0 每 256 值行 = `8 x 34 = 272` 字节，**块边界 34 B 不是 16 B 对齐**，而 `load_xqa_tc_kv_vector<..., KV_CACHE_DTYPE_Q8_0>`（TC 向量化路径）按 16 B 取数 ⇒ 越界。
+**为何此前没发现**：R? 的 codec 自检（768/768、`max_abs_diff=0`）只覆盖**标量**路径 `load_kv_cache_float_unscaled`；**向量化 TC 路径从未被运行过** ⇒ 首次上机即炸。教训入账：**codec 自检必须覆盖内核真正走的那条 loader 路径**。
+
+**修法（下一轮，二选一，都要在 loader 层解决而非绕开）**
+1. 让 q8_0 的 TC 向量化路径**对齐安全**：按 34 B 块边界改取数方式（不对齐时退回字节/`__half` 标量读，或按块装载到 smem 再向量化使用）。
+2. 或对该 KV_DTYPE 实例化**改走标量 loader**（`scalar-attention.cu` 那条已自检过的路径，或同文件内的非 TC 变体），代价是取数变慢——需以 `[OP]` 实测判定是否仍能打到 12.9 ms 地板。
+
+**证据**：构建 `BUILD_RC=0`（R421 的 PV 条件编译 + 本适配层分支均编译通过）；`v10` 运行 `rc=134`；服务已 `pkill` 清场。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
