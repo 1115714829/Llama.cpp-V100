@@ -1218,6 +1218,25 @@ FP8_VERIFY_TEST q=8 hq=24 hkv=4 kv=512 page=256 np=2
 
 **fp8 资产处置**：已落地的 ggml `F8_E4M3` 类型、`set_rows` fp8、适配层 fp8 分支（R410）**保留**，作为 ② 数值不过关时的备用路（E4M3 是 vendored 原生 dtype，原生 XQA 族 + 补偿 P 全齐）。
 
+### R412 (2026-09-26) 撤回 R411 的可执行结论：PV 阶段只实现了补偿 E4M3，q8_0 零拷贝需自写 PV
+
+**R411 撤回**。R411 依据 `:2092` 的条件式断言 + `:2076` 默认值认定「`COMPENSATE_P=false` 可编译 ⇒ W1 可零拷贝直读 q8_0」。**该结论错误**，依据不完整。R412 同文件读出真正的墙：
+
+```
+:2507  static_assert(COMPENSATE_P && kGroupedVerifyWarps == 16,
+                      "PV reuse is isolated to six-head compensated E4M3");
+```
+
+- 位置在 **PV（P·V）阶段**，是**顶层无条件断言**，其后 `:2509-2521` 的 PV 直接用 `volta::load_matrix_sync` 对着 `shared_values` 做六头复用 —— **本 partial 内核没有非补偿的 PV 实现**。
+- 故 `COMPENSATE_P=false` 只是"能过 `:2092`"，到 `:2507` 必死。**这正是 R396 当初 `#if defined(SM70_LONG_Q8_0_ENTRY)` 编掉的真实原因**（编译错在 `:2507`，不在 `:2092`）。
+- 旁证：`:2493` 的 `if constexpr (!COMPENSATE_P)` 只覆盖**输出 rescale** 这一步，**不覆盖 PV**；即非补偿配置在本内核里是**部分实现**，不是可用配置。
+
+**路线裁定（回到 fp8 E4M3，即原"路 B"）**：本 vendored 族的**受支持配置 = E4M3/E5M2 KV + 补偿 P**（族名 `..._e5m2_partial...`、`..._e4m3_full_q8_kernel`、`PAIR_E4M3`、`COMPENSATE_P` 全是为此而生；1cat 生产服务亦跑 FP8 KV ⇒ 换 fp8 才叫**同口径追平**，不是绕路）。q8_0 零拷贝要**自写非补偿 PV 阶段**（在 `:2507` 之后接一条非补偿 PV 路径），属**独立内核工作项**，记为 W1-2nd，**只降级不删除**（§1.6 判负≠关闭）。
+
+**已就位、无需重做**：ggml `F8_E4M3` 类型、`set_rows` fp8、适配层 fp8 零拷贝分支（R410，构建绿）、**数值自检逐位一致**（R409：49152 元素 `abs_err>2e-2`=0、最坏相对误差=0）。⇒ W1 主线**只差一件事**：让 KV 缓存在运行时以 E4M3 落地。
+
+**新的唯一风险点（须先查清再动手）**：XQA/预填充族按 dtype 分派（`:4295/:4345-4359` `LAUNCH_XQA_PARTITION(...)` 已含 `KV_CACHE_DTYPE_FP8_E4M3`）⇒ 冻结的 79T 预填充路**是否已能传 dtype=1**。这属 §1.0.1「公共组件例外」：① 默认行为不变（KV 非 fp8 时逐字节同旧）② 改后预填充门值重过（151.7 s ≤ 152.5 s + 门 `bcda0092…`）③ 验收标准不变。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
