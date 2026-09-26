@@ -16,3 +16,4 @@
 | L0010 | 2026-09-26 | 基线 | L3 BASE（代码默认，4 卡 256K）：TTFT 212.69 s / pp 1,111、TPOT 中位 20.41 ms（18.7–29.6）、显存 ≤ 13,806 MiB；旧三开关 TTFT 196.92 s 但显存 14,990 MiB 超包络 ⇒ BASE 取代码默认，旧三开关列 C3；关投机 TTFT 174.83 s、TPOT 33.39 ms | results/S0-04-BASE-256K.md（主代理复核 AL 公式与路由） | 生效 |
 | L0011 | 2026-09-26 | 基线 | L3 REF（vllm-1cat 原样，4 卡 256K，同负载）：TTFT 151.42 s（SPREAD 0.2%）/ pp 1,561、TPOT 中位 9.13 ms（8.76–10.27）、每卡显存峰值 15,106 MiB；草稿 block_size 8 = 7 草稿 token。BASE 差距：TTFT 1.40×、TPOT 2.24× | results/S0-05-REF-256K.md；主代理复核服务恢复 | 生效 |
 | L0012 | 2026-09-26 | 基线 | L2 门参考：BASE 在单卡（IQ1_S）与 4 卡（Q8_0）上重启前后逐 token 一致；参考 = gate/REF-1card.txt、REF-4card.txt | results/S0-06-L2门参考.md（主代理复核） | 生效 |
+| L0013 | 2026-09-26 | 体系 | 用户授权推送 GitHub：仓库 1115714829/Llama.cpp-V100（公开），固定分支映射 + 只快进 + 推前密钥扫描（RULES R2.4）；两项口径裁定（包络、TPOT 降噪）用户暂缓；准备交接给 Claude Desktop | 用户答复 | 生效 |

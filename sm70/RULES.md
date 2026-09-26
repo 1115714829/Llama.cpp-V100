@@ -12,7 +12,8 @@
 1. **只读**：`/root/llm/systemd/**`、`/root/llm/llama.cpp/**`、`/root/llm/ac922env/**`、`/root/llm/models/**`，以及本地 `v100-refs/**`。
 2. **服务**：`vllm-1cat`（平时 inactive）、`llmscope`、`new-api`（active）保持原状态。`vllm-1cat` 只在用户授权的 REF 任务里 `systemctl start/stop`，测完必须回到 inactive；其他服务一律不碰。
 3. llama.cpp 用的模型只从 `/mnt/3.84t/**` 加载；服务器可写区只有 `/root/llm/test/**` 与 `/mnt/3.84t/**`。
-4. 绝不 `git push`、不加 remote、不提 PR / issue。`git commit` 只由主代理在节点上做（消息末尾写 `Assisted-by:`）。
+4. 不提 PR / issue，不向上游（ggml-org 等）推送。`git commit` 与 `git push` 只由主代理做（消息末尾写 `Assisted-by:`）。
+   **推送 GitHub（用户 2026-09-26 授权）**：只推用户仓库 `github.com/1115714829/Llama.cpp-V100`——**这是公开仓库**。分支映射固定：本工作区 `master → workspace`；`llama.cpp` `feat/p3-decomp → feat/p3-decomp`（按 URL 推送，不在 `llama.cpp/` 里添加 remote）；`1cat-vllm-v100-study` `master → study-docs`。只做快进推送，禁止 force；每次推送前做密钥扫描（vLLM api-key 精确匹配 + 口令 / token 关键词），命中即停。
 5. 密钥不打印、不落日志、不入库（vLLM 的 api-key 由脚本在运行时从单元文件读取；`olddoc/qwen-private/`）。
 
 ## R3 机器与等待

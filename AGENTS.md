@@ -25,7 +25,7 @@
 ## 硬规则（摘要；全文见 RULES.md，冲突以 RULES.md 为准）
 
 1. 服务器 `root@192.168.50.235`：只读 `/root/llm/{systemd,llama.cpp,ac922env,models}`；可写 `/root/llm/test/**`、`/mnt/3.84t/**`。`vllm-1cat` / `llmscope` / `new-api` 保持原状态；`vllm-1cat` 只在用户授权的 REF 测量中启停，测完恢复。
-2. 绝不 `git push`、不加 remote、不提 PR；`git commit` 只由主代理做。
+2. 不提 PR、不向上游推送；`git commit` / `git push` 只由主代理做。推送只推用户仓库 `1115714829/Llama.cpp-V100`（**公开仓库**），按 RULES R2.4 的固定分支映射快进推送，推前做密钥扫描。
 3. 同一时刻只有一个上机作业；上机前三查（GPU / 进程 / 锁），加锁 `/root/llm/test/AGENT_LOCK`，结束删锁。
 4. 只做代码和内核优化，不做启动参数调参：llama.cpp 启动参数只取 BENCH.md 对齐表里的值。
 5. 先正确后速度：没过 L1/L2 正确性门的速度数字作废；单算子收益必须在 256K 标准测试（L3）里保住才算。
