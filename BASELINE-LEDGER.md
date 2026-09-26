@@ -1421,6 +1421,25 @@ CUDA error: misaligned address
 
 **证据**：构建 `BUILD_RC=0`（R421 的 PV 条件编译 + 本适配层分支均编译通过）；`v10` 运行 `rc=134`；服务已 `pkill` 清场。
 
+### R423 (2026-09-26) 对齐缺陷修复：q8_0 零拷贝路**首次端到端跑通**（服务监听，内核四卡执行）
+
+**两处根因，都在根上修（其中①是我的错，如实记录）**
+1. **R421 我把 q8_0 入口的 stride 改错了** → 已回退。该 loader 工作在**虚拟 256 元素行**空间：`physical_offset = row*256 + d`，行号→真实 272 B 行的映射由 loader 自己用 `row * KV_Q8_0_ROW_BYTES` 完成（入口原注释即写明）。我改成 `n_kv_heads*272 / 272` 使地址全错。⇒ 恢复 `token_stride = n_kv_heads*256`、`head_stride = 256`、`block_stride = page_tokens*token_stride`，并加注释说明为何必须是 256 基。
+2. **8 字节读不对齐（原作者遗留）**：`p = row*272 + j*34`，`p mod 8 = (2j) mod 8` ⇒ `j` 为奇数时 `p+2` 不是 8 字节对齐，而 `__ldg(reinterpret_cast<const uint64_t*>(...))` 要求 8 字节对齐 ⇒ `misaligned address`。⇒ 改为**逐字节组装**（`for b in 0..7: raw |= q8[b] << 8b`），恒对齐、语义与原来一致（小端同序）。
+
+**证据**
+- 构建：`BUILD_RC=0`。
+- 运行 `v11`（`SPEC=1 LLAMA_SM70_LONG_DECODE=1 LLAMA_SM70_Q8_0_INPLACE=1`，KV 保持 q8_0）：
+  - `[SM70EXEC] #1..#4 dev=0,1,2,3 q=2 kv=256 hq=6 hkv=1 Ktype=8 dsttype=0` ⇒ **内核在四张卡上真正执行**；
+  - `0.06.364.949 I srv llama_server: listening on http://0.0.0.0:8082` ⇒ **服务起来**；
+  - **无 `misaligned address`、无 `:580` 规划器崩** ⇒ W1（q8_0 零拷贝）**首次端到端跑通**，且全程未动 KV 缓存类型（零外溢面，正是路 B 的设计目标）。
+- 服务已 `pkill` 清场。
+
+**仍未取得（下一轮，不许跳）**
+1. **数值验证**：`bash t1c-gate.sh` / `bash e3-op-timing.sh` 本次**均无输出**（未读其脚本头，调用约定未知——可能需 `TAG=` 或参数）。下一轮**先读脚本头**再跑，拿到 greedy sha（`bcda0092…`）与 `[OP]` FA 时间。
+2. **`[OP]` 判据**：`FLASH_ATTN_EXT` 25.4 ms/轮 → 目标 ≤12.9 ms（q8_0 地板）；同时看 `MUL_MAT` 未被推高、门值不回归默认关状态。
+3. 全程**尚无任何速度数字**：本轮只到"跑通"，未到"测到"。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
