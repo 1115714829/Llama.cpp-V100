@@ -1459,6 +1459,39 @@ CUDA error: misaligned address
 
 **下一步（§1.6 内核层，不退回加转换税）**：把 q8_0 读做成**对齐向量友好**——候选：① 34 B 块的对齐向量读法（行基址 16 对齐，块内 32 B code + 2 B scale 用对齐 16 B 读 + 字节重排）② 写入侧 repack（scale 与 code 分离布局，即 W2 的 q8_0 repack 思路）③ 复核非补偿 PV 的算力代价。先做同源 A/B 拿到干净的 FA 数字，再按上述顺序攻。
 
+### R425 (2026-09-26) A/B 两处口径缺陷曝光（tmux env 泄漏 + [OP] 表语义不可比）；判据回到墙钟 ms/轮
+
+**缺陷 1：A/B 的 B 臂被 env 污染（我的实验设计错误）。** `t1c-run.sh` 由 tmux 会话启动，脚本只 `tmux kill-session -t srv` **不 kill-server** ⇒ B 臂新会话**继承 A 臂 tmux server 的 env**（含 `LLAMA_SM70_Q8_0_INPLACE=1`）⇒ 两臂跑的是同一条路（43.741 vs 43.713，逐位一致，正是同路的铁证）。**纪律：A/B 臂间必须 `tmux kill-server` 或 `env -u` 隔离。**（A 臂两次 43.741/43.710 ⇒ 该数字本身可复现 ✓）
+
+**缺陷 2：`[OP]` 表跨臂不可比（口径未查明）。** 臂 A（inplace）：FA `calls=128 avg=43.71 ms`；臂 C（生产默认，无 env）：FA `calls=16 avg=0.856 ms`。物理论证：单层单 KV 头 256K = 134 MB ⇒ 43.71 ms/层 = 3 GB/s（荒谬），0.856 ms/层 = 157 GB/s（合理）⇒ **两臂的 call 语义不同**（且我提取时 `tail -3`/`tail -2` 抓到不同报表）。`[OP]` 计时器的聚合口径（per-layer / per-round / per-report）**未查明之前，跨臂比 `[OP]` 一律无效**。
+
+**判据裁定（回到项目口径）**：A/B 一律以 **stress-256k 墙钟 `ms/轮` + tg + AL** 为准（与 BL1 同口径），`[OP]` 只作**同臂内**归因用，且必须保存**完整表格**（禁止 tail 摘行）。
+
+**顺带澄清一个历史数字**：R377 的 `FLASH_ATTN_EXT 25.4 ms` 是 **TILE 路**（生产默认，含 f16 暂存税）的**轮口径**数字；臂 C 的 0.856 ms/次 × 64 层 ≈ 55 ms/轮与"轮口径"不冲突（表内含 draft/其他）。⚠ 我上一轮把 25.4 与 43.71 直接相比，**结论"直读慢 2.7x"作废** —— 两者口径不同。**直读 vs 暂存的真实差距必须用墙钟重新测。**
+
+**下一步（顺序不变，口径修正）**
+1. **同源 A/B 用墙钟**：inplace 开/关 + `tmux kill-server` 隔离 + ≥2 rep 报离散 ⇒ 得到直读的真实净效果。
+2. 若净效果为负，再攻装载粒度（16 字节对齐窗口读 / 块级 staging）；若为正，直接进 W2。
+3. 调测加速（用户 2026-09-26 提议，§1.0 调测许可范围内）：Q4_K_M / IQ1_S 单卡 8-32K 迭代（W1 形状契约 D=256/GQA 6:1/hkv≤4 全部保持；单卡顺带绕开 meta 切分规划器）；**门值按模型重立**；绝对速度数不外推；**验收仍回 Q8_0 256K TP4**；W2 是按权重量化实例化的，IQ1_S/Q4 上调 W2 无意义。
+
+### R426 (2026-09-26) 用户提议落地：IQ1_S 已从魔搭下载；单卡首跑暴露新崩点（cuBLAS 内部失败）
+
+**模型下载（完成，可复现）**：源 = 魔搭 `unsloth/Qwen3.8-27B-GGUF`（README 溯源 `base_model: Qwen/Qwen3.8-27B`，unsloth Dynamic V3.0）。文件 `Qwen3.8-27B-UD-IQ1_S.gguf` **6,192,222,208 B（5.77 GiB）**，落 `/mnt/3.84t/Qwen3.8-27B-GGUF/`，GGUF 魔数 ✓。命令：`aria2c -x 16 -s 16 -k 2M -c`（16 连接，实测 85 MiB/s，ETA ~1 min）。同目录已有 `Qwen3.8-27B-Q4_K_M.gguf`（17.1 GB，**单卡放不下**：+草稿 3.8 GB 已超 16 GB）。
+**调测许可依据**：AGENTS.md §1.0「调测许可：小模型可用于开发/基线/压测调参……验收必须在 Q8_0 全量模型上」✓。
+
+**单卡首跑（`CARDS=0 TS=1 CTX=16384 SPEC=1 UB=2048 LLAMA_SM70_LONG_DECODE=1`，模型=IQ1_S）**
+- 加载 ✓、健康 200 ✓、draft 加载 ✓（`draft-dflash` n_max=7 block_size=8）、T1C 预填充引擎连跑 94 次 ✓
+- **崩溃**：`rc=134`；`CUDA error: an internal operation failed`，报在 `ggml_cuda_mul_mat_cublas_impl`（`ggml-cuda.cu:1696 cublasGemmEx`）——**不在我的内核里**，且属异步性质（前序 kernel 的错可在此浮出）。
+- **假设 1 已自证伪**：我怀疑工作区按 hkv=1 分配、单卡 4 头溢出 → 读码确认 `:273 kv_need = kv_elems * hkv` **正确按头数分配** ✓ ⇒ 不是溢出。
+- **两条硬线索**：① 日志 `kv_unified = 'false'` ⇒ KV 走**非统一缓存**路径（我方 FA 的地址契约/页布局是在统一缓存下推得的，需核对是否一致）② 崩点紧跟 T1C 预填充（94 次调用后某个调用耗时 54 ms 异常）。
+
+**下一轮二分（每步 ~2 分钟，成本低）**
+1. `NO_SPEC=1` + `CTX=8192`（最小footprint：去草稿 3.8 GB、KV 减半）→ 若通 ⇒ 显存/草稿相关；若仍崩 ⇒ 更深。
+2. `NO79T=1`（停 T1C 预填充引擎）→ 若通 ⇒ T1C 在单卡或 IQ1_S 上有问题。
+3. 核对 `kv_unified=false` 下 K/V 视图的 `nb1/nb2` 是否仍满足我方契约（`nb1=1088, nb2=272`）；若不同 ⇒ 适配层地址契约需按非统一路径修正。
+
+**判据提醒（R425 已裁定）**：跨臂比 `[OP]` 无效；A/B 一律以 **stress-256k 墙钟 ms/轮 + tg** 为准，`[OP]` 仅同臂内归因。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
