@@ -617,7 +617,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
     const void * q, const void * k, const void * v,
     float * state_max, float * state_sum, void * out,
     int query_len, int kv_len, int heads_q, int heads_kv,
-    float softmax_scale, cudaStream_t stream);
+    float softmax_scale, int kv_fp8, cudaStream_t stream);
 
 void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     // T1-C dispatch: 79T Q8000-core prefix engine behind LLAMA_SM70_79T=1.
@@ -688,7 +688,7 @@ void ggml_cuda_flash_attn_ext_sm70_d256(ggml_backend_cuda_context & ctx, ggml_te
             : onecat_79t_prefill_q2048(
                 Q->data, K->data, V->data, scratch_max, scratch_sum, dst->data,
                 q_len, M != nullptr ? (int) M->ne[0] : kv_len, hq, hkv, scale,
-                ctx.stream());
+                K->type == GGML_TYPE_F8_E4M3 ? 1 : 0, ctx.stream());
         if (getenv("T1C_DUMP") != nullptr) {
             fprintf(stderr, "[T1C] st=%d\n", (int) st);
         }

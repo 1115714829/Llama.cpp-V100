@@ -3164,29 +3164,53 @@ __global__ void t1c_q_f32_to_half_t(const float * src, Element * dst,
 
 // T1-C K dequant + transpose: q8_0 [kv][256] (tok stride 8*34 B) -> half
 // column-major [d][kv] so cuBLAS reads B with ldb = kv_len.
+// R416: the row stride is a parameter so the same kernels serve the q8_0 cache
+// (272 B per 256-value row) and the E4M3 cache (256 B per row).
+#include <cuda_fp8.h>
+
 __global__ void t1c_k_q8_0_to_half_t(const char * src, Element * dst,
-                                     int kv_len, long total) {
+                                     int kv_len, long total, long row_bytes) {
   long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= total) return;
   const int dd = (int) (i % kHeadDim);
   const long tok = i / kHeadDim;
-  const char * blk = src + tok * ((kHeadDim / 32) * 34) + (dd / 32) * 34;
+  const char * blk = src + tok * row_bytes + (dd / 32) * 34;
   const float scale = __half2float(*(const __half *) blk);
   const int q = (int) (signed char) blk[2 + (dd % 32)];
   dst[(long) dd * kv_len + tok] = (Element) (scale * (float) q);
 }
 
-// T1-C V dequant: q8_0 [kv][256] -> half token-major [kv][256] (the layout
-// stable_value_center/amax/scale and the PV B-operand both expect).
-__global__ void t1c_v_q8_0_to_half(const char * src, Element * dst, long total) {
+__global__ void t1c_k_fp8_to_half_t(const char * src, Element * dst,
+                                    int kv_len, long total, long row_bytes) {
   long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= total) return;
   const int dd = (int) (i % kHeadDim);
   const long tok = i / kHeadDim;
-  const char * blk = src + tok * ((kHeadDim / 32) * 34) + (dd / 32) * 34;
+  const __nv_fp8_storage_t raw = *(const __nv_fp8_storage_t *) (src + tok * row_bytes + dd);
+  const float f = __half2float(__nv_cvt_fp8_to_halfraw(raw, __NV_E4M3));
+  dst[(long) dd * kv_len + tok] = (Element) f;
+}
+
+// T1-C V dequant: q8_0 [kv][256] -> half token-major [kv][256] (the layout
+// stable_value_center/amax/scale and the PV B-operand both expect).
+__global__ void t1c_v_q8_0_to_half(const char * src, Element * dst, long total, long row_bytes) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % kHeadDim);
+  const long tok = i / kHeadDim;
+  const char * blk = src + tok * row_bytes + (dd / 32) * 34;
   const float scale = __half2float(*(const __half *) blk);
   const int q = (int) (signed char) blk[2 + (dd % 32)];
   dst[i] = (Element) (scale * (float) q);
+}
+
+__global__ void t1c_v_fp8_to_half(const char * src, Element * dst, long total, long row_bytes) {
+  long i = (long) blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int dd = (int) (i % kHeadDim);
+  const long tok = i / kHeadDim;
+  const __nv_fp8_storage_t raw = *(const __nv_fp8_storage_t *) (src + tok * row_bytes + dd);
+  dst[i] = (Element) __half2float(__nv_cvt_fp8_to_halfraw(raw, __NV_E4M3));
 }
 
 // T1-C finalize+store: vacc/psum*scale+center -> strided FP32 dst [d, ...].
@@ -3299,7 +3323,7 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
     const void * q, const void * k, const void * v,
     float * state_max, float * state_sum, void * out,
     int query_len, int kv_len, int heads_q, int heads_kv,
-    float softmax_scale, cudaStream_t stream) {
+    float softmax_scale, int kv_fp8, cudaStream_t stream) {
   const void * q0 = q; const void * k0 = k; const void * v0 = v;
   void * out0 = out;
   const long dst_ne1 = (long) state_max[0];
@@ -3438,11 +3462,19 @@ extern "C" cudaError_t onecat_79t_prefill_q2048(
       fprintf(stderr, "[T1C] s1a q-trans t=%.1fms\n", t1c_ms());
     }
     const long ktotal = (long) kv_len * kHeadDim;
+    const long kv_row_bytes = kv_fp8 ? (long) kHeadDim : (long) ((kHeadDim / 32) * 34);
     if (ktotal > 0) {
-      t1c_k_q8_0_to_half_t<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
-          (const char *) k, ws.kt, kv_len, ktotal);
-      t1c_v_q8_0_to_half<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
-          (const char *) v, ws.vhalf, ktotal);
+      if (kv_fp8) {
+        t1c_k_fp8_to_half_t<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+            (const char *) k, ws.kt, kv_len, ktotal, kv_row_bytes);
+        t1c_v_fp8_to_half<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+            (const char *) v, ws.vhalf, ktotal, kv_row_bytes);
+      } else {
+        t1c_k_q8_0_to_half_t<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+            (const char *) k, ws.kt, kv_len, ktotal, kv_row_bytes);
+        t1c_v_q8_0_to_half<<<(int) ((ktotal + threads - 1) / threads), threads, 0, stream>>>(
+            (const char *) v, ws.vhalf, ktotal, kv_row_bytes);
+      }
     }
     if (t1c_verbose) {
       cudaStreamSynchronize(stream);
