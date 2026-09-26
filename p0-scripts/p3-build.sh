@@ -75,6 +75,12 @@ fi
 if [ -f /tmp/p3-fattn-sm70-long.cu ]; then
   sed 's/\r$//' /tmp/p3-fattn-sm70-long.cu > ggml/src/ggml-cuda/fattn-sm70-long.cu
 fi
+if [ -f /tmp/p3-fattn-vec.cuh ]; then
+  sed 's/\r$//' /tmp/p3-fattn-vec.cuh > ggml/src/ggml-cuda/fattn-vec.cuh
+fi
+if [ -f /tmp/p3-fattn-tile.cuh ]; then
+  sed 's/\r$//' /tmp/p3-fattn-tile.cuh > ggml/src/ggml-cuda/fattn-tile.cuh
+fi
 if [ -f /tmp/p3-fattn.cu ]; then
   sed 's/\r$//' /tmp/p3-fattn.cu > ggml/src/ggml-cuda/fattn.cu
 fi

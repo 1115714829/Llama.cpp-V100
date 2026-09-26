@@ -16,10 +16,16 @@ export GGML_GALLOCR_SLOTS=${SLOTS:-1}
 if [ "${NO79T:-}" != "1" ]; then export LLAMA_SM70_79T=1; fi
 # R332: meta sub-graph capture/replay = -12.6% per round at 25K, -4.1% at 256K.
 # FULLGRAPH alone is harmful (draft faster but target slower) => keep it off.
-export GGML_META_SUBGRAPH_CAPTURE=1
+export GGML_META_SUBGRAPH_CAPTURE=${SUB:-1}
+# R366: whole-step single capture incl. collectives (GGML_META_FULLGRAPH) is re-testable
+# now that the decode loop is host-dispatch bound (129 subgraphs + 128 allreduce per step).
+if [ -n "${FULLGRAPH:-}" ]; then export GGML_META_FULLGRAPH=1; fi
+if [ -n "${METAHOST:-}" ]; then export GGML_META_HOST_TIMING=1; fi
 SPEC_ARGS=""
+DRAFT_KV_ARGS=""
+if [ -n "${DCTK:-}" ]; then DRAFT_KV_ARGS="--spec-draft-type-k $DCTK --spec-draft-type-v ${DCTV:-$DCTK}"; fi
 if [ "${SPEC:-}" = "1" ]; then
-  SPEC_ARGS="--model-draft ${DRAFT:-/mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-F16.gguf} --spec-type draft-dflash --spec-draft-n-max ${NMAX:-7}"
+  SPEC_ARGS="--model-draft ${DRAFT:-/mnt/3.84t/llm-models/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-F16.gguf} --spec-type draft-dflash --spec-draft-n-max ${NMAX:-7} $DRAFT_KV_ARGS"
 else
   export NO_SPEC=1
 fi
@@ -35,13 +41,18 @@ if [ -n "${T1C_STAGE_STOP:-}" ]; then export T1C_STAGE_STOP=$T1C_STAGE_STOP; fi
 if [ -n "${BLOCKING:-}" ]; then export CUDA_LAUNCH_BLOCKING=1; fi
 if [ -n "${DECOMP:-}" ]; then export LLAMA_SM70_FA_DECOMP=$DECOMP; fi
 echo "RUN tag=$TAG bin=$LIBS/llama-server cards=$CUDA_VISIBLE_DEVICES ub=${UB:-2048} owsum=${T1C_OWSUM:-0} $(date)" | tee -a "$LOG"
-exec "$LIBS/llama-server" \
-  --model /mnt/3.84t/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf \
+# PROF=1: run the server under nsys (kernel-level attribution); report in /tmp/$TAG-prof.nsys-rep
+PROF_ARGS=""
+if [ -n "${PROF:-}" ]; then
+  PROF_ARGS="${NSYS_BIN:-/usr/local/cuda-12.4/bin/nsys} profile -o /tmp/$TAG-prof --force-overwrite=true -t ${NSYS_TRACE:-cuda} ${NSYS_EXTRA:---cuda-graph-trace=node}"
+fi
+exec $PROF_ARGS "$LIBS/llama-server" \
+  --model ${MODEL:-/mnt/3.84t/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0.gguf} \
   --alias Qwen3.8-27B-Q8_0-BL2 \
-  --ctx-size 262144 \
+  --ctx-size ${CTX:-262144} \
   --n-gpu-layers 999 \
-  --split-mode tensor --tensor-split 1,1,1,1 \
-  --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 \
+  --split-mode tensor --tensor-split ${TS:-1,1,1,1} \
+  --flash-attn on --cache-type-k ${CTK:-q8_0} --cache-type-v ${CTV:-q8_0} \
   --parallel 1 --ubatch-size "${UB:-2048}" \
   $SPEC_ARGS \
   --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 \
