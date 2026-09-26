@@ -1384,6 +1384,21 @@ ggml/src/ggml-backend-meta.cpp:580: generic split states:
 
 **fp8 资产处置**：**不删**（ggml 类型、`set_rows` fp8、适配层 fp8 分支、预填充 E4M3 反量化、`LLAMA_KV_FP8` 门、几何判定）—— 全部保留，作为路 B 若数值不过关时的备用线；§1.6「判负 ≠ 关闭」。
 
+### R421 (2026-09-26) 路 B 内核墙拆除：PV 改为条件编译，q8_0 非补偿配置首次可编译（构建绿）
+
+**读清的真相（`grouped-attention.cu`）**：`：2507` 那段不是"缺 PV"，而是**补偿方案专用的延后 PV**——它把 P 拆两路（`shared_probs` 的 P 与 `shared_prob_residual` 的残差）分别对 V 与 `V/2048`（`residual_value_fragment`）做 mma 再合并。同文件 `：2493` 的 `if constexpr (!COMPENSATE_P)`（输出片段 rescale）**证明非补偿路本就有自己的在线 PV**。⇒ 正解是**把延后 PV 段条件编译掉**，不是重写 PV（作者当年用 assert 硬禁，而非条件编译）。
+
+**改动（2 处，`replace_all` 同步两个内核：partial `:2078` / e4m3_full_q8 `:2654`，各自该段各 1 份）**
+1. 延后 PV 段（原 `static_assert(COMPENSATE_P && ...)` 起，至 `grouped_verify_add_output_tile` 循环止）**包进 `if constexpr (COMPENSATE_P) { ... }`**；assert 降级为 `static_assert(kGroupedVerifyWarps == 16, ...)`。**对现有补偿实例行为等价**（仅多一层 `if constexpr(true)`）。
+2. q8_0 入口：`#if defined(SM70_LONG_Q8_0_ENTRY)` → `#if 1`（`:5167`）；并**修正该入口硬编码的 stride**：`token_stride = n_kv_heads*272`、`head_stride = 272`、`block_stride = page_tokens*token_stride`（q8_0 每 256 值行 272 B；与我们真实缓存 `nb1=1088, nb2=272` 一致）。fp8 入口的 256 基 stride **未动**（其注释文本不同，精确锚点保证只改到 q8_0 那份）。
+
+**证据**：`BUILD_RC=0`、**`grep error` 无输出** ⇒ 两者均编译通过；**`：2507` 的墙在源码层消除**，q8_0 非补偿配置**首次可编译**（此前 R396 起一直靠 `#if` 编掉）。
+
+**下一轮（必做，不许跳）**
+1. **数值验证**（把 `p0-scripts/fp8_verify_test.cu` 改造成 q8_0 版，对 f16 参考比，判据同 R409：`abs_err>2e-2` 计数 + 最坏相对误差）—— 编译通过 **≠** 数值正确；非补偿配置下 PV 由"在线路"承担，**必须实测**。
+2. 适配层补 **q8_0 零拷贝分支**（跳过 `sm70_long_stage_kv` 的 O(kv) f16 化 = R375 算的 ~9 ms/卡税），传真实 stride 1088/272/278528。
+3. 通过后才按 `[OP]` 判 FA（25.4 → 目标 12.9 ms 地板，q8_0 略高于 fp8 的 12.1）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
