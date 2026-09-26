@@ -2504,7 +2504,10 @@ __launch_bounds__(kGroupedVerifyThreads, 1) void flash_attention_grouped_verify_
 
 
 
-    static_assert(COMPENSATE_P && kGroupedVerifyWarps == 16,
+    // Deferred PV pass. It belongs to the compensated scheme only; without
+    // compensation the in-loop PV already accumulated P x V for this block.
+    if constexpr (COMPENSATE_P) {
+    static_assert(kGroupedVerifyWarps == 16,
                   "PV reuse is isolated to six-head compensated E4M3");
     volta::fragment<volta::accumulator, 16, 16, 16, float>
         tile_fragments[kGroupedVerifyOutputTilesPerWarp];
@@ -2560,6 +2563,7 @@ __launch_bounds__(kGroupedVerifyThreads, 1) void flash_attention_grouped_verify_
                                      tile_fragments[fragment_idx],
                                      smem.row_scale, m_tile * 16);
     }
+    } // COMPENSATE_P
     __syncthreads();
   }
 
@@ -3137,7 +3141,10 @@ __launch_bounds__(kGroupedVerifyThreads, 1) void flash_attention_grouped_verify_
 
 
 
-    static_assert(COMPENSATE_P && kGroupedVerifyWarps == 16,
+    // Deferred PV pass. It belongs to the compensated scheme only; without
+    // compensation the in-loop PV already accumulated P x V for this block.
+    if constexpr (COMPENSATE_P) {
+    static_assert(kGroupedVerifyWarps == 16,
                   "PV reuse is isolated to six-head compensated E4M3");
     volta::fragment<volta::accumulator, 16, 16, 16, float>
         tile_fragments[kGroupedVerifyOutputTilesPerWarp];
@@ -3193,6 +3200,7 @@ __launch_bounds__(kGroupedVerifyThreads, 1) void flash_attention_grouped_verify_
                                      tile_fragments[fragment_idx],
                                      smem.row_scale, m_tile * 16);
     }
+    } // COMPENSATE_P
     __syncthreads();
   }
 
@@ -5156,7 +5164,7 @@ extern "C" void sm70_long_decode_fp8(
 // compensated path, which is asserted to be FP8 E4M3 only, so a q8_0 instantiation
 // cannot build. Route B (adopt the vendor's fp8 KV) supersedes this entry; the block
 // is kept compiled-out as a verified construction for a future q8_0 KV cache.
-#if defined(SM70_LONG_Q8_0_ENTRY)
+#if 1 // R421: q8_0 zero-copy entry enabled
 // R396: zero-copy q8_0 entry for llama.cpp's flat [d][t][h] KV cache.
 //
 // The page table granularity is ours because the panel loader's unspecialized
@@ -5178,9 +5186,9 @@ extern "C" void sm70_long_decode_q8_0(
   const int  n_q_pad = q_rows < 2 ? 2 : q_rows;
   const bool paired  = true;  // our q8_0 rows are 272 bytes = 16 mod 8, and bases are 256-byte aligned
 
-  const int64_t token_stride = (int64_t) n_kv_heads * 256;          // 1024 for 4 KV heads
-  const int64_t block_stride = (int64_t) page_tokens * token_stride; // 262144 for 256-token pages
-  const int64_t head_stride  = 256;
+  const int64_t token_stride = (int64_t) n_kv_heads * 272;          // q8_0: 272 bytes per 256-value row
+  const int64_t block_stride = (int64_t) page_tokens * token_stride; // 256-token pages, contiguous
+  const int64_t head_stride  = 272;
 
   const std::vector<int64_t> q_sz  = {n_q_pad, n_q_heads_per_kv, 256};
   const std::vector<int64_t> q_st  = {n_q_heads_per_kv * 256, 256, 1};
