@@ -1344,6 +1344,32 @@ ggml/src/ggml-backend-meta.cpp:580: generic split states:
 3. INFO → `fprintf(stderr)` 让覆盖自证。
 4. 复跑三臂；门值绿后再按 `[OP]` 判 FA（25.4 → 目标 12.1）。
 
+### R419 (2026-09-26) 崩与 FA 新路无关（四臂）；机制定位到 meta 规划器 MUL 的 split 状态不一致
+
+**四臂（每次跑后 pkill，`pgrep` 均 0）**
+| 臂 | env | 结果 |
+|---|---|---|
+| v2 | 无 | 正常监听 ✓ |
+| v3 | `LLAMA_SM70_LONG_DECODE=1` | 正常监听 ✓ |
+| v1/v4 | `LLAMA_KV_FP8=1` (+FA) | rc=134 `:580` |
+| **v5** | **仅 `LLAMA_KV_FP8=1`（FA 路关）** | **同样 rc=134 `:580` 同 node** |
+
+⇒ **崩与我们的 sm70_long FA 路由完全无关**；是 fp8 KV 缓存张量本身让 meta 规划器走进不支持状态。同时 **`:179` 的 512 门槛放开（R418 假设）并未解决** ⇒ **该假设判定为不成立**（门槛放开本身仍保留：它是"短 KV 无核可读"的正确性修复，只是不是本崩的病因）。
+**自证恢复**：`fprintf(stderr)` 生效，日志出现 `llama_context: KV cache type overridden to E4M3` ✓（R418 的记账缺口已闭）。
+
+**机制（读码定位）**
+- `ggml-backend-meta.cpp:560-586 handle_generic`：取所有 src 的**公共 split 状态**；两 src 不一致 → `SPLIT_AXIS_UNKNOWN` → `:580 GGML_ABORT`。
+- 崩的节点是 `attn_gated`（`op=MUL`）= FA 输出 × attention gate：`src0=attn_pregate`（FA 输出，状态打印 `axis0=10`）、`src1=gate_sigmoid`（状态 `axis1=0`）⇒ **状态不一致** ⇒ abort。
+- `:905-922 handle_flash_attn_ext`：断言 `src_ss[0].axis == SPLIT_AXIS_2`（Q 按头切），**返回值固定为 `SPLIT_AXIS_1`**，**与 KV dtype 无关** ⇒ 所以"变的一方"不是 FA 输出本身，而是**上游被 fp8 影响的某个 split 决策**（或 gate 侧）。
+- `:1014 case GGML_OP_MUL` 走哪条 handler 待读（`handle_generic` 本身要求 src 状态相等，元素级 MUL 却需要"广播/镜像"语义才能容忍不等——这很可能正是上游 D7 修复覆盖过、而 fp8 KV 重新暴露的同一类缺口）。
+
+**下一轮（三步，直达修复）**
+1. 读 `GGML_BACKEND_SPLIT_AXIS_*` 枚举声明（确定 `10` 是 `NONE` 还是别的），据此判定**哪一侧状态变了**。
+2. 读 `:1014` 的 `GGML_OP_MUL` 分支与其 handler：确认元素级 MUL 在"src0 未切分 / src1 按轴切分"时**应有的语义**（镜像或按件复制），补上缺失分支（**指向根因的规划器修复，不是给本次现象打补丁**）。
+3. 复跑四臂 → 门值绿 → 才允许进 `[OP]` A/B。
+
+**本轮无速度数字**（仍在图分配阶段崩，`[OP]` 无法采集）。
+
 ### R323 ★★★ **T1-C 第一硬里程碑：79T 引擎编译通过（BUILD_RC=0）——错误收敛 101→21→15→3→1→0，抄袭链四世同堂闭环**（2026-09-24）
 
 - **装配终账**：prefill.cu 6893 行 + CUTLASS 2.11 全集（OBJECT target 隔离 = 双 cutlass drift 实证后正解）+ `_79t_defs` 圣经 36 宏**移至文件首**（晚于 :19 cublas 门 = 前一轮假绿根因）+ `cutlass::GemmSoftmax` = **CUTLASS example 35 头**（抄袭链闭环：FA 抄 example → 1cat 抄 FA → 我方抄 1cat，vintage 与 2.11 天然同代）+ swizzle `get_tile_offset` static→成员（v2.11 API vintage 差）。
