@@ -387,9 +387,23 @@ llama_context::llama_context(
 
     // init the memory module
     if (!hparams.vocab_only) {
+        // R414: E4M3 KV for the V100 long-context decode kernel. This is an internal
+        // decision, so the user's cache type flag is left untouched.
+        ggml_type type_k_mem = params.type_k;
+        ggml_type type_v_mem = params.type_v;
+        if (const char * kv_fp8 = getenv("LLAMA_KV_FP8"); kv_fp8 != nullptr && atoi(kv_fp8) != 0) {
+            const char * rt = getenv("LLAMA_SM70_LONG_DECODE");
+            if (rt == nullptr || atoi(rt) == 0) {
+                LLAMA_LOG_WARN("%s: LLAMA_KV_FP8 is set without LLAMA_SM70_LONG_DECODE, "
+                               "E4M3 flash attention may not be selectable\n", __func__);
+            }
+            type_k_mem = GGML_TYPE_F8_E4M3;
+            type_v_mem = GGML_TYPE_F8_E4M3;
+            LLAMA_LOG_INFO("%s: KV cache type overridden to E4M3\n", __func__);
+        }
         llama_memory_params params_mem = {
-            /*.type_k    =*/ params.type_k,
-            /*.type_v    =*/ params.type_v,
+            /*.type_k    =*/ type_k_mem,
+            /*.type_v    =*/ type_v_mem,
             /*.swa_full  =*/ params.swa_full,
             /*.ctx_type  =*/ cparams.ctx_type,
             /*.mem_other =*/ llama_get_memory(cparams.ctx_other),
