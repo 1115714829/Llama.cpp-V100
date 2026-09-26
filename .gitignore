@@ -1,7 +1,8 @@
 # heavy / nested — not in this workspace meta repo
 v100-refs/
 llama.cpp/
-.dsh/
+.dsh/*
+!.dsh/skills/
 .mimocode/
 .tmpcmp/
 .tools/
@@ -12,3 +13,5 @@ olddoc/qwen-private/
 olddoc/backup/
 # self-versioned archive repo (its own commits are the backup)
 1cat-vllm-v100-study/
+# regenerable raw logs of the sm70 tasks
+sm70/results/raw/
